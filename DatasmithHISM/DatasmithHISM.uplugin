@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "DatasmithHISM",
+	"Description": "",
+	"Category": "Other",
+	"CreatedBy": "Jonathan McMichael",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EngineVersion": "5.7.0",
+	"CanContainContent": false,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "DatasmithHISM",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
