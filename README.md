@@ -1,65 +1,74 @@
-# ConVerse
+# ConVerse HISM Plugin
 
-ConVerse is an Unreal Engine 5.7 project.
+This repository contains an Unreal Engine 5.7 editor plugin for converting Datasmith-style actor hierarchies into managed hierarchical instanced static mesh outputs.
 
-The repository contains the main `ConVerse` runtime project module and local editor-focused plugins for authoring and content-processing workflows.
+The plugin is intended to reduce actor count in imported scenes while preserving grouping by family, mesh, and materials.
 
-## Project Layout
+## What It Does
 
-- `ConVerse.uproject`: Unreal project descriptor.
-- `Source/ConVerse`: primary runtime game module.
-- `Plugins/ConVerseEditor`: local editor plugin for mesh consolidation, HISM generation, Dataprep operations, and material tooling.
-- `Plugins/DatasmithHISM`: additional local plugin content.
-- `Content`: Unreal assets for the project.
-- `Config`: project configuration.
-- `Build`: build metadata and platform-specific files.
+The plugin provides editor tooling for:
+
+- creating HISMs from the current editor selection
+- batching selected static mesh components into HISMs
+- running HISM creation inside Dataprep workflows
+- consolidating similar static meshes before instancing
+
+## Main Workflow
+
+The primary tool is `Create HISMs From Selection`.
+
+It:
+
+1. Walks the current editor selection and attached child hierarchy.
+2. Finds actors that represent eligible static mesh instances.
+3. Groups them by logical family boundary, static mesh, and material set.
+4. Creates managed `HierarchicalInstancedStaticMeshComponent` outputs.
+5. Removes converted source actors and redundant hierarchy shells when safe.
+
+This workflow is designed for Datasmith and Revit-style imported scene hierarchies.
+
+## Plugin Layout
+
+- `Plugins/ConVerseEditor/ConVerseEditor.uplugin`
+- `Plugins/ConVerseEditor/Source/ConVerseEditor`
+- `Plugins/ConVerseEditor/Source/ConVerseEditor/Public`
+- `Plugins/ConVerseEditor/Source/ConVerseEditor/Private`
 
 ## Requirements
 
 - Unreal Engine `5.7`
-- Windows development environment
-- Visual Studio or Rider with Unreal support
+- Windows editor environment
+- Dataprep-enabled Unreal installation for the Dataprep operations
 
-## Opening The Project
+## Installation
 
-1. Open `ConVerse.uproject` in Unreal Engine 5.7.
-2. If project files are stale, regenerate them from the `.uproject`.
-3. Open the generated solution in Rider or Visual Studio.
+1. Copy `Plugins/ConVerseEditor` into your Unreal project's `Plugins/` folder.
+2. Open the project in Unreal Engine 5.7.
+3. Enable the plugin if Unreal prompts for it.
+4. Regenerate project files if you are building from source.
 
-## Plugins
+## Usage
 
-### ConVerseEditor
+After enabling the plugin, open the Unreal Editor and use the ConVerse toolbar or Tools menu entries:
 
-`ConVerseEditor` is a local editor plugin under `Plugins/ConVerseEditor`.
+- `Create HISMs`
+- `Batch To HISMs`
+- `Consolidate Meshes`
 
-It provides editor utilities for:
+The plugin also exposes Blueprint-callable editor utilities and Dataprep operations.
 
-- consolidating similar static meshes
-- creating hierarchical instanced static mesh groups from selections
-- running Dataprep editor operations
-- generating powdercoat substrate materials
+## Managed Output
 
-Additional implementation notes for the HISM workflow are documented in:
+Managed objects are identified with these tags:
 
-- `Plugins/ConVerseEditor/Source/ConVerseEditor/Public/README.md`
+- `ConVerseManagedHISM`
+- `ConVerseManagedFamilyType`
 
-## Source Control Notes
+Re-running the tool on the same boundary replaces older managed ConVerse HISM outputs for that boundary.
 
-If this project is moved to GitHub, only source assets and configuration should be committed. Generated and machine-local Unreal folders should be ignored, including:
+## Notes
 
-- `Binaries/`
-- `DerivedDataCache/`
-- `Intermediate/`
-- `Saved/`
-- `.vs/`
-- `.idea/`
-
-Large cache or database files should also stay out of Git, including:
-
-- `cesium-request-cache.sqlite`
-
-## Current State
-
-- `ConVerse` is the active runtime module.
-- `ConVerseEditor` is enabled as a plugin in `ConVerse.uproject`.
-- The project still contains `Source/ConVerseEditor.Target.cs`; if plugin-only editor builds are desired, that target may need review later.
+- The plugin is editor-only.
+- It assumes each convertible source actor effectively represents one mesh instance.
+- Actors with multiple eligible static mesh components are skipped by the main HISM creation path.
+- The detailed HISM behavior is further documented in `Plugins/ConVerseEditor/Source/ConVerseEditor/Public/README.md`.
