@@ -73,3 +73,20 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# Mobile app — node_modules and generated files
+mobile/node_modules/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/
+mobile/ios/Pods/
+mobile/ios/build/
+mobile/.expo/
+
+# Firebase credentials — replace the template with real files locally, never commit them
+# mobile/android/app/google-services.json
+# mobile/ios/GoogleService-Info.plist
+
+# Android keystore files
+mobile/android/app/*.keystore
+mobile/android/app/*.jks
