@@ -1,0 +1,31 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "DatasmithHISM",
+	"Description": "Editor tools for Datasmith HISM creation, mesh consolidation, Dataprep operations, and powdercoat material generation.",
+	"Category": "Editor",
+	"CreatedBy": "Jonathan McMichael",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"EnabledByDefault": true,
+	"Installed": false,
+	"Plugins": [
+		{
+			"Name": "DataprepEditor",
+			"Enabled": true
+		}
+	],
+	"Modules": [
+		{
+			"Name": "DatasmithHISM",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
