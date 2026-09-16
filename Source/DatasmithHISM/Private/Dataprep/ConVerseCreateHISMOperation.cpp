@@ -42,7 +42,7 @@ namespace
 #define LOCTEXT_NAMESPACE "ConVerseCreateHISMOperation"
 
 UConVerseCreateHISMOperation::UConVerseCreateHISMOperation()
-	: NewActorLabelPrefix(TEXT("HISM"))
+	: NewActorLabelPrefix(TEXT("ISM"))
 {
 }
 
@@ -73,7 +73,7 @@ void UConVerseCreateHISMOperation::OnExecution_Implementation(const FDataprepCon
 
 	ConVerseHISM::FBuildOutput BuildOutput = ConVerseHISM::BuildManagedHISMs(ActorsToProcess, NewActorLabelPrefix);
 
-	if (BuildOutput.Result.HISMActorsCreated == 0 && BuildOutput.Result.SourceActorsConverted == 0)
+	if (BuildOutput.Result.ISMComponentsCreated == 0 && BuildOutput.Result.SourceActorsConverted == 0)
 	{
 		LogInfo(FText::FromString(BuildOutput.Result.Summary));
 		return;
@@ -88,7 +88,7 @@ void UConVerseCreateHISMOperation::OnExecution_Implementation(const FDataprepCon
 
 		LogInfo(FText::FromString(BuildOutput.Result.Summary));
 		LogInfo(FText::Format(
-			LOCTEXT("DeleteSummary", "Deleted {0} converted source or wrapper actor(s) after building managed HISM components."),
+			LOCTEXT("DeleteSummary", "Deleted {0} converted source or wrapper actor(s) after building managed ISM components."),
 			ObjectsToDeleteCount));
 		return;
 	}

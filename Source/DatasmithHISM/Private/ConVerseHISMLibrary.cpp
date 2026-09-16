@@ -5,7 +5,10 @@
 #include "Editor.h"
 #include "Engine/Selection.h"
 #include "ObjectTools.h"
+#include "ScopedTransaction.h"
 #include "Subsystems/EditorActorSubsystem.h"
+
+#define LOCTEXT_NAMESPACE "ConVerseHISMLibrary"
 
 namespace
 {
@@ -85,6 +88,11 @@ FConVerseHISMCreationResult UConVerseHISMLibrary::CreateHISMsFromSelection(const
 	TArray<AActor*> ActorsToProcess;
 	ConVerseHISM::CollectActorsFromRoots(SelectedRootActors, ActorsToProcess);
 
+	// Wrap the entire operation in a single undoable transaction so the user can
+	// Ctrl+Z to restore all source actors and remove all created ISM components
+	// in one step. All spawned actors and modified components carry RF_Transactional.
+	FScopedTransaction Transaction(LOCTEXT("BuildManagedISMs", "Build Managed ISMs"));
+
 	ConVerseHISM::FBuildOutput BuildOutput = ConVerseHISM::BuildManagedHISMs(ActorsToProcess, NewActorLabelPrefix);
 	Result = BuildOutput.Result;
 
@@ -97,3 +105,5 @@ FConVerseHISMCreationResult UConVerseHISMLibrary::CreateHISMsFromSelection(const
 
 	return Result;
 }
+
+#undef LOCTEXT_NAMESPACE

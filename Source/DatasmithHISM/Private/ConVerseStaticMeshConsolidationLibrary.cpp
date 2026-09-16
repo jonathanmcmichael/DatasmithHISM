@@ -4,6 +4,7 @@
 
 #include "Editor.h"
 #include "Engine/Selection.h"
+#include "Misc/MessageDialog.h"
 #include "ObjectTools.h"
 
 #define LOCTEXT_NAMESPACE "ConVerseStaticMeshConsolidationLibrary"
@@ -116,6 +117,27 @@ FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::
 
 	if (!DuplicateMeshesToDelete.IsEmpty())
 	{
+		// Only show a confirmation dialog in interactive editor sessions — Dataprep pipelines
+		// and commandlets run headlessly and should proceed without prompting.
+		const bool bIsInteractive = GIsEditor && !IsRunningCommandlet();
+		if (bIsInteractive)
+		{
+			const FText ConfirmMessage = FText::Format(
+				LOCTEXT("DedupeConfirm",
+					"This will permanently delete {0} duplicate static mesh asset(s) from the Content Browser across {1} duplicate group(s).\n\n"
+					"This action cannot be undone. Make sure your level is saved and source control is active.\n\n"
+					"Delete the duplicates?"),
+				DuplicateMeshesToDelete.Num(),
+				Result.DuplicateGroupsFound);
+
+			const EAppReturnType::Type Response = FMessageDialog::Open(EAppMsgType::YesNo, ConfirmMessage);
+			if (Response != EAppReturnType::Yes)
+			{
+				Result.Summary = LOCTEXT("DedupeCancelled", "Consolidation cancelled by user.").ToString();
+				return Result;
+			}
+		}
+
 		const int32 DeletedCount = ObjectTools::DeleteObjects(DuplicateMeshesToDelete, false, ObjectTools::EAllowCancelDuringDelete::CancelNotAllowed);
 		Result.MeshesConsolidated = DeletedCount;
 		Result.FailedConsolidations = DuplicateMeshesToDelete.Num() - DeletedCount;

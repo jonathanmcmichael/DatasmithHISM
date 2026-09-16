@@ -12,6 +12,9 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Logging/LogMacros.h"
+#include "Misc/ScopedSlowTask.h"
+
+#define LOCTEXT_NAMESPACE "ConVerseHISMUtils"
 
 DEFINE_LOG_CATEGORY_STATIC(LogConVerseHISM, Log, All);
 
@@ -677,16 +680,17 @@ namespace ConVerseHISM
 	void FinalizeSummary(FConVerseHISMCreationResult& Result)
 	{
 		Result.Summary = FString::Printf(
-			TEXT("Considered %d actor(s), created %d HISM component(s), converted %d source actor(s). ")
+			TEXT("Considered %d actor(s), created %d ISM component(s), converted %d source actor(s), left %d single-instance actor(s) in place. ")
 			TEXT("Skipped %d actor(s): %d had no eligible static mesh component, %d had multiple eligible static mesh components. ")
-			TEXT("%d HISM component creation(s) failed. %d converted actor delete(s) failed."),
+			TEXT("%d ISM component creation(s) failed. %d converted actor delete(s) failed."),
 			Result.ActorsConsidered,
-			Result.HISMActorsCreated,
+			Result.ISMComponentsCreated,
 			Result.SourceActorsConverted,
+			Result.ActorsInSingleActorGroups,
 			Result.SkippedActors,
 			Result.ActorsWithNoEligibleStaticMesh,
 			Result.ActorsWithMultipleEligibleStaticMeshes,
-			Result.FailedHISMActorCreations,
+			Result.FailedISMComponentCreations,
 			Result.FailedSourceActorDeletes);
 	}
 
@@ -702,8 +706,17 @@ namespace ConVerseHISM
 		TSet<AActor*> ClearedBoundaryActors;
 		FFamilyTypeLookupCache FamilyTypeLookupCache;
 
+		{
+			FScopedSlowTask GroupingTask(
+				static_cast<float>(Actors.Num()),
+				LOCTEXT("GroupingActors", "Grouping actors by geometry and material..."));
+			GroupingTask.MakeDialog(true);
+
 		for (AActor* Actor : Actors)
 		{
+			GroupingTask.EnterProgressFrame(1.f, FText::Format(
+				LOCTEXT("GroupingActor", "Grouping: {0}"),
+				FText::FromString(IsValid(Actor) ? Actor->GetActorLabel() : TEXT(""))));
 			UStaticMeshComponent* MeshComponent = nullptr;
 			EActorEligibilityFailureReason FailureReason = EActorEligibilityFailureReason::None;
 			if (!TryGetEligibleStaticMeshComponent(Actor, MeshComponent, FailureReason))
@@ -762,12 +775,13 @@ namespace ConVerseHISM
 			{
 				GroupData.CanonicalMesh = Mesh;
 			}
-		}
+		} // end grouping loop
+		} // end grouping FScopedSlowTask scope
 
 		UE_LOG(
 			LogConVerseHISM,
 			Display,
-			TEXT("BuildManagedHISMs: grouped %d actor(s) into %d HISM group(s) across %d family type actor(s). Skipped %d actor(s)."),
+			TEXT("BuildManagedHISMs: grouped %d actor(s) into %d ISM group(s) across %d family type actor(s). Skipped %d actor(s)."),
 			Output.Result.ActorsConsidered - Output.Result.SkippedActors,
 			Groups.Num(),
 			FamilyTypeActors.Num(),
@@ -784,8 +798,15 @@ namespace ConVerseHISM
 		int32 GroupIndex = 0;
 		int32 ProcessedGroupCount = 0;
 
+		{
+			FScopedSlowTask BuildTask(
+				static_cast<float>(Groups.Num()),
+				LOCTEXT("BuildingISMs", "Building ISM components..."));
+			BuildTask.MakeDialog(true);
+
 		for (TPair<FHISMGroupKey, FHISMGroupData>& GroupPair : Groups)
 		{
+			BuildTask.EnterProgressFrame(1.f);
 			++ProcessedGroupCount;
 			if ((ProcessedGroupCount % 250) == 0)
 			{
@@ -808,11 +829,19 @@ namespace ConVerseHISM
 				continue;
 			}
 
+			// Leave single-instance groups as plain static mesh actors — a 1-instance ISM has
+			// higher overhead than the source component and provides no instancing benefit.
+			if (SourceActors.Num() < 2)
+			{
+				Output.Result.ActorsInSingleActorGroups += SourceActors.Num();
+				continue;
+			}
+
 			const EComponentMobility::Type SourceMobility = SourceActors[0].Component->Mobility;
 			USceneComponent* RootComponent = EnsureRootComponent(GroupKey.FamilyTypeActor.Get(), SourceMobility);
 			if (RootComponent == nullptr)
 			{
-				++Output.Result.FailedHISMActorCreations;
+				++Output.Result.FailedISMComponentCreations;
 				continue;
 			}
 
@@ -844,7 +873,7 @@ namespace ConVerseHISM
 			{
 				GroupKey.FamilyTypeActor->RemoveInstanceComponent(ISMComponent);
 				ISMComponent->DestroyComponent();
-				++Output.Result.FailedHISMActorCreations;
+				++Output.Result.FailedISMComponentCreations;
 				continue;
 			}
 
@@ -855,16 +884,18 @@ namespace ConVerseHISM
 				++Output.Result.SourceActorsConverted;
 			}
 
-			++Output.Result.HISMActorsCreated;
-		}
+			++Output.Result.ISMComponentsCreated;
+		} // end build loop
+		} // end build FScopedSlowTask scope
 
 		UE_LOG(
 			LogConVerseHISM,
 			Display,
-			TEXT("BuildManagedHISMs: built %d HISM component(s), converted %d source actor(s), failed %d component creation(s)."),
-			Output.Result.HISMActorsCreated,
+			TEXT("BuildManagedHISMs: built %d ISM component(s), converted %d source actor(s), skipped %d single-instance group(s), failed %d component creation(s)."),
+			Output.Result.ISMComponentsCreated,
 			Output.Result.SourceActorsConverted,
-			Output.Result.FailedHISMActorCreations);
+			Output.Result.ActorsInSingleActorGroups,
+			Output.Result.FailedISMComponentCreations);
 
 		UE_LOG(LogConVerseHISM, Display, TEXT("BuildManagedHISMs: collecting delete candidates from %d converted actor(s)."), ConvertedActorsAndCleanupBoundaries.Num());
 		const TArray<AActor*> ActorsToDelete = CollectSortedDeleteCandidates(ConvertedActorsAndCleanupBoundaries);
@@ -880,3 +911,5 @@ namespace ConVerseHISM
 		return Output;
 	}
 }
+
+#undef LOCTEXT_NAMESPACE

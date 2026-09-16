@@ -104,7 +104,7 @@ void FDatasmithHISMModule::RunConsolidateSimilarMeshes()
 
 void FDatasmithHISMModule::RunCreateHISMs()
 {
-	const FConVerseHISMCreationResult Result = UConVerseHISMLibrary::CreateHISMsFromSelection(TEXT("HISM"));
+	const FConVerseHISMCreationResult Result = UConVerseHISMLibrary::CreateHISMsFromSelection(TEXT("ISM"));
 
 	FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Result.Summary));
 }
