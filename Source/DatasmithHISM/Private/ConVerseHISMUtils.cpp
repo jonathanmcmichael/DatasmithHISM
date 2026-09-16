@@ -8,6 +8,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Logging/LogMacros.h"
@@ -30,15 +31,23 @@ namespace ConVerseHISM
 			// allowing them to share one ISM. Falls back to the mesh asset path for meshes
 			// that cannot be hashed (no source models, no triangles).
 			FString GeometrySignature;
+			// Ordered list of effective material asset paths from the component (slot 0, 1, …).
+			// Actors with identical geometry but different materials produce different keys
+			// and get separate ISM components, preserving each variant's appearance.
+			FString MaterialSignature;
 
 			bool operator==(const FHISMGroupKey& Other) const
 			{
-				return FamilyTypeActor == Other.FamilyTypeActor && GeometrySignature == Other.GeometrySignature;
+				return FamilyTypeActor == Other.FamilyTypeActor
+					&& GeometrySignature == Other.GeometrySignature
+					&& MaterialSignature == Other.MaterialSignature;
 			}
 
 			friend uint32 GetTypeHash(const FHISMGroupKey& Key)
 			{
-				return HashCombine(GetTypeHash(Key.FamilyTypeActor), GetTypeHash(Key.GeometrySignature));
+				return HashCombine(
+					HashCombine(GetTypeHash(Key.FamilyTypeActor), GetTypeHash(Key.GeometrySignature)),
+					GetTypeHash(Key.MaterialSignature));
 			}
 		};
 
@@ -384,6 +393,21 @@ namespace ConVerseHISM
 			return Signature;
 		}
 
+		static FString BuildMaterialSignature(const UStaticMeshComponent* Component)
+		{
+			FString Signature;
+			const int32 MaterialCount = Component ? Component->GetNumMaterials() : 0;
+			Signature.AppendInt(MaterialCount);
+			Signature.AppendChar(TEXT(':'));
+			for (int32 Index = 0; Index < MaterialCount; ++Index)
+			{
+				const UMaterialInterface* Material = Component->GetMaterial(Index);
+				Signature += Material ? Material->GetPathName() : TEXT("<None>");
+				Signature.AppendChar(TEXT('|'));
+			}
+			return Signature;
+		}
+
 		static FHISMGroupKey BuildGroupKey(
 			AActor* FamilyTypeActor,
 			UStaticMeshComponent* MeshComponent,
@@ -392,6 +416,7 @@ namespace ConVerseHISM
 			FHISMGroupKey Key;
 			Key.FamilyTypeActor = FamilyTypeActor;
 			Key.GeometrySignature = GetCachedMeshSignature(MeshComponent->GetStaticMesh(), SignatureCache);
+			Key.MaterialSignature = BuildMaterialSignature(MeshComponent);
 			return Key;
 		}
 
