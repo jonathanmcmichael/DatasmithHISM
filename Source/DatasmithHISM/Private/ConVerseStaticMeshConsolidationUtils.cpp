@@ -372,6 +372,14 @@ namespace ConVerseStaticMeshConsolidation
 
 		return ReplacedComponentCount;
 	}
+
+	bool GetMeshGeometrySignature(UStaticMesh* Mesh, FString& OutSignature)
+	{
+		FText Reason;
+		FOptions Options;
+		Options.bRequireMatchingMaterials = false;
+		return BuildMeshSignature(Mesh, Options, OutSignature, Reason);
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

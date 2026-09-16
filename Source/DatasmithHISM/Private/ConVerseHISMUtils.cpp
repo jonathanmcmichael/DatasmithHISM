@@ -1,5 +1,6 @@
 #include "ConVerseHISMUtils.h"
 
+#include "ConVerseStaticMeshConsolidationUtils.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h" // UHierarchicalInstancedStaticMeshComponent is a UInstancedStaticMeshComponent subclass; the include
                                                                   // keeps the full type available so GetComponents<UInstancedStaticMeshComponent> also returns legacy
                                                                   // HISM components created by earlier versions of this plugin when ClearManagedHISMComponents runs.
@@ -24,17 +25,30 @@ namespace ConVerseHISM
 		struct FHISMGroupKey
 		{
 			TObjectPtr<AActor> FamilyTypeActor = nullptr;
-			TObjectPtr<UStaticMesh> Mesh = nullptr;
+			// Stable hash of the mesh's LOD0 geometry (shape only, no material asset paths).
+			// Identical geometry from separately imported assets produces the same signature,
+			// allowing them to share one ISM. Falls back to the mesh asset path for meshes
+			// that cannot be hashed (no source models, no triangles).
+			FString GeometrySignature;
 
 			bool operator==(const FHISMGroupKey& Other) const
 			{
-				return FamilyTypeActor == Other.FamilyTypeActor && Mesh == Other.Mesh;
+				return FamilyTypeActor == Other.FamilyTypeActor && GeometrySignature == Other.GeometrySignature;
 			}
 
 			friend uint32 GetTypeHash(const FHISMGroupKey& Key)
 			{
-				return HashCombine(GetTypeHash(Key.FamilyTypeActor), GetTypeHash(Key.Mesh));
+				return HashCombine(GetTypeHash(Key.FamilyTypeActor), GetTypeHash(Key.GeometrySignature));
 			}
+		};
+
+		// Per-group data: the list of source actors plus the canonical mesh chosen for the ISM.
+		// The canonical mesh is the one whose asset path sorts first among all geometrically
+		// equivalent meshes in the group, giving a deterministic result across reruns.
+		struct FHISMGroupData
+		{
+			TArray<FSourceActorData> Actors;
+			TObjectPtr<UStaticMesh> CanonicalMesh = nullptr;
 		};
 
 		struct FSourceActorData
@@ -344,11 +358,40 @@ namespace ConVerseHISM
 			return FamilyActor;
 		}
 
-		static FHISMGroupKey BuildGroupKey(AActor* FamilyTypeActor, UStaticMeshComponent* MeshComponent)
+		static FString GetCachedMeshSignature(
+			UStaticMesh* Mesh,
+			TMap<UStaticMesh*, FString>& SignatureCache)
+		{
+			if (!IsValid(Mesh))
+			{
+				return FString();
+			}
+
+			if (const FString* Cached = SignatureCache.Find(Mesh))
+			{
+				return *Cached;
+			}
+
+			FString Signature;
+			if (!ConVerseStaticMeshConsolidation::GetMeshGeometrySignature(Mesh, Signature))
+			{
+				// Fall back to the asset path so the actor still gets instanced with
+				// others referencing the exact same (unhashable) mesh asset.
+				Signature = Mesh->GetPathName();
+			}
+
+			SignatureCache.Add(Mesh, Signature);
+			return Signature;
+		}
+
+		static FHISMGroupKey BuildGroupKey(
+			AActor* FamilyTypeActor,
+			UStaticMeshComponent* MeshComponent,
+			TMap<UStaticMesh*, FString>& SignatureCache)
 		{
 			FHISMGroupKey Key;
 			Key.FamilyTypeActor = FamilyTypeActor;
-			Key.Mesh = MeshComponent->GetStaticMesh();
+			Key.GeometrySignature = GetCachedMeshSignature(MeshComponent->GetStaticMesh(), SignatureCache);
 			return Key;
 		}
 
@@ -628,7 +671,8 @@ namespace ConVerseHISM
 		Output.Result.ActorsConsidered = Actors.Num();
 		UE_LOG(LogConVerseHISM, Display, TEXT("BuildManagedHISMs: starting with %d actor(s)."), Actors.Num());
 
-		TMap<FHISMGroupKey, TArray<FSourceActorData>> Groups;
+		TMap<FHISMGroupKey, FHISMGroupData> Groups;
+		TMap<UStaticMesh*, FString> SignatureCache;
 		TSet<AActor*> FamilyTypeActors;
 		TSet<AActor*> ClearedBoundaryActors;
 		FFamilyTypeLookupCache FamilyTypeLookupCache;
@@ -676,11 +720,23 @@ namespace ConVerseHISM
 
 			FamilyTypeActors.Add(FamilyTypeActor);
 
-			FSourceActorData& Entry = Groups.FindOrAdd(BuildGroupKey(FamilyTypeActor, MeshComponent)).AddDefaulted_GetRef();
+			const FHISMGroupKey GroupKey = BuildGroupKey(FamilyTypeActor, MeshComponent, SignatureCache);
+			FHISMGroupData& GroupData = Groups.FindOrAdd(GroupKey);
+
+			FSourceActorData& Entry = GroupData.Actors.AddDefaulted_GetRef();
 			Entry.Actor = Actor;
 			Entry.Component = MeshComponent;
 			Entry.CleanupBoundaryActor = CleanupBoundaryActor;
 			Entry.WorldTransform = GetSourceWorldTransform(Actor, MeshComponent);
+
+			// Track the canonical mesh: alphabetically first asset path among equivalent meshes
+			// in this group so the choice is deterministic across reruns.
+			UStaticMesh* Mesh = MeshComponent->GetStaticMesh();
+			if (!IsValid(GroupData.CanonicalMesh) ||
+				Mesh->GetPathName() < GroupData.CanonicalMesh->GetPathName())
+			{
+				GroupData.CanonicalMesh = Mesh;
+			}
 		}
 
 		UE_LOG(
@@ -703,7 +759,7 @@ namespace ConVerseHISM
 		int32 GroupIndex = 0;
 		int32 ProcessedGroupCount = 0;
 
-		for (TPair<FHISMGroupKey, TArray<FSourceActorData>>& GroupPair : Groups)
+		for (TPair<FHISMGroupKey, FHISMGroupData>& GroupPair : Groups)
 		{
 			++ProcessedGroupCount;
 			if ((ProcessedGroupCount % 250) == 0)
@@ -718,8 +774,11 @@ namespace ConVerseHISM
 			}
 
 			const FHISMGroupKey& GroupKey = GroupPair.Key;
-			const TArray<FSourceActorData>& SourceActors = GroupPair.Value;
-			if (!IsValid(GroupKey.FamilyTypeActor.Get()) || !IsValid(GroupKey.Mesh.Get()) || SourceActors.IsEmpty())
+			FHISMGroupData& GroupData = GroupPair.Value;
+			const TArray<FSourceActorData>& SourceActors = GroupData.Actors;
+			UStaticMesh* CanonicalMesh = GroupData.CanonicalMesh.Get();
+
+			if (!IsValid(GroupKey.FamilyTypeActor.Get()) || !IsValid(CanonicalMesh) || SourceActors.IsEmpty())
 			{
 				continue;
 			}
@@ -737,7 +796,7 @@ namespace ConVerseHISM
 			const FString BaseName = FString::Printf(
 				TEXT("%s_%s_%03d"),
 				ComponentNamePrefix.IsEmpty() ? TEXT("ISM") : *ComponentNamePrefix,
-				*SanitizeNameFragment(GroupKey.Mesh->GetName()),
+				*SanitizeNameFragment(CanonicalMesh->GetName()),
 				++GroupIndex);
 			const FName ComponentName = MakeUniqueObjectName(GroupKey.FamilyTypeActor.Get(), UInstancedStaticMeshComponent::StaticClass(), *BaseName);
 
@@ -751,7 +810,7 @@ namespace ConVerseHISM
 			ISMComponent->ComponentTags.AddUnique(ManagedHISMTag);
 			ISMComponent->SetMobility(SourceMobility);
 			ISMComponent->SetupAttachment(RootComponent);
-			ISMComponent->SetStaticMesh(GroupKey.Mesh.Get());
+			ISMComponent->SetStaticMesh(CanonicalMesh);
 
 			CopyRelevantComponentProperties(SourceActors[0].Component.Get(), ISMComponent);
 			ISMComponent->RegisterComponent();
