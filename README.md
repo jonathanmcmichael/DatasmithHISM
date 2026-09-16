@@ -55,7 +55,8 @@ All major operations are Blueprint-callable editor utilities:
 - `UConVerseHISMLibrary::CreateHISMsFromSelection` — Managed ISMs
 - `UConVerseBatchHISMLibrary::BatchSelectionToHISMs` — Batch ISMs
 - `UConVerseStaticMeshConsolidationLibrary::ConsolidateSimilarStaticMeshes` — Dedupe Meshes
-- `UConVersePowdercoatMaterialLibrary` — material utility functions
+- `UConVerseStaticMeshConsolidationWidget` — Editor Utility Widget base class; subclass in UMG to build custom UI around the Dedupe Meshes operation
+- `UConVersePowdercoatMaterialLibrary::CreatePowdercoatSubstrateMaterial` — procedurally creates a [Substrate](https://dev.epicgames.com/documentation/en-us/unreal-engine/substrate-materials-in-unreal-engine)-based powdercoat material asset with configurable color, orange-peel amount/scale, clearcoat, and thickness
 
 ## Managed Output Tags
 
