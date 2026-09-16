@@ -2,7 +2,9 @@
 
 Unreal Engine 5 editor plugin for converting Datasmith-imported actor hierarchies into Instanced Static Mesh (ISM) components.
 
-Reduces actor and draw-call count in imported scenes while preserving grouping by family, mesh geometry, and materials. Nanite-compatible.
+Reduces actor and draw-call count in AEC/BIM scenes while preserving grouping by family, mesh geometry, and materials. Nanite-compatible.
+
+> **Name note:** The plugin is named `DatasmithHISM` for historical reasons. It uses plain `UInstancedStaticMeshComponent` (ISM) throughout — not `UHierarchicalInstancedStaticMeshComponent` (HISM) — because HISM's per-cluster occlusion culling is redundant and harmful for Nanite meshes. The `ConVerse` prefix on all C++ classes is a project namespace.
 
 ## Tools
 
@@ -95,3 +97,7 @@ Copy the `DatasmithHISM` folder into your project's `Plugins/` directory and reb
 - Each convertible source actor must represent exactly one mesh instance — actors with multiple eligible static mesh components are skipped by the Managed ISMs path.
 - **Dedupe Meshes permanently deletes duplicate mesh assets.** Run it on a saved level or with source control active. A confirmation dialog is shown before any deletion.
 - ISM (not HISM) is used throughout for Nanite compatibility. HISM adds per-cluster occlusion culling overhead that is redundant and harmful with Nanite meshes.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

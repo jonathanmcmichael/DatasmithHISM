@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "DatasmithHISM",
-	"Description": "Editor tools for Datasmith HISM creation, mesh consolidation, Dataprep operations, and powdercoat material generation.",
+	"Description": "Editor tools for converting Datasmith-imported actor hierarchies into Instanced Static Mesh (ISM) components, with mesh deduplication and Dataprep pipeline support.",
 	"Category": "Editor",
 	"CreatedBy": "Jonathan McMichael",
 	"CreatedByURL": "",
