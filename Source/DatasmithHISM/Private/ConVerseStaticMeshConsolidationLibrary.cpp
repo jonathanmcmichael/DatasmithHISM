@@ -62,14 +62,28 @@ namespace
 
 		return SelectedObjects;
 	}
+
+	static FString BuildSkippedMeshReport(const TMap<TObjectPtr<UStaticMesh>, FText>& SkippedMeshes)
+	{
+		TArray<FString> Entries;
+		Entries.Reserve(SkippedMeshes.Num());
+		for (const TPair<TObjectPtr<UStaticMesh>, FText>& Pair : SkippedMeshes)
+		{
+			Entries.Add(FString::Printf(TEXT("%s: %s"),
+				*GetPathNameSafe(Pair.Key.Get()),
+				*Pair.Value.ToString()));
+		}
+		Entries.Sort();
+		return FString::Join(Entries, TEXT("\n"));
+	}
 }
 
-FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::ConsolidateSimilarStaticMeshesInSelection(const bool bRequireMatchingMaterials)
+FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::ConsolidateSimilarStaticMeshesInSelection(const bool bRequireMatchingMaterials, const bool bDryRun)
 {
-	return ConsolidateSimilarStaticMeshes(GetSelectedEditorObjects(), bRequireMatchingMaterials);
+	return ConsolidateSimilarStaticMeshes(GetSelectedEditorObjects(), bRequireMatchingMaterials, bDryRun);
 }
 
-FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::ConsolidateSimilarStaticMeshes(const TArray<UObject*>& Objects, const bool bRequireMatchingMaterials)
+FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::ConsolidateSimilarStaticMeshes(const TArray<UObject*>& Objects, const bool bRequireMatchingMaterials, const bool bDryRun)
 {
 	FConVerseStaticMeshConsolidationResult Result;
 
@@ -91,9 +105,9 @@ FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::
 
 	Result.DuplicateGroupsFound = Analysis.Groups.Num();
 	Result.SkippedMeshes = Analysis.SkippedMeshCount;
+	Result.SkippedMeshReport = BuildSkippedMeshReport(Analysis.SkippedMeshes);
 
-	TMap<UStaticMesh*, UStaticMesh*> ReplacementMap;
-	TArray<UObject*> DuplicateMeshesToDelete;
+	TMap<UStaticMesh*, UStaticMesh*> CandidateReplacementMap;
 	for (const ConVerseStaticMeshConsolidation::FGroup& Group : Analysis.Groups)
 	{
 		if (!IsValid(Group.CanonicalMesh.Get()))
@@ -103,17 +117,48 @@ FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::
 
 		for (UStaticMesh* DuplicateMesh : Group.DuplicateMeshes)
 		{
-			if (!IsValid(DuplicateMesh))
+			if (IsValid(DuplicateMesh))
 			{
-				continue;
+				CandidateReplacementMap.Add(DuplicateMesh, Group.CanonicalMesh.Get());
 			}
-
-			ReplacementMap.Add(DuplicateMesh, Group.CanonicalMesh.Get());
-			DuplicateMeshesToDelete.Add(DuplicateMesh);
 		}
 	}
 
-	ConVerseStaticMeshConsolidation::ReplaceStaticMeshReferencesInObjects(Objects, ReplacementMap);
+	const ConVerseStaticMeshConsolidation::FReferenceAudit ReferenceAudit =
+		ConVerseStaticMeshConsolidation::AuditStaticMeshReplacementReferences(Objects, CandidateReplacementMap);
+	Result.SkippedMeshes += ReferenceAudit.SkippedMeshes.Num();
+	const FString UnsafeSkippedMeshReport = BuildSkippedMeshReport(ReferenceAudit.SkippedMeshes);
+	if (!UnsafeSkippedMeshReport.IsEmpty())
+	{
+		Result.SkippedMeshReport = Result.SkippedMeshReport.IsEmpty()
+			? UnsafeSkippedMeshReport
+			: Result.SkippedMeshReport + TEXT("\n") + UnsafeSkippedMeshReport;
+	}
+
+	// Dry-run: count what would happen and return without making any changes.
+	if (bDryRun)
+	{
+		Result.MeshesConsolidated = ReferenceAudit.SafeReplacementMap.Num();
+		Result.Summary = FString::Printf(
+			TEXT("[Dry run] Considered %d mesh asset(s), found %d duplicate group(s). "
+				"Would consolidate %d duplicate mesh asset(s), skipped %d mesh asset(s). No changes made."),
+			Result.MeshesConsidered,
+			Result.DuplicateGroupsFound,
+			Result.MeshesConsolidated,
+			Result.SkippedMeshes);
+		return Result;
+	}
+
+	TMap<UStaticMesh*, UStaticMesh*> ReplacementMap = ReferenceAudit.SafeReplacementMap;
+	TArray<UObject*> DuplicateMeshesToDelete;
+	DuplicateMeshesToDelete.Reserve(ReplacementMap.Num());
+	for (const TPair<UStaticMesh*, UStaticMesh*>& Pair : ReplacementMap)
+	{
+		if (IsValid(Pair.Key))
+		{
+			DuplicateMeshesToDelete.Add(Pair.Key);
+		}
+	}
 
 	if (!DuplicateMeshesToDelete.IsEmpty())
 	{
@@ -133,14 +178,21 @@ FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::
 			const EAppReturnType::Type Response = FMessageDialog::Open(EAppMsgType::YesNo, ConfirmMessage);
 			if (Response != EAppReturnType::Yes)
 			{
+				Result.Outcome = EConVerseStaticMeshConsolidationOutcome::Cancelled;
 				Result.Summary = LOCTEXT("DedupeCancelled", "Consolidation cancelled by user.").ToString();
 				return Result;
 			}
 		}
 
+		ConVerseStaticMeshConsolidation::ReplaceStaticMeshReferencesInObjects(Objects, ReplacementMap);
+
 		const int32 DeletedCount = ObjectTools::DeleteObjects(DuplicateMeshesToDelete, false, ObjectTools::EAllowCancelDuringDelete::CancelNotAllowed);
 		Result.MeshesConsolidated = DeletedCount;
 		Result.FailedConsolidations = DuplicateMeshesToDelete.Num() - DeletedCount;
+		if (Result.FailedConsolidations > 0)
+		{
+			Result.Outcome = EConVerseStaticMeshConsolidationOutcome::Failed;
+		}
 	}
 
 	Result.Summary = BuildSummaryText(Result);

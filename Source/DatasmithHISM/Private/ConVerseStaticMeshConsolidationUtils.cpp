@@ -1,5 +1,6 @@
 #include "ConVerseStaticMeshConsolidationUtils.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
@@ -7,6 +8,7 @@
 #include "Misc/Crc.h"
 #include "Misc/SecureHash.h"
 #include "StaticMeshAttributes.h"
+#include "UObject/UObjectIterator.h"
 
 #define LOCTEXT_NAMESPACE "ConVerseStaticMeshConsolidationUtils"
 
@@ -91,16 +93,26 @@ namespace ConVerseStaticMeshConsolidation
 				return false;
 			}
 
+			// Try LOD0; fall back to LOD1 if LOD0 is missing or empty (some Datasmith
+			// imports omit the LOD0 source model but retain LOD1).
+			int32 UsedLODIndex = 0;
 			const FMeshDescription* MeshDescription = StaticMesh->GetMeshDescription(0);
+			if ((MeshDescription == nullptr || MeshDescription->Triangles().Num() == 0)
+				&& StaticMesh->GetNumSourceModels() > 1)
+			{
+				MeshDescription = StaticMesh->GetMeshDescription(1);
+				UsedLODIndex = 1;
+			}
+
 			if (MeshDescription == nullptr)
 			{
-				OutReason = LOCTEXT("MissingMeshDescription", "Mesh has no accessible LOD0 mesh description.");
+				OutReason = LOCTEXT("MissingMeshDescription", "Mesh has no accessible mesh description (LOD0 or LOD1).");
 				return false;
 			}
 
 			if (MeshDescription->Triangles().Num() == 0)
 			{
-				OutReason = LOCTEXT("NoTriangles", "Mesh has no triangles.");
+				OutReason = LOCTEXT("NoTriangles", "Mesh has no triangles (LOD0 or LOD1).");
 				return false;
 			}
 
@@ -127,6 +139,7 @@ namespace ConVerseStaticMeshConsolidation
 			TriangleHashes.Sort();
 
 			FMD5 SignatureHash;
+			HashValue(SignatureHash, UsedLODIndex);
 			HashValue(SignatureHash, StaticMesh->GetNumSourceModels());
 			HashValue(SignatureHash, MeshDescription->Vertices().Num());
 			HashValue(SignatureHash, MeshDescription->VertexInstances().Num());
@@ -249,6 +262,77 @@ namespace ConVerseStaticMeshConsolidation
 					ProcessedComponents);
 			}
 		}
+
+		static void CollectStaticMeshComponentsFromActorHierarchy(
+			AActor* RootActor,
+			TSet<UStaticMeshComponent*>& OutComponents,
+			TSet<AActor*>& VisitedActors)
+		{
+			if (!IsValid(RootActor) || VisitedActors.Contains(RootActor))
+			{
+				return;
+			}
+
+			VisitedActors.Add(RootActor);
+
+			TInlineComponentArray<UStaticMeshComponent*> MeshComponents;
+			RootActor->GetComponents(MeshComponents);
+			for (UStaticMeshComponent* MeshComponent : MeshComponents)
+			{
+				if (IsValid(MeshComponent))
+				{
+					OutComponents.Add(MeshComponent);
+				}
+			}
+
+			TArray<AActor*> AttachedActors;
+			RootActor->GetAttachedActors(AttachedActors, true, false);
+			for (AActor* AttachedActor : AttachedActors)
+			{
+				CollectStaticMeshComponentsFromActorHierarchy(AttachedActor, OutComponents, VisitedActors);
+			}
+		}
+
+		static void CollectScopedStaticMeshComponents(
+			const TArray<UObject*>& Objects,
+			TSet<UStaticMeshComponent*>& OutComponents,
+			TSet<FName>& OutPackageNames)
+		{
+			TSet<AActor*> VisitedActors;
+
+			for (UObject* Object : Objects)
+			{
+				if (!IsValid(Object))
+				{
+					continue;
+				}
+
+				if (UPackage* Package = Object->GetOutermost())
+				{
+					OutPackageNames.Add(Package->GetFName());
+				}
+
+				if (UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Object))
+				{
+					OutComponents.Add(MeshComponent);
+				}
+				else if (AActor* Actor = Cast<AActor>(Object))
+				{
+					CollectStaticMeshComponentsFromActorHierarchy(Actor, OutComponents, VisitedActors);
+				}
+			}
+
+			for (UStaticMeshComponent* MeshComponent : OutComponents)
+			{
+				if (IsValid(MeshComponent))
+				{
+					if (UPackage* Package = MeshComponent->GetOutermost())
+					{
+						OutPackageNames.Add(Package->GetFName());
+					}
+				}
+			}
+		}
 	}
 
 	void CollectStaticMeshes(const TArray<UObject*>& Objects, TSet<UStaticMesh*>& OutMeshes)
@@ -323,6 +407,84 @@ namespace ConVerseStaticMeshConsolidation
 		});
 
 		return Analysis;
+	}
+
+	FReferenceAudit AuditStaticMeshReplacementReferences(
+		const TArray<UObject*>& Objects,
+		const TMap<UStaticMesh*, UStaticMesh*>& CandidateReplacementMap)
+	{
+		FReferenceAudit Audit;
+		if (CandidateReplacementMap.IsEmpty())
+		{
+			return Audit;
+		}
+
+		TSet<UStaticMeshComponent*> ScopedComponents;
+		TSet<FName> ScopedPackageNames;
+		CollectScopedStaticMeshComponents(Objects, ScopedComponents, ScopedPackageNames);
+
+		TSet<UStaticMesh*> UnsafeMeshes;
+		for (TObjectIterator<UStaticMeshComponent> It; It; ++It)
+		{
+			UStaticMeshComponent* MeshComponent = *It;
+			if (!IsValid(MeshComponent) || ScopedComponents.Contains(MeshComponent))
+			{
+				continue;
+			}
+
+			if (CandidateReplacementMap.Contains(MeshComponent->GetStaticMesh()))
+			{
+				UnsafeMeshes.Add(MeshComponent->GetStaticMesh());
+				Audit.SkippedMeshes.FindOrAdd(MeshComponent->GetStaticMesh()) = FText::Format(
+					LOCTEXT("LoadedExternalComponentReference",
+						"Skipped because loaded static mesh component '{0}' is outside the supplied context."),
+					FText::FromString(MeshComponent->GetPathName()));
+			}
+		}
+
+		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		for (const TPair<UStaticMesh*, UStaticMesh*>& Pair : CandidateReplacementMap)
+		{
+			UStaticMesh* DuplicateMesh = Pair.Key;
+			if (!IsValid(DuplicateMesh) || UnsafeMeshes.Contains(DuplicateMesh))
+			{
+				continue;
+			}
+
+			UPackage* DuplicatePackage = DuplicateMesh->GetOutermost();
+			if (DuplicatePackage == nullptr)
+			{
+				UnsafeMeshes.Add(DuplicateMesh);
+				Audit.SkippedMeshes.FindOrAdd(DuplicateMesh) =
+					LOCTEXT("MissingDuplicatePackage", "Skipped because the duplicate mesh package could not be determined.");
+				continue;
+			}
+
+			TArray<FName> ReferencerPackageNames;
+			AssetRegistry.GetReferencers(DuplicatePackage->GetFName(), ReferencerPackageNames);
+			for (const FName ReferencerPackageName : ReferencerPackageNames)
+			{
+				if (!ScopedPackageNames.Contains(ReferencerPackageName))
+				{
+					UnsafeMeshes.Add(DuplicateMesh);
+					Audit.SkippedMeshes.FindOrAdd(DuplicateMesh) = FText::Format(
+						LOCTEXT("ExternalPackageReference",
+							"Skipped because package '{0}' references this mesh outside the supplied context."),
+						FText::FromName(ReferencerPackageName));
+					break;
+				}
+			}
+		}
+
+		for (const TPair<UStaticMesh*, UStaticMesh*>& Pair : CandidateReplacementMap)
+		{
+			if (!UnsafeMeshes.Contains(Pair.Key) && IsValid(Pair.Key) && IsValid(Pair.Value))
+			{
+				Audit.SafeReplacementMap.Add(Pair.Key, Pair.Value);
+			}
+		}
+
+		return Audit;
 	}
 
 	int32 ReplaceStaticMeshReferencesInObjects(const TArray<UObject*>& Objects, const TMap<UStaticMesh*, UStaticMesh*>& ReplacementMap)

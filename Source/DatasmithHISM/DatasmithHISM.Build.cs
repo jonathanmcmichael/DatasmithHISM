@@ -18,9 +18,17 @@ public class DatasmithHISM : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new[]
 			{
+				"AssetRegistry",
 				"AssetTools",
 				"Blutility",
+				"DatasmithContent",
+				"DatasmithCore",
+				"DatasmithExporter",
+				"DatasmithImporter",
+				"DatasmithTranslator",
+				"DesktopPlatform",
 				"EditorFramework",
+				"ExternalSource",
 				"InputCore",
 				"MaterialEditor",
 				"MeshDescription",

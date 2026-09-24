@@ -17,6 +17,10 @@
 	"Installed": false,
 	"Plugins": [
 		{
+			"Name": "DatasmithImporter",
+			"Enabled": true
+		},
+		{
 			"Name": "DataprepEditor",
 			"Enabled": true
 		}

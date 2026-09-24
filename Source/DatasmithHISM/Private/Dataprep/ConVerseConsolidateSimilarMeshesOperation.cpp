@@ -47,8 +47,7 @@ void UConVerseConsolidateSimilarMeshesOperation::OnExecution_Implementation(cons
 		return;
 	}
 
-	TMap<UStaticMesh*, UStaticMesh*> ReplacementMap;
-	TArray<UObject*> MeshesToDelete;
+	TMap<UStaticMesh*, UStaticMesh*> CandidateReplacementMap;
 	for (const ConVerseStaticMeshConsolidation::FGroup& Group : Analysis.Groups)
 	{
 		if (!IsValid(Group.CanonicalMesh.Get()))
@@ -63,15 +62,38 @@ void UConVerseConsolidateSimilarMeshesOperation::OnExecution_Implementation(cons
 				continue;
 			}
 
-			ReplacementMap.Add(DuplicateMesh, Group.CanonicalMesh.Get());
-			MeshesToDelete.Add(DuplicateMesh);
+			CandidateReplacementMap.Add(DuplicateMesh, Group.CanonicalMesh.Get());
 		}
 	}
 
+	const ConVerseStaticMeshConsolidation::FReferenceAudit ReferenceAudit =
+		ConVerseStaticMeshConsolidation::AuditStaticMeshReplacementReferences(ContextObjects, CandidateReplacementMap);
+	const int32 TotalSkippedMeshCount = Analysis.SkippedMeshCount + ReferenceAudit.SkippedMeshes.Num();
+	for (const TPair<TObjectPtr<UStaticMesh>, FText>& SkippedMesh : ReferenceAudit.SkippedMeshes)
+	{
+		LogInfo(FText::Format(
+			LOCTEXT("UnsafeMeshSkipped", "Skipped unsafe duplicate mesh '{0}': {1}"),
+			FText::FromString(GetPathNameSafe(SkippedMesh.Key.Get())),
+			SkippedMesh.Value));
+	}
+
+	TMap<UStaticMesh*, UStaticMesh*> ReplacementMap = ReferenceAudit.SafeReplacementMap;
 	if (ReplacementMap.IsEmpty())
 	{
-		LogInfo(LOCTEXT("NoReplacements", "No duplicate static mesh references were eligible for replacement."));
+		LogInfo(FText::Format(
+			LOCTEXT("NoReplacements", "No duplicate static mesh references were eligible for replacement. Skipped {0} mesh asset(s)."),
+			TotalSkippedMeshCount));
 		return;
+	}
+
+	TArray<UObject*> MeshesToDelete;
+	MeshesToDelete.Reserve(ReplacementMap.Num());
+	for (const TPair<UStaticMesh*, UStaticMesh*>& Pair : ReplacementMap)
+	{
+		if (IsValid(Pair.Key))
+		{
+			MeshesToDelete.Add(Pair.Key);
+		}
 	}
 
 	const int32 ReplacedComponentCount = ConVerseStaticMeshConsolidation::ReplaceStaticMeshReferencesInObjects(ContextObjects, ReplacementMap);
@@ -82,7 +104,7 @@ void UConVerseConsolidateSimilarMeshesOperation::OnExecution_Implementation(cons
 		ReplacementMap.Num(),
 		Analysis.Groups.Num(),
 		ReplacedComponentCount,
-		Analysis.SkippedMeshCount));
+		TotalSkippedMeshCount));
 }
 
 #undef LOCTEXT_NAMESPACE

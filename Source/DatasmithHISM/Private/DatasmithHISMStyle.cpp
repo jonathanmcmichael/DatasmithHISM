@@ -47,6 +47,11 @@ TSharedRef< FSlateStyleSet > FDatasmithHISMStyle::Create()
 	Style->Set("DatasmithHISM.ConsolidateMeshes", new IMAGE_BRUSH_SVG(TEXT("IconConsolidateMeshes"), Icon20x20));
 	Style->Set("DatasmithHISM.ManagedHISMs", new IMAGE_BRUSH_SVG(TEXT("IconManagedHISMs"), Icon20x20));
 	Style->Set("DatasmithHISM.BatchHISMs", new IMAGE_BRUSH_SVG(TEXT("IconBatchHISMs"), Icon20x20));
+	Style->Set("DatasmithHISM.AnalyzeISMs", new IMAGE_BRUSH_SVG(TEXT("PlaceholderButtonIcon"), Icon20x20));
+	Style->Set("DatasmithHISM.EnableNanite", new IMAGE_BRUSH_SVG(TEXT("PlaceholderButtonIcon"), Icon20x20));
+	Style->Set("DatasmithHISM.ExplodeISMs", new IMAGE_BRUSH_SVG(TEXT("PlaceholderButtonIcon"), Icon20x20));
+	Style->Set("DatasmithHISM.OneClickPipeline", new IMAGE_BRUSH_SVG(TEXT("PlaceholderButtonIcon"), Icon20x20));
+	Style->Set("DatasmithHISM.ToggleUseHISM", new IMAGE_BRUSH_SVG(TEXT("PlaceholderButtonIcon"), Icon20x20));
 	return Style;
 }
 
