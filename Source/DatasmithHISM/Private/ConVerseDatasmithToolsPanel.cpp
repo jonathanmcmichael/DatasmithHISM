@@ -51,12 +51,34 @@ void SConVerseDatasmithToolsPanel::Construct(const FArguments& InArgs)
 
 			+ SVerticalBox::Slot()
 			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT(
+					"OptimizedPathHeading",
+					"Tracked import - verified, reversible"))
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT(
+					"OptimizedPathDescription",
+					"Records a manifest, verifies its own output, and rolls the whole attempt back if anything fails. Reimporting a changed source supersedes the previous session instead of duplicating it."))
+				.AutoWrapText(true)
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			[
 				SNew(SButton)
 				.Text(LOCTEXT("OptimizedImport", "Optimized Datasmith Import"))
 				.ToolTipText(LOCTEXT(
 					"OptimizedImportTooltip",
-					"Use when importing a new Datasmith scene, including CAD, Revit, and IFC sources. Optimizes before individual source actors populate the level, with ISM or HISM output and verification."))
+					"Use when importing a new Datasmith scene, including CAD, Revit, and IFC sources. Optimizes before individual source actors populate the level, with ISM or HISM output and verification. This is the manifest-backed path: failures roll back automatically."))
 				.OnClicked_Lambda([this]() { return ExecuteAction(OnOpenOptimizedImport); })
 			]
 
@@ -65,6 +87,28 @@ void SConVerseDatasmithToolsPanel::Construct(const FArguments& InArgs)
 			.Padding(0.0f, 10.0f, 0.0f, 6.0f)
 			[
 				SNew(SSeparator)
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT(
+					"LegacyPathHeading",
+					"Selection tools - in-place, not reversible"))
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT(
+					"LegacyPathDescription",
+					"These operate directly on the selected actors already in the level. They record no manifest, perform no verification, and have no rollback: undo is the only recovery. Save first."))
+				.AutoWrapText(true)
 			]
 
 			+ SVerticalBox::Slot()
@@ -99,7 +143,7 @@ void SConVerseDatasmithToolsPanel::Construct(const FArguments& InArgs)
 				.Text(LOCTEXT("CreateManagedISMs", "Managed ISMs"))
 				.ToolTipText(LOCTEXT(
 					"CreateManagedISMsTooltip",
-					"Use when an existing Datasmith or IFC level needs post-import conversion. Groups repeated geometry by family, mesh, and materials into managed ISM or HISM components."))
+					"Use when an existing Datasmith or IFC level needs post-import conversion. Groups repeated geometry by family, mesh, and materials into managed ISM or HISM components. In-place: no manifest, no verification, no rollback."))
 				.OnClicked_Lambda([this]() { return ExecuteAction(OnCreateManagedISMs); })
 			]
 
@@ -111,7 +155,7 @@ void SConVerseDatasmithToolsPanel::Construct(const FArguments& InArgs)
 				.Text(LOCTEXT("BatchISMs", "Batch ISMs"))
 				.ToolTipText(LOCTEXT(
 					"BatchISMsTooltip",
-					"Use when an existing level only needs Unreal's standard same-mesh batching. Faster and simpler than Managed ISMs, but not family-structure-aware."))
+					"Use when an existing level only needs Unreal's standard same-mesh batching. Faster and simpler than Managed ISMs, but not family-structure-aware. In-place: no manifest, no verification, no rollback."))
 				.OnClicked_Lambda([this]() { return ExecuteAction(OnBatchISMs); })
 			]
 

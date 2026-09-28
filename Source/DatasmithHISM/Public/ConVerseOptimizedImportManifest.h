@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ConVerseImportRecipe.h"
 #include "Engine/AssetUserData.h"
 #include "Engine/EngineTypes.h"
 #include "UObject/SoftObjectPath.h"
@@ -275,6 +276,24 @@ struct DATASMITHHISM_API FConVerseOptimizedVerificationSummary
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Optimized Import")
 	FString FullReportArtifactPath;
+
+	/**
+	 * True when a user deliberately accepted this session despite verification failing.
+	 *
+	 * A manifest in this state is committed and usable, but degraded: its records describe output
+	 * that was NOT confirmed to match the plan. Optimized reimport is refused against it, because
+	 * superseding destroys actors based on exactly the records verification could not confirm.
+	 *
+	 * State == Failed alone is not sufficient to detect this. A rolled-back attempt also records a
+	 * failed verification, and that manifest never becomes active. This flag marks the far rarer
+	 * case of failed-but-kept.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Optimized Import")
+	bool bAcceptedWithFailedVerification = false;
+
+	/** Why verification failed, preserved so the refusal can explain itself long after the import. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Optimized Import")
+	FString AcceptedFailureDetails;
 };
 
 /**
@@ -289,6 +308,8 @@ class DATASMITHHISM_API UConVerseOptimizedImportManifest : public UAssetUserData
 	GENERATED_BODY()
 
 public:
+	virtual bool IsEditorOnly() const override { return true; }
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Optimized Import|Header")
 	int32 ManifestSchemaVersion = 1;
 
@@ -360,6 +381,32 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Optimized Import|Header")
 	FConVerseOptimizedImportOptionSnapshot Options;
+
+	/** Missing in older manifests; never infer newly verified behavior from an empty snapshot. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Optimized Import|Header")
+	FString ProcessingSettingsJson;
+
+	UPROPERTY()
+	TArray<FConVerseAppearanceReviewRow> Appearances;
+
+	UPROPERTY()
+	int32 SourceInventoryVersion = 0;
+	UPROPERTY()
+	TMap<FString, FString> SourceLightDescriptions;
+	UPROPERTY()
+	TMap<FString, FString> MaterialDecisions;
+
+	UPROPERTY()
+	TArray<FConVerseTrackedObjectState> TrackedObjects;
+
+	UPROPERTY()
+	int32 TrackedStateVersion = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Optimized Import|Output")
+	TArray<FConVerseImportInspectionRow> ImportedElements;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Optimized Import|Verification")
+	TArray<FString> Diagnostics;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Optimized Import|Header")
 	FString PlanId;
@@ -442,6 +489,8 @@ class DATASMITHHISM_API UConVerseOptimizedAssetMarker : public UAssetUserData
 	GENERATED_BODY()
 
 public:
+	virtual bool IsEditorOnly() const override { return true; }
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Optimized Import|Ownership")
 	FString ManifestId;
 

@@ -1,0 +1,244 @@
+{
+  "date": "2026-09-26",
+  "engine": "5.8.3",
+  "plugin_version": "1.0",
+  "scope": "Phase 2 persistence and recovery; live UI and release acceptance remain incomplete",
+  "build": {
+    "exit_code": 0,
+    "log": "Saved/Phase2Acceptance/20260926A/09-build.txt"
+  },
+  "automation": {
+    "log": "Saved/Phase2Acceptance/20260926A/10-full-automation.txt",
+    "passed": 27,
+    "controller_errors": 0,
+    "exit_code": 0,
+    "tests": [
+      {
+        "name": "DatasmithHISM.LegacyConversion.BehaviorPayloadIsNotDestroyed",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.LegacyConversion.BelowThresholdLeavesNoEmptyActors",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.LegacyConversion.ComponentOffsetsAndSettings",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.LegacyConversion.MaterialOverrideSurvivesConversion",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.AnalyzeCancellationLeavesNoPartialPlan",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.ApprovedMaterialsAndPresetRoundTrip",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.DeletedActorReportsDriftNotSuccess",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.FailedVerificationCanBeAcceptedAndIsQuarantined",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.FailedVerificationCanBeDiscarded",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.FutureSchemaManifestIsRefused",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.GeneratedFixtureEndToEnd",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.ImportLogRecordsFailures",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.InducedFailureRollsBackCleanly",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.ManualEditsRequireExplicitRebuild",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.MaterialStateIgnoresGeneratedExpressionIds",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.MultiMaterialSlotsVerify",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.MultipleActiveOwnersAreRefused",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.NanitePolicyAndZeroGroupImport",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.ObstructedRollbackDegradesToRollbackFailed",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.OptimizerAwareReimport",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.PhysicalLightUnitsAndThreshold",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.SidecarChangeWarnsWithoutReimport",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.StockReimportIsRefused",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.OptimizedImport.TessellationAffectsPlanIdentity",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.Persistence.NamedMapSaveAsDoesNotClaimSuccess",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.Persistence.PartialSaveAndManualDrift",
+        "result": "Success"
+      },
+      {
+        "name": "DatasmithHISM.Persistence.RecoveryListsKnownPaths",
+        "result": "Success"
+      }
+    ]
+  },
+  "named_save_as": {
+    "before": {
+      "fresh_copy_reopen_exit_code": 1,
+      "save_exit_code": 0,
+      "verified_groups": 0,
+      "expected_groups": 1
+    },
+    "after": {
+      "commandlet": "Refuses before import/copy; original owner/session retained",
+      "native_copy": "Owner GUID changes; explicit save refuses rebinding and names original map",
+      "regression": "DatasmithHISM.Persistence.NamedMapSaveAsDoesNotClaimSuccess"
+    }
+  },
+  "save_failures": {
+    "actual": "Read-only generated owned asset; attributes restored; retry passed",
+    "simulated": "Zero write capacity for disposable map temporary file; actual SavePackage fails after assets save",
+    "manual_drift": "Saved as unverified; baseline unchanged; re-verification still fails"
+  },
+  "interruption": {
+    "InterruptedProcessId": 40804,
+    "InterruptedProcessStarted": "2026-09-26T21:35:52.4334527Z",
+    "CheckpointStage": 9,
+    "Session": "0a40897b43b1aa24c01bccb3e8bc1d0b",
+    "Map": "/Game/__ConVersePersistence/AFDB603E4B6CE07262D56580DC813331/Interrupted",
+    "OwnedFolder": "/Game/__ConVersePersistence/AFDB603E4B6CE07262D56580DC813331/InterruptedImport/Joist16K6_ConVerse_0a40897b43b1",
+    "ObservedObjectCount": 7,
+    "PreservedFileCount": 4,
+    "RecoveryExitCode": 0,
+    "AllRecordedFilesUnchanged": true,
+    "EvidenceDirectory": "D:\\Unreal\\Sandbox\\AdvancedHISM\\Saved\\Phase2Acceptance\\20260926A-Interrupted-Final"
+  },
+  "fresh_reopen": {
+    "exit_code": 0,
+    "status": "AlreadyCurrent",
+    "log": "Saved/Phase2Acceptance/20260926A/11-final-reopen.txt",
+    "new_session": false,
+    "instances": 2,
+    "groups": 1
+  },
+  "runtime_lookup": {
+    "exit_code": 0,
+    "errors": 0,
+    "log": "Saved/Phase2Acceptance/20260926A/12-runtime-lookup.txt",
+    "mesh_components": 1,
+    "source_records": 2,
+    "scope": "Fresh editor process, NullRHI; not a new packaged or rendered test"
+  },
+  "source_immutability": {
+    "primary_initial_md5": "3d2d4813644afde6264d5544c7d7e111",
+    "primary_unchanged": true,
+    "primary_final_md5": "3d2d4813644afde6264d5544c7d7e111",
+    "sidecar_matches_provenance": true,
+    "sidecar_mesh_final_md5": "09a89ee1bcb2b412de6f84d671be8f42"
+  },
+  "pending": [
+    "Live Slate progress/cancellation and inspection",
+    "Content Browser rename/move",
+    "Other interruption/checkpoint windows",
+    "Actual full-volume OS failure",
+    "Source-dependent geometry/light/material gates",
+    "Broader cooked/rendered/performance acceptance"
+  ],
+  "source_sha256": {
+    "Source/DatasmithHISM/DatasmithHISM.Build.cs": "427fd858f7a3d101147a0c58002bd1cb49d83649f1e159bb0412105fc0026181",
+    "Source/DatasmithHISM/Private/ConVerseBatchHISMLibrary.cpp": "b35a1d21879f4ff368076e5fa0fe651e0256b1699dc8db6aa3324d9077313097",
+    "Source/DatasmithHISM/Private/ConVerseDatasmithImportPanel.cpp": "e791af74cdde31ac288e709d378b4aec141f9fa81ce629e1deed460bd0bd3e73",
+    "Source/DatasmithHISM/Private/ConVerseDatasmithImportPanel.h": "5eb28e3684e5346d732f17516617a5730e13d54beb1787c15bcea8688c8e1b2c",
+    "Source/DatasmithHISM/Private/ConVerseDatasmithImportService.cpp": "c7e9d89c8bf5ca9e212f23b19f89f009bf556a80ee9d3153aaf5351d1e604e3b",
+    "Source/DatasmithHISM/Private/ConVerseDatasmithImportService.h": "f12de0275f7d54c144eacaf21a726fc14a8323ba5d436edac508940af1d401eb",
+    "Source/DatasmithHISM/Private/ConVerseDatasmithToolsPanel.cpp": "d03a28a638a8e847273f5775c7793c957ac4cd5db8dd284e6b92b1ac78b31f22",
+    "Source/DatasmithHISM/Private/ConVerseDatasmithToolsPanel.h": "10958c9c4d385af8f8b418857b52156ecdb73faf3377c00787a63c9b4afe7620",
+    "Source/DatasmithHISM/Private/ConVerseHISMLibrary.cpp": "206c183c141170a36c30131cd136397f0b5774e590b339280dfdef26602292ab",
+    "Source/DatasmithHISM/Private/ConVerseHISMUtils.cpp": "778ee7ddc6417fecaf26ee0183cc2c87c64aaea768465adfdb6486218966ac54",
+    "Source/DatasmithHISM/Private/ConVerseHISMUtils.h": "e985be697a8de7293b6dc181a0bee806e358e647f3309210d97126daa744575c",
+    "Source/DatasmithHISM/Private/ConVerseImportPersistence.cpp": "1cab43d9afa7179d17e066b9071c9270032284a12953b8d7057337583214e716",
+    "Source/DatasmithHISM/Private/ConVerseImportProcessing.cpp": "07c96402da4a3b03a00b3a4bbc02dc519ae6438a6f5ac859b2ef179416602b7c",
+    "Source/DatasmithHISM/Private/ConVerseImportProcessing.h": "8a0fe1cf5cc0bbbb8f87549664cbaf85f9d63c67ee7045bc559fdfd942955c7b",
+    "Source/DatasmithHISM/Private/ConVerseMaterialReview.cpp": "8d711c7f12c61734320ceed451da308aa35d7ec7041992dc330de02d54d88252",
+    "Source/DatasmithHISM/Private/ConVerseMaterialReview.h": "5f88f2400cf52c334c5d33f70bbd95d6828dc7e5931427187495b6dc1a525ce5",
+    "Source/DatasmithHISM/Private/ConVerseOptimizedImportCommandlet.cpp": "ec94fdf645c0ac15309cd2aa6567267ef0eccfc5a8b231813b408740b6eb3d9b",
+    "Source/DatasmithHISM/Private/ConVerseOptimizedImportCommandlet.h": "ed574a1ae04337329585d6575a1b236eb6b8c6731480784ea85c51a9105f0dd4",
+    "Source/DatasmithHISM/Private/ConVerseOptimizedImportManifest.cpp": "499e0eaa988a24b935bfb23ff9466b46ba79c4a76dd63ea1e3f3bf6f29699e77",
+    "Source/DatasmithHISM/Private/ConVerseOptimizedReimportHandler.cpp": "d4de409820dd7b27f5fc4cfecc26b8499402d53a5a24b9cd298b5ebdab846192",
+    "Source/DatasmithHISM/Private/ConVerseOptimizedReimportHandler.h": "11cb27d098d2ab465865e89e9be0fd5ad3145fc5ba7112bd951a58289d3707db",
+    "Source/DatasmithHISM/Private/ConVersePowdercoatMaterialLibrary.cpp": "a3fdb02d31664ad5204874a4eee37d4075898b63bbbfb69df0563b5d119c6235",
+    "Source/DatasmithHISM/Private/ConVerseStaticMeshConsolidationLibrary.cpp": "74c0b42e8a25b5f6017bae8db8f64788cf067250cefd1d142d9aee6084a3e5fd",
+    "Source/DatasmithHISM/Private/ConVerseStaticMeshConsolidationUtils.cpp": "26ece8018f12d388a1d9fbbfcd4d7d49d15a70e3b74484e92a0e2542d0bbb994",
+    "Source/DatasmithHISM/Private/ConVerseStaticMeshConsolidationUtils.h": "5a33c4d43d7cfac8d8f0e56262749afa93451d384bf3f827d6afc83757ff13be",
+    "Source/DatasmithHISM/Private/ConVerseStaticMeshConsolidationWidget.cpp": "19d538865ac7909d0725e2056a790361255fad1562398eda90448d93a796345c",
+    "Source/DatasmithHISM/Private/Dataprep/ConVerseAnalyzeHISMOperation.cpp": "895033c8c4d69432bf62049e70b760a007dec246913d7674501cc42508905bad",
+    "Source/DatasmithHISM/Private/Dataprep/ConVerseCategoryGroupHISMOperation.cpp": "c43736f1ef039e070116a6a6aa84155ef39b280bc68d1a905c3cf4d0bbd7ef6d",
+    "Source/DatasmithHISM/Private/Dataprep/ConVerseConsolidateSimilarMeshesOperation.cpp": "3052a34019750b0d15cb04cf5b94603a363a9851f4d86dbff4f6cf00c240ca64",
+    "Source/DatasmithHISM/Private/Dataprep/ConVerseCreateHISMOperation.cpp": "67f2aea6904bbbffe3a751edc4ac098435f69cbe69e610e500f3e1048798cd4b",
+    "Source/DatasmithHISM/Private/DatasmithHISM.cpp": "5a5ce0da5ab8d21d13196e49dd04ea55e82d8a51dbbb92837cbff844efd676ab",
+    "Source/DatasmithHISM/Private/DatasmithHISMCommands.cpp": "2adfcf866b3f9082b38b960b80e3f2a3f7724f43606f5873d6cdd6ea786d5ee6",
+    "Source/DatasmithHISM/Private/DatasmithHISMStyle.cpp": "8ff4e71557474e8750904d2a57ea065d8d14297b7d3256e6b9b52d03c3851dc8",
+    "Source/DatasmithHISM/Private/Tests/ConVerseHISMLegacyAutomation.cpp": "d79621445ee835d65b7f11cdd61358e0cf251332ed03239610fb61fc22f21ae7",
+    "Source/DatasmithHISM/Private/Tests/ConVerseOptimizedImportAutomation.cpp": "71d94129d9a06e33e836671d91e25dfb7d838548ee7892f35eb69f82a4b8da64",
+    "Source/DatasmithHISM/Private/Tests/ConVersePersistenceAutomation.cpp": "97639b09fcb12eac8e23cf239424bef164c58309044352d99faed467db43b0f1",
+    "Source/DatasmithHISM/Public/ConVerseBatchHISMLibrary.h": "d1b3cbbbc1a6f93e8b273e3c9cfe610c8e9d7d58e45ca5cbe1ac8ebb19d9919b",
+    "Source/DatasmithHISM/Public/ConVerseHISMLibrary.h": "2a692fb11eaa89229a8149af2fde666389bcf8a6725b8edbf8abfe46b4c13a9b",
+    "Source/DatasmithHISM/Public/ConVerseImportRecipe.h": "4d478dd52f873c3e1b6459eb80c5a3205cb5bd31aebb032dab435169dcd4f28d",
+    "Source/DatasmithHISM/Public/ConVerseOptimizedImportManifest.h": "7ed31c98a7f8e4e869ea6fe894c9a0143cbfa1dfeca9d7eb4f644ad71b4930e6",
+    "Source/DatasmithHISM/Public/ConVersePowdercoatMaterialLibrary.h": "73faec44292a4912e8d59a37bbbc256685034a9032cdb80ea5a8b589fe9c56db",
+    "Source/DatasmithHISM/Public/ConVerseStaticMeshConsolidationLibrary.h": "a0c61c9604b82d77dc58d9b274caecb75785a16c8c1935a808d28280c90b62dc",
+    "Source/DatasmithHISM/Public/ConVerseStaticMeshConsolidationWidget.h": "c6c71e704360b97f89320741e4613c1277bc5ba197abe43eb7ee2b859188597e",
+    "Source/DatasmithHISM/Public/Dataprep/ConVerseAnalyzeHISMOperation.h": "3c76b14f22e016406913669a003f0abab725a9f1a23dd38eb3995e94dca18879",
+    "Source/DatasmithHISM/Public/Dataprep/ConVerseCategoryGroupHISMOperation.h": "51873f66e2bb5a915aa9f1459871c45dbb5fdf99d177ebb164a1248ec273d2d0",
+    "Source/DatasmithHISM/Public/Dataprep/ConVerseConsolidateSimilarMeshesOperation.h": "7363674f0f68d28e66bc6ef64ae214df0d8ffc87c41d4c08924660ae7db67099",
+    "Source/DatasmithHISM/Public/Dataprep/ConVerseCreateHISMOperation.h": "ff3ae241a96eda7be1358e466f9ffe77aa76d226a366a326a4eec077bf99eccb",
+    "Source/DatasmithHISM/Public/DatasmithHISM.h": "fdbaa827ebc8ee612b77f381104253de089772493475554ca1c381106a048268",
+    "Source/DatasmithHISM/Public/DatasmithHISMCommands.h": "12720555e4763f3dce3319aa7ffd75ea000d695f065c5367b0931c9518531a06",
+    "Source/DatasmithHISM/Public/DatasmithHISMStyle.h": "4609fc79fd7a884e7ff302b86b714e293f8037764a185fd3cd5a7e2f4148c99c",
+    "Source/DatasmithHISMRuntime/DatasmithHISMRuntime.Build.cs": "fac89bb0717427b62d67bb14f2869d304b329258fbb3d75b9a1138e13c863c9b",
+    "Source/DatasmithHISMRuntime/Private/ConVerseRuntimeValidation.cpp": "bb0b42d52af8b208d7813db093b969362652e054acafeb551bc521fe3448df6c",
+    "Source/DatasmithHISMRuntime/Private/ConVerseSourceMetadata.cpp": "8c44a9d339fb49d02685691e274e4eb106c712b0c43f7fb93b98c27c4336cb21",
+    "Source/DatasmithHISMRuntime/Public/ConVerseSourceMetadata.h": "f3b9f7081eefb02b6fa3c5dc3b2992f1c4da924c0c731cbbf6b60cc39ecfa7f1"
+  }
+}

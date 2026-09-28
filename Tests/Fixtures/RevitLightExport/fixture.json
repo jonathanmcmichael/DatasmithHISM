@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "source": "Snowdon_Towers_Sample_HVAC-3DView-{3D}.udatasmith",
+  "source_md5": "465bf366be809f0e9de0e530b8c6bf5a",
+  "light": "92094f736c42db158d9b8821a7e343a3",
+  "exported_intensity": "100.0",
+  "exported_units": "Unitless",
+  "status": "Exported evidence only. Authoritative Revit family photometrics and rendered calibration are still required.",
+  "coordinate_note": "Parents omitted. Do not use this extraction to establish discipline alignment.",
+  "revit": "2025",
+  "exporter_sdk": "5.3.0-24761556",
+  "revit_element_id": "2052881",
+  "ies_sha256": "b9f5e8e99b8aee70dca4e23a56df5d42035d4b095374a033bbdd84e56409c816"
+}

@@ -2,10 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "UObject/StrongObjectPtr.h"
+#include "Widgets/Views/SListView.h"
 
 #include "ConVerseDatasmithImportService.h"
 
 class SEditableTextBox;
+class SWindow;
 
 /**
  * Editor panel for analyzing and importing optimized Datasmith scenes.
@@ -22,11 +25,32 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SConVerseDatasmithImportPanel() override;
 
 private:
+	friend class FConVersePanelInputStateTest;
+	friend class FConVersePanelSessionRestoreTest;
+	friend class FConVersePanelMissingTexturesTest;
+	void ApplyInputOptions(const FConVerseOptimizedImportOptions& Options);
+	/** Asks whether to proceed without the result's missing textures; on Yes, records them as accepted. */
+	bool ConfirmMissingTextures(const FConVerseOptimizedImportResult& Result);
+	void SetTextureSearchFolders(const TArray<FString>& Folders);
+	void ApplySelectedSource(const FString& SelectedFile);
+	bool LoadPresetFromFile(const FString& FilePath);
+	FReply HandleReviewMaterials();
+	void CloseMaterialReview();
 	FReply HandleBrowseForSource();
 	FReply HandleAnalyze();
 	FReply HandleImportAndVerify();
+	FReply HandleRebuild();
+	FReply HandleSaveResult();
+	FReply HandleSavePreset();
+	FReply HandleLoadPreset();
+	void RefreshInspection();
+	TSharedRef<ITableRow> MakeInspectionRow(TSharedPtr<FConVerseImportInspectionRow> Row, const TSharedRef<STableViewBase>& Owner);
+	FReply FocusInspection();
+	FReply OpenInspectionMesh();
+	FReply SetInspectionException(bool bDisableNanite);
 
 	void HandleSourcePathChanged(const FText& NewText);
 	void HandleDestinationPathChanged(const FText& NewText);
@@ -85,7 +109,18 @@ private:
 		Failed
 	};
 
+	TArray<FConVerseImportInspectionRow> InspectionRows;
+	TArray<FConVerseAppearanceReviewRow> Appearances;
+	TArray<TSharedPtr<FConVerseImportInspectionRow>> FilteredRows;
+	TSharedPtr<SListView<TSharedPtr<FConVerseImportInspectionRow>>> InspectionList;
+	FString InspectionSearch;
+	TStrongObjectPtr<UConVerseImportRecipe> ProcessingRecipe;
+	TWeakPtr<SWindow> MaterialReviewWindow;
+	bool bApplyingInputs = false;
+	bool bForceRebuildNext = false;
+	FSoftObjectPath LastManifestPath;
 	TSharedPtr<SEditableTextBox> SourcePathTextBox;
+	TSharedPtr<SEditableTextBox> DestinationPathTextBox;
 	FString SourcePath;
 	FString DestinationPath = TEXT("/Game/DatasmithOptimized");
 	EConVerseOptimizedInstanceType InstanceType = EConVerseOptimizedInstanceType::ISM;
@@ -101,6 +136,10 @@ private:
 	/** Whether the most recent run found a translator that accepts tessellation options. */
 	bool bLastRunAppliedTessellation = false;
 	bool bHasRunSinceInputChange = false;
+	/** Missing textures the user chose to proceed without for the current source. Cleared when the source changes. */
+	TArray<FString> AcceptedMissingTextures;
+	/** Yes/No prompt seam; automation replaces the modal dialog. */
+	TFunction<bool(const FText&)> AskYesNo;
 	EPanelStatus PanelStatus = EPanelStatus::Idle;
 	FText StatusDetail;
 	FText ReportText;

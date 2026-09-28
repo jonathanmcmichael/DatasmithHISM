@@ -1,0 +1,46 @@
+<DatasmithUnrealScene>
+<Version>0.24</Version>
+<SDKVersion>5.6.1</SDKVersion>
+<Host>Revit</Host>
+<Application Vendor="Autodesk Inc." ProductName="Revit" ProductVersion="2027"/>
+<StaticMesh name="944b1f630c7e6f634621bcd04007fdf3" label="Structural_Framing_K-Series_Bar_Joist-Angle_Web_16K6">
+		<file path="Joist16K6_Assets/944b1f630c7e6f634621bcd04007fdf3.udsmesh"/>
+		<Size a="31412.832031" x="678.179993" y="7.3025" z="40.639999"/>
+		<LightmapCoordinateIndex value="-1"/>
+		<LightmapUV value="-1"/>
+		<Hash value="9cfacdcbd6bca61fb144affe39d59a36"/>
+		<Material id="0" name="f4dca6a6ce20ceb7b1c3bcdbac05b33b"/>
+	</StaticMesh>
+<MaterialInstance name="f4dca6a6ce20ceb7b1c3bcdbac05b33b"  label="Steel" Type="1" Quality="0" >
+		<KeyValueProperty name="IsPBR" type="Bool" val="True"/>
+		<KeyValueProperty name="IsMetal" type="Bool" val="True"/>
+		<KeyValueProperty name="DiffuseColor" type="Color" val="(R=0.063010,G=0.016807,B=0.015209,A=1.000000)"/>
+		<KeyValueProperty name="DiffuseMapFading" type="Float" val="0.000000"/>
+		<KeyValueProperty name="RoughnessMapEnable" type="Bool" val="False"/>
+		<KeyValueProperty name="Rougness" type="Float" val="0.264575"/>
+	</MaterialInstance>
+<ActorMesh name="65ed2f6f5f2fc1c2dbc8b9ec951c288e" label="Structural_Framing_K-Series_Bar_Joist-Angle_Web_16K6" layer="Structural Framing" mobility="Static">
+				<mesh name="944b1f630c7e6f634621bcd04007fdf3"/>
+				<material id="0" name="f4dca6a6ce20ceb7b1c3bcdbac05b33b"/>
+				<Transform tx="231.019347" ty="-924.559986" tz="217.169997" sx="1.0" sy="1.0" sz="1.0" qx="0.0" qy="0.0" qz="-0.707107" qw="0.707107" qhex64="00000000000000800000000000000000C73B7F669EA0E6BFD33B7F669EA0E63F"/>
+				<tag value="Revit.Element.Id.610662" />
+				<tag value="Revit.Element.UniqueId.e37453ab-55ac-464e-96ef-b2d748a679fc-00095166" />
+				<tag value="Revit.DB.FamilyInstance.Mirrored.False" />
+				<tag value="Revit.DB.FamilyInstance.HandFlipped.False" />
+				<tag value="Revit.DB.FamilyInstance.FaceFlipped.False" />
+				<tag value="Revit.Host.Id.610560" />
+				<tag value="Revit.Host.UniqueId.e37453ab-55ac-464e-96ef-b2d748a679fc-00095100" />
+			</ActorMesh>
+<ActorMesh name="2bdc6289359db94b15bf0efc24fc0635" label="Structural_Framing_K-Series_Bar_Joist-Angle_Web_16K6" layer="Structural Framing" mobility="Static">
+				<mesh name="944b1f630c7e6f634621bcd04007fdf3"/>
+				<material id="0" name="f4dca6a6ce20ceb7b1c3bcdbac05b33b"/>
+				<Transform tx="353.059995" ty="-924.559986" tz="210.819997" sx="1.0" sy="1.0" sz="1.0" qx="0.0" qy="0.0" qz="-0.707107" qw="0.707107" qhex64="00000000000000800000000000000000C73B7F669EA0E6BFD33B7F669EA0E63F"/>
+				<tag value="Revit.Element.Id.610663" />
+				<tag value="Revit.Element.UniqueId.e37453ab-55ac-464e-96ef-b2d748a679fc-00095167" />
+				<tag value="Revit.DB.FamilyInstance.Mirrored.False" />
+				<tag value="Revit.DB.FamilyInstance.HandFlipped.False" />
+				<tag value="Revit.DB.FamilyInstance.FaceFlipped.False" />
+				<tag value="Revit.Host.Id.610560" />
+				<tag value="Revit.Host.UniqueId.e37453ab-55ac-464e-96ef-b2d748a679fc-00095100" />
+			</ActorMesh>
+</DatasmithUnrealScene>

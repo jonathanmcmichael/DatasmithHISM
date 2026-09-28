@@ -1,236 +1,61 @@
-# DatasmithHISM Plugin
+# DatasmithHISM
 
-Unreal Engine 5 editor plugin for converting Datasmith-imported actor hierarchies into Instanced Static Mesh (ISM) components.
+Tracked Datasmith import and ISM/HISM optimization for **Unreal Engine 5.8.3**. Import runs in the editor; imported scenes and source metadata can be cooked into Windows applications.
 
-Reduces actor, component, and primitive overhead in AEC/BIM scenes while preserving grouping by family, mesh geometry, and materials. Nanite-compatible.
+**Status, 2026-09-27:** UE 5.8.3 editor build and **32/32 automation tests passed** after [live UI acceptance](Docs/Validation/2026-09-27-live-ui.md) found and fixed two defects. The fixes still need a live re-check. Earlier [preset-state and analysis-cancellation fixes](Docs/Validation/2026-09-27-preset-cancellation.md) retain their evidence. [Earlier Phase 2 evidence](Docs/Validation/2026-09-26-phase2.md) records named-copy refusal, partial saves and actual interruption/recovery. Earlier Windows cook and packaged checks remain separate. Release acceptance is incomplete; [the handoff](HANDOFF.md) identifies the live re-check and remaining UI rows as the next task.
 
-> **Name note:** The plugin is named `DatasmithHISM` for historical reasons. It defaults to plain `UInstancedStaticMeshComponent` (ISM) — not `UHierarchicalInstancedStaticMeshComponent` (HISM) — because HISM's per-cluster occlusion culling is redundant and harmful for Nanite meshes. HISM is available via `bUseHISM = true` or auto-detected per-mesh with `bAutoDetectFromNanite = true`. The `ConVerse` prefix on all C++ classes is a project namespace.
+## Start here
 
-## Optimized Datasmith import panel
+1. Open **Tools > Optimized Datasmith Import**.
+2. Choose a source readable by an enabled Datasmith translator and a `/Game/...` destination. Keep `.udatasmith` exports with their complete `_Assets` sidecars.
+3. Choose ISM or HISM, the minimum group size, and tessellation where the translator supports it. ISM and a minimum of two are the defaults.
+4. Review **Mesh, lighting, and material settings**. Nanite defaults to **All supported imported meshes**, including retained ordinary meshes. Material replacement is off until reviewed mappings are enabled.
+5. Run **Analyze** to inspect grouping, exclusions, lights, appearances, dependencies, and proposed rebuild changes. It creates no scene assets or actors.
+6. Run **Import and Verify**. A verified result is initially unsaved. Give its owning level a permanent name and use **Save imported result**.
 
-Open **Tools > Optimized Datasmith Import** in the Unreal Editor. The panel accepts a `.udatasmith` scene, builds a read-only optimization plan, lets you choose ISM or HISM output, imports the transformed in-memory scene, and verifies every planned group before reporting success.
+[Full workflow and commandlet options](Docs/IMPORT_WORKFLOW.md) cover exceptions, named presets, rebuilds, material review, and inspection.
 
-1. Keep the `.udatasmith` file beside its exported sidecar assets.
-2. Select the source file and a `/Game/...` destination folder.
-3. Choose **ISM** for the default Nanite-oriented path or **HISM** when hierarchical instance culling is required.
-4. Set the minimum number of matching actors per instance group. The default is 2.
-5. Run **Analyze** to inspect counts and skip reasons without creating actors or assets.
-6. Run **Import and Verify** to create a versioned import attempt, convert eligible groups, verify class, mesh, materials, settings, instance order, transforms, and coverage, then commit its ownership manifest.
+## Two workflows with different guarantees
 
-Reports are written under `Saved/DatasmithHISM/ImportReports`. A successful import stores source identity and instance alignment in asset user data, detaches the level actor from ordinary Datasmith synchronization, and marks owned assets so standard reimport is blocked. A second optimized import into the same destination is also blocked until optimizer-aware reimport is implemented.
+| | Tracked import, primary workflow | Legacy selection tools |
+|---|---|---|
+| Input | Source file and translator | Actors/assets already in the project |
+| Grouping | Exact source mesh reference, same parent, compatible source settings | Geometry signature, hierarchy boundary, effective materials and component descriptor |
+| Recovery | Attempt ownership, verification, rollback, guarded replacement | No tracked manifest or session rollback; editor transactions where supported |
+| Reimport | Stock reimport blocked; explicit optimizer-aware rebuild | No equivalent lifecycle guarantee |
+| Runtime identity | Per-source records for ordinary meshes, instances and lights | No equivalent tracked source-record contract |
 
-The first implementation groups exact Datasmith mesh references under the same immediate parent. It leaves actors with children, unresolved references, invalid transforms, mirrored transforms, and groups below the selected threshold as ordinary Datasmith actors. Real Revit export validation remains pending because this project does not contain a representative `.udatasmith` file and sidecar.
+The primary importer does not merge separate mesh assets because their family names, labels, or bounds resemble one another. Cross-asset deduplication remains deferred for tracked imports. Scene-component roots remain where they carry transforms or attachments. See [architecture](Docs/ARCHITECTURE.md) and [legacy tools](Docs/LEGACY_TOOLS.md).
 
-### Validation status
+## Import policies
 
-The UE 5.8.3 editor target builds successfully. The editor automation suite includes `DatasmithHISM.OptimizedImport.GeneratedFixtureEndToEnd`, which generates a temporary Datasmith fixture and exercises Analyze plus both ISM and HISM output without modifying its source `.udatasmith` or `.udsmesh` files. The test compiles, but running it in this environment is blocked before editor startup by the packaged editor launcher's optional-platform SDK validation. See [JOURNAL.md](JOURNAL.md) for the exact limitation and run it before validating with a representative Revit export and its `_Assets` folder.
+- **Nanite:** all supported imported meshes, converted ISM meshes only, or preserve imported settings. Exact source-mesh exceptions can retain ordinary actors or disable Nanite. Effective material checks precede compilation and verification.
+- **Lights:** warn at 100 enabled local lights by default. Report project MegaLights configuration and offer settings navigation without changing global rendering settings. Verify exported units/intensity/IES evidence; ambiguous Unitless data stays unresolved.
+- **Materials:** recognize appearances separately from approving Unreal replacements. Approval binds to exact appearance evidence and is reconsidered when it changes. External replacement materials are outside import rollback ownership.
+- **Rebuild:** detect tracked manual changes before replacement; require Replace with source or Cancel. Headless execution requires `-ReplaceManualEdits` to discard those changes.
+- **Identity:** output-changing options and approved mapping revisions participate in PlanId. Light advisories and sidecar-only changes do not silently trigger replacement. Use explicit rebuild for changed sidecars.
+- **Persistence:** verification and successful saving are separate. Incomplete saves and unfinished attempts remain diagnostic states; uncertain objects are not automatically deleted.
+- **Named-map copies:** Save As of an already-saved level changes actor GUIDs and is refused by the commandlet before import/copy. Continue with the owning map, or import independent output into a fresh map and destination. Native copies do not inherit manifest ownership from copied tags.
 
-## How it works
+The initial appearance inventory contains 245 observed variants, not verified coverage of Autodesk's default library. See [material catalog and approval](Docs/MATERIALS.md).
 
-### The problem
+## Known source findings
 
-Datasmith represents individually placed BIM elements as Unreal Actors. A building with 10,000 chairs produces thousands of Static Mesh Actors and components even when many of those objects share identical geometry. This creates substantial Actor, UObject, component, primitive, and scene-management overhead — and prevents Unreal's normal same-mesh batching and dynamic instancing from consolidating the geometry into instances.
+The sampled 16K6 joist for Revit elements 610662/610663 has no web diagonals in its original exported payload. Its 88 vertices / 160 triangles are preserved by all six ordinary/ISM/HISM and Nanite comparisons. The full structural/HVAC exports also have missing texture references.
 
-On top of actor proliferation, some Datasmith and IFC imports go further: geometrically identical elements arrive as **separate `UStaticMesh` assets** rather than shared ones. This happens across MEP pipe fittings, structural members, lighting fixtures, site furniture, and chairs — any category where the authoring tool emitted one asset per placed instance rather than one asset per unique type.
+All 1,033 lights in the supplied HVAC export explicitly declare Unitless intensity. Preserving those exported values is tested; matching physical Revit brightness requires authoritative source values and calibration. These findings are documented with fixtures and evidence in the [validation record](Docs/Validation/2026-09-26.md).
 
-Unreal's built-in Batch ISMs handles the first case partially — it can consolidate actors that already reference the **same asset**. It cannot help when identical geometry lives in separate assets, because it groups by mesh pointer equality, not by shape.
+## Install, build, and package
 
-### The solution
+Place this folder under a project's `Plugins/DatasmithHISM` directory. Build against the tested engine version with the editor closed. DatasmithImporter and DataprepEditor dependencies are declared by the plugin; additional source formats depend on enabled translators. Compatibility with other engine versions is not established by this baseline.
 
-Group by **geometry signature** instead of mesh pointer.
+- [Build and automation commands](Docs/VALIDATION.md)
+- [Runtime source lookup and Windows packaging](Docs/RUNTIME_AND_PACKAGING.md)
+- [Architecture decisions](Docs/ADR/README.md)
+- [Documentation index](Docs/README.md)
 
-The signature is an MD5 hash of the LOD0 triangle data covering vertex positions (centroid-relative, so position-independent), normals, UVs (all channels), and material slot names — sorted by triangle hash so the result is order-independent. Two mesh assets with identical rendered geometry produce the same hash regardless of asset name, path, or import order.
-
-**Grouping key** = `(FamilyTypeActor, GeometrySignature, MaterialSignature)`
-
-- Same shape + same materials → one ISM, N instances
-- Same shape + different effective materials → separate ISM groups. Current code does not apply source component material overrides to the new ISM; see [Info.md](Info.md).
-- Unique shape with no duplicates → source actor left in place; a 1-instance ISM has higher overhead than the source component. The current grouping pass can still create an empty managed actor.
-
-### What runs inside Managed ISMs
-
-**Phase 1 — Grouping** (one pass over all selected actors):
-
-For each actor, the plugin:
-1. Finds its single eligible `UStaticMeshComponent` (skips actors with zero or multiple)
-2. Walks the attach-parent chain to identify the **family wrapper** (nearest non-geometry ancestor — a Revit wrapper actor with no mesh of its own) and the **cleanup boundary** (the first non-geometry ancestor above the wrapper, or the immediate parent if there is no wrapper). The managed family label comes from the wrapper's name, or the mesh name if no wrapper exists.
-3. Clears prior managed outputs on that boundary before building new groups. Reimport and partial-selection behavior still need validation; see [the development plan](PLAN.md).
-4. Computes `GeometrySignature` (cached per mesh asset) and `MaterialSignature`
-5. Accumulates into a group map keyed by `(FamilyTypeActor, GeometrySignature, MaterialSignature)`
-
-**Phase 2 — Building** (one pass over the groups):
-
-For each group meeting the minimum instance threshold (default 2):
-1. Spawns or finds a managed family-type actor (tagged `ConVerseManagedFamilyType`) under the cleanup boundary
-2. Creates a `UInstancedStaticMeshComponent` or `UHierarchicalInstancedStaticMeshComponent` (depending on `bUseHISM` / `bAutoDetectFromNanite`) tagged `ConVerseManagedHISM`
-3. Uses the **canonical mesh** (alphabetically first asset path in the group — deterministic across reruns) as the ISM's mesh
-4. Adds one instance per source actor at its world transform
-5. Queues source actors and empty hierarchy shells for deletion
-
-The entire operation is wrapped in a single `FScopedTransaction` — one Ctrl+Z undoes everything.
-
-### The Revit family hierarchy
-
-Revit families have a two-level structure:
-
-```
-[Family wrapper actor]       ← no geometry; identifies the family type
-  └─ [Geometry actor]        ← has the UStaticMeshComponent
-  └─ [Geometry actor]
-  └─ ...
-```
-
-The plugin detects this by walking the attach-parent chain. Geometry actors at the bottom are grouped under a managed actor named after their wrapper. The **cleanup boundary** is the first non-geometry ancestor above that wrapper — the scope within which prior managed outputs are cleared on a rerun. Re-running after Datasmith reimport has not been validated yet.
-
-### What you end up with
-
-```
-[Cleanup boundary actor]
-  └─ [Managed family-type actor]  (tag: ConVerseManagedFamilyType)
-       ├─ ISM_ChairBase_001        (tag: ConVerseManagedHISM, 847 instances, black finish)
-       ├─ ISM_ChairBase_002        (tag: ConVerseManagedHISM, 312 instances, white finish)
-       └─ ISM_ChairArm_003         (tag: ConVerseManagedHISM, 1159 instances)
-```
-
-An import with 10,000 source actors and three compatible geometry/material groups could become three instanced components representing 10,000 transforms. This is an illustrative target, not a measured result for the Aeron import. For Nanite scenes the expected gain is reduced Actor, UObject, component, and primitive overhead; actual rendering and memory gains require profiling on the imported scene.
-
-ISM (not HISM) is the default because HISM's per-cluster culling adds overhead that Nanite already handles. Pass `bUseHISM = true` via the Blueprint API or Dataprep operation for non-Nanite meshes where hierarchical culling is beneficial.
-
-### What Dedupe Meshes does
-
-Dedupe Meshes is an optional pre-pass. It finds duplicate mesh assets by geometry signature, repoints references in the supplied objects to a canonical asset per group, then attempts to **permanently delete** the duplicates from the Content Browser. Review the current limitations below before using it.
-
-You don't need to run it before Managed ISMs — geometry-signature grouping handles separate-asset duplicates at conversion time. Dedupe Meshes is useful when you want a clean Content Browser, or when you want to reduce asset count before other operations.
-
-## Tools
-
-The Level Editor toolbar provides the following tools:
-
-### Dedupe Meshes
-
-Scans the selected actors for geometrically identical static mesh assets, repoints components in the supplied selection to a canonical mesh per group, then attempts to delete the duplicate assets.
-
-- Does not change actor layout or create instances
-- Uses a stable MD5 hash of LOD0 source geometry for comparison — position-independent (centroid-relative), order-independent (sorted triangle hashes). Falls back to LOD1 if LOD0 source data is absent.
-- Prompts for confirmation before permanently deleting assets
-- Current implementation repoints component references before that confirmation. Declining deletion does not restore them. Use dry-run or disposable content until Phase 1 of [the development plan](PLAN.md) is verified.
-- References outside the supplied selection are not repointed by this path. Avoid deleting assets used by other actors or maps until the Phase 1 reference-scope check is complete.
-
-### Managed ISMs
-
-Groups selected actors by family boundary, mesh geometry signature, and material set. Creates one `UInstancedStaticMeshComponent` per group under a managed family-type actor, then removes the converted source actors and any empty hierarchy shells.
-
-Key behaviors:
-- **Geometry-based grouping** — actors referencing separate mesh assets with identical geometry (same shape, same material slots, same UVs) are collapsed into one ISM. No pre-deduplication required.
-- **Material variants** — actors with the same geometry but different effective materials produce separate groups. The current build path does not copy component material overrides to its new ISM, so appearance needs verification before converting source actors.
-- **Grouping mode** — two modes via the `GroupingMode` parameter:
-  - `PreserveBIMHierarchy` (default) — groups within Revit/IFC family-type boundaries; different families never collapse even if geometry is identical. Preserves BIM organization.
-  - `MaximumOptimization` — ignores family identity; any actors under the same cleanup boundary with identical geometry and materials collapse into one ISM. Produces the smallest possible component count.
-- **Minimum instance threshold** — groups below the threshold (default 2, configurable) are left as plain static mesh actors. A small-count ISM has higher overhead than the source components.
-- **Family hierarchy** — Revit/IFC wrapper families are detected and respected. Multi-part families group under a managed actor named after the wrapper.
-- **Reruns** — existing managed ISM outputs on a boundary are cleared before rebuilding. Use a complete source selection; reimport and partial-selection behavior need validation.
-- **Undo** — the entire operation is wrapped in a single `FScopedTransaction`. Ctrl+Z restores all source actors and removes all created components in one step.
-- **Cancel** — the progress dialog cancel button stops the operation cleanly. Any ISMs built before cancellation are committed; Ctrl+Z undoes the partial result if unwanted. No orphaned empty actors are left behind.
-
-**Current workflow for IFC imports with duplicate mesh assets:** Select the intended source hierarchy, run **Analyze ISMs**, review its counts, then run **Managed ISMs** on a disposable copy of the level. Geometry-based grouping does not require the Dedupe pre-pass. Dedupe now skips and reports duplicate assets with loaded-component or on-disk package references outside the supplied context; validate the workflow on disposable content before using it in production.
-
-### Analyze ISMs
-
-Dry-run counterpart to Managed ISMs. Runs the grouping phase on the selection and reports how many ISM groups would be created, how many actors would be converted, and how many would be left in place — without making any changes to the level.
-
-Use this before running Managed ISMs to understand the expected reduction before committing.
-
-### Explode ISMs
-
-Reverse of Managed ISMs. Finds all `ConVerseManagedHISM`-tagged components in the selection and its descendant hierarchy. For each ISM component, spawns one `AActor` with a `UStaticMeshComponent` per instance at the stored world transform, copying the mesh and all material assignments. Destroys the ISM components and any now-empty managed family-type actors.
-
-The operation stages and validates every actor before it removes the source component. If any actor cannot be recreated, it destroys the staged actors and retains the source ISM/HISM component.
-
-The entire operation is wrapped in a single `FScopedTransaction` — one Ctrl+Z undoes everything.
-
-### Dedupe + ISMs
-
-One-click pipeline. Runs Dedupe Meshes then Managed ISMs in sequence on the selection. Dedupe prompts before it changes mesh references or deletes assets. Declining the prompt leaves the selection unchanged, and a declined or failed Dedupe operation stops the pipeline before Managed ISMs run.
-
-Before deletion, Dedupe audits loaded `UStaticMeshComponent` references and on-disk Asset Registry package referencers. It only replaces and deletes a duplicate when every detected reference is inside the supplied toolbar or Dataprep context; otherwise it skips and reports the duplicate. Manual editor validation of selected-only, external-reference, unloaded-package, and asset-only cases remains pending.
-
-### Enable Nanite
-
-Enables Nanite on all static mesh assets referenced by the current selection. Sets `NaniteSettings.bEnabled = true` on each asset and queues asynchronous rebuilds. Wrapped in a transaction.
-
-Use this to prepare non-Nanite Datasmith imports before running Managed ISMs, so the auto-ISM/HISM detection (`bAutoDetectFromNanite`) correctly selects ISM for all converted meshes.
-
-### Batch ISMs (Unreal)
-
-Runs Unreal's built-in `MergeComponentsToInstances` path on the selection using `UInstancedStaticMeshComponent`. Faster and simpler than Managed ISMs but not family-hierarchy-aware or geometry-signature-aware.
-
-## Dataprep Support
-
-Four operations are exposed as Dataprep actions:
-
-- `ConVerse Create ISM Operation` — runs Managed ISMs logic in a Dataprep pipeline (Prefix, bUseHISM, bAutoDetectFromNanite, MinInstanceCount, GroupingMode)
-- `ConVerse Analyze ISM Candidates` — dry-run counterpart; same parameters as Create ISM; logs a grouping report without making any changes; useful as a pipeline pre-flight step
-- `ConVerse Create ISMs By Category` — filters root actors by a case-insensitive label substring, then processes their subtrees
-- `ConVerse Consolidate Similar Meshes Operation` — runs Dedupe Meshes logic in a Dataprep pipeline (no confirmation dialog in Dataprep context)
-
-## Blueprint API
-
-All major operations are Blueprint-callable editor utilities:
-
-- `UConVerseHISMLibrary::CreateISMsFromSelection(Prefix, bUseHISM, MinInstanceCount, bAutoDetectFromNanite, GroupingMode)` — Managed ISMs (canonical)
-- `UConVerseHISMLibrary::AnalyzeISMCandidatesInSelection(Prefix, bUseHISM, MinInstanceCount, bAutoDetectFromNanite, GroupingMode)` — dry-run; same parameters; no changes
-- `UConVerseHISMLibrary::ExplodeISMsFromSelection` — reverse of Managed ISMs; spawns individual actors from ISM instances
-- `UConVerseHISMLibrary::EnableNaniteOnSelection` — enables Nanite on all mesh assets referenced by selection
-- `UConVerseHISMLibrary::MigrateTagsInCurrentLevel(OldTagName, NewTagName)` — level-wide tag replacement
-- `UConVerseHISMLibrary::CreateHISMsFromSelection` — **deprecated**; delegates to `CreateISMsFromSelection`
-- `UConVerseBatchHISMLibrary::BatchSelectionToHISMs` — Batch ISMs
-- `UConVerseStaticMeshConsolidationLibrary::ConsolidateSimilarStaticMeshes(Objects, bRequireMatchingMaterials, bDryRun)` — Dedupe Meshes; `bDryRun = true` reports what would happen without deleting
-- `UConVerseStaticMeshConsolidationWidget` — Editor Utility Widget base class; subclass in UMG to build custom UI around the Dedupe Meshes operation
-- `UConVersePowdercoatMaterialLibrary::CreatePowdercoatSubstrateMaterial` — procedurally creates a [Substrate](https://dev.epicgames.com/documentation/en-us/unreal-engine/substrate-materials-in-unreal-engine)-based powdercoat material asset with configurable color, orange-peel amount/scale, clearcoat, and thickness
-
-## Managed Output Tags
-
-Objects created by Managed ISMs are identified with component/actor tags:
-
-- `ConVerseManagedHISM` — on the ISM component (tag name preserved from original HISM release for backward compatibility with existing levels)
-- `ConVerseManagedFamilyType` — on the managed family-type actor
-
-Re-running on the same boundary detects these tags and replaces prior managed outputs before rebuilding.
-
-## Result Fields
-
-`FConVerseHISMCreationResult` (returned by Blueprint API and logged to Output Log):
-
-| Field | Description |
-|---|---|
-| `ActorsConsidered` | Total actors passed in |
-| `ISMComponentsCreated` | Number of ISM/HISM components created |
-| `ISMOnlyComponentsCreated` / `HISMOnlyComponentsCreated` | Count by actual component class |
-| `SourceActorsConverted` | Source actors folded into ISMs |
-| `ActorsInSingleActorGroups` | Actors left in place (below minimum instance threshold) |
-| `SkippedActors` | Actors with no or multiple eligible mesh components |
-| `FailedISMComponentCreations` | ISM creation failures |
-| `FailedSourceActorDeletes` | Source actor delete failures |
-| `bWasCancelled` | True if the user cancelled via the progress dialog |
-| `Summary` | Human-readable summary string |
-
-## Requirements
-
-- Unreal Engine 5.5+
-- Windows editor environment
-- Dataprep plugin enabled for Dataprep operations
-
-## Installation
-
-Copy the `DatasmithHISM` folder into your project's `Plugins/` directory and rebuild.
-
-## Notes
-
-- Editor-only plugin.
-- Each convertible source actor must represent exactly one mesh instance — actors with multiple eligible static mesh components are skipped by the Managed ISMs path.
-- **Dedupe Meshes permanently deletes duplicate mesh assets.** Run it on a saved level or with source control active. A confirmation dialog is shown before any deletion.
-- ISM is the default for Nanite compatibility. HISM is available via `bUseHISM = true` or auto-selected per mesh via `bAutoDetectFromNanite = true` (ISM for Nanite meshes, HISM for non-Nanite). HISM's per-cluster occlusion culling is redundant and harmful with Nanite but beneficial for large non-Nanite populations.
+The historical `DatasmithHISM` name and `ConVerse` C++ prefix remain for compatibility. ISM is the default; HISM remains an explicit supported choice. Performance depends on the scene and target and requires measurement.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The fixture/catalog evidence does not grant distribution rights to Autodesk library assets or a future material pack.

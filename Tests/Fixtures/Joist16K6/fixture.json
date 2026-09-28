@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "source_name": "Snowdon_Towers_Sample_Structural-3DView-{3D}.udatasmith",
+  "source_md5": "b39cb401399641a9b8d8a5adf6933d65",
+  "revit": "2027",
+  "exporter_sdk": "5.6.1",
+  "mesh": "944b1f630c7e6f634621bcd04007fdf3",
+  "mesh_md5": "09a89ee1bcb2b412de6f84d671be8f42",
+  "elements": [
+    "65ed2f6f5f2fc1c2dbc8b9ec951c288e",
+    "2bdc6289359db94b15bf0efc24fc0635"
+  ],
+  "revit_element_ids": [
+    "610662",
+    "610663"
+  ],
+  "expected": "Known incomplete export: payload has 88 vertices and 160 triangles, with no diagonal web members. Ordinary/ISM/HISM imports preserve the payload exactly with Nanite on and off.",
+  "coordinate_note": "Original actor transforms retained. Parents omitted; validate against full-scene world placement before using as alignment evidence.",
+  "geometry_obj_sha256": "fd92149136fce0483709bea955efd31eafc84af191c55ef16b4f718601669c72"
+}

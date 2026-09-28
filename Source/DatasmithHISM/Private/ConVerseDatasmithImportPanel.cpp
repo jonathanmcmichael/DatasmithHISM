@@ -1,11 +1,24 @@
 #include "ConVerseDatasmithImportPanel.h"
+#include "ConVerseMaterialReview.h"
+#include "ConVerseOptimizedImportManifest.h"
 
 #include "DatasmithTranslatorManager.h"
+#include "PropertyEditorModule.h"
+#include "IDetailsView.h"
+#include "ISettingsModule.h"
+#include "Editor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Widgets/Views/STableRow.h"
+#include "Widgets/Input/SSearchBox.h"
 #include "DesktopPlatformModule.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "IDesktopPlatform.h"
 #include "Misc/PackageName.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
@@ -21,6 +34,7 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "ConVerseDatasmithImportPanel"
@@ -115,6 +129,25 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 		"Analysis and verification results will appear here. Analyze reads and plans the source scene without creating assets or actors.");
 	StatusDetail = LOCTEXT("IdleStatus", "Select a Datasmith-supported source file to begin.");
 
+	ProcessingRecipe.Reset(NewObject<UConVerseImportRecipe>(GetTransientPackage()));
+	FConVerseOptimizedImportOptions SessionOptions;
+	FString SessionError;
+	if (FConVerseDatasmithImportService::LoadPreset(FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Presets/Session.json"), SessionOptions, SessionError))
+	{
+		SourcePath = SessionOptions.FilePath; DestinationPath = SessionOptions.DestinationPath;
+		InstanceType = SessionOptions.InstanceType; MinimumInstanceCount = SessionOptions.MinimumInstanceCount;
+		Tessellation = SessionOptions.Tessellation; ProcessingRecipe->Processing = SessionOptions.Processing;
+	}
+	SetTextureSearchFolders(SessionOptions.TextureSearchFolders);
+
+	FDetailsViewArgs DetailsArgs;
+	DetailsArgs.bAllowSearch = true;
+	DetailsArgs.bHideSelectionTip = true;
+	DetailsArgs.NameAreaSettings = FDetailsViewArgs::HideNameArea;
+	TSharedRef<IDetailsView> ProcessingDetails = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor")).CreateDetailView(DetailsArgs);
+	ProcessingDetails->SetObject(ProcessingRecipe.Get());
+	ProcessingDetails->OnFinishedChangingProperties().AddLambda([this](const FPropertyChangedEvent&) { MarkInputsChanged(); });
+
 	ChildSlot
 	[
 		SNew(SBorder)
@@ -164,6 +197,7 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
 				[
 					SAssignNew(SourcePathTextBox, SEditableTextBox)
+					.Text(FText::FromString(SourcePath))
 					.HintText(LOCTEXT("SourceFileHint", "Choose a Datasmith source file (.udatasmith, CAD, Revit, IFC)"))
 					.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
 					.OnTextChanged(this, &SConVerseDatasmithImportPanel::HandleSourcePathChanged)
@@ -195,7 +229,7 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 				.ColumnSpan(2)
 				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
 				[
-					SNew(SEditableTextBox)
+					SAssignNew(DestinationPathTextBox, SEditableTextBox)
 					.Text(FText::FromString(DestinationPath))
 					.HintText(LOCTEXT("DestinationHint", "/Game/DatasmithOptimized"))
 					.ToolTipText(LOCTEXT("DestinationTooltip", "Unreal long package path used for the imported Datasmith scene and assets."))
@@ -445,6 +479,23 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 				.AutoWrapText(true)
 			]
 
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(true)
+				.HeaderContent()[SNew(STextBlock).Text(LOCTEXT("Processing", "Mesh, lighting, and material settings"))]
+				.BodyContent()[SNew(SBox).MaxDesiredHeight(260.0f).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)[ProcessingDetails]]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("Rebuild", "Rebuild from source")).IsEnabled(this, &SConVerseDatasmithImportPanel::CanImportAndVerify).OnClicked(this, &SConVerseDatasmithImportPanel::HandleRebuild)]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("SaveResult", "Save imported result")).IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); }).OnClicked(this, &SConVerseDatasmithImportPanel::HandleSaveResult)]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("SavePreset", "Save project preset")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleSavePreset)]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("LoadPreset", "Load project preset")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleLoadPreset)]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("ReviewMaterials", "Review materials")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleReviewMaterials)]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("RenderingSettings", "Rendering settings")).OnClicked_Lambda([] { FModuleManager::LoadModuleChecked<ISettingsModule>(TEXT("Settings")).ShowViewer("Project", "Engine", "Rendering"); return FReply::Handled(); })]
+			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(0.0f, 8.0f)
@@ -499,6 +550,29 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
 			]
 
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SSearchBox).HintText(LOCTEXT("SearchSource", "Filter source element, mesh, label, or outcome"))
+				.OnTextChanged_Lambda([this](const FText& Text) { InspectionSearch = Text.ToString(); RefreshInspection(); })
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SBox).HeightOverride(180.0f)
+				[
+					SAssignNew(InspectionList, SListView<TSharedPtr<FConVerseImportInspectionRow>>)
+					.ListItemsSource(&FilteredRows).SelectionMode(ESelectionMode::Single)
+					.OnGenerateRow(this, &SConVerseDatasmithImportPanel::MakeInspectionRow)
+					.OnMouseButtonDoubleClick_Lambda([this](TSharedPtr<FConVerseImportInspectionRow>) { FocusInspection(); })
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("FocusSource", "Select and focus")).OnClicked(this, &SConVerseDatasmithImportPanel::FocusInspection)]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("OpenMesh", "Open mesh")).OnClicked(this, &SConVerseDatasmithImportPanel::OpenInspectionMesh)]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("KeepOrdinary", "Keep mesh ordinary")).OnClicked_Lambda([this] { return SetInspectionException(false); })]
+				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("DisableMeshNanite", "Disable mesh Nanite")).OnClicked_Lambda([this] { return SetInspectionException(true); })]
+			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
@@ -515,6 +589,13 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 			]
 		]
 	];
+	const auto Interrupted = FConVerseDatasmithImportService::FindInterruptedAttempts();
+	if (!Interrupted.IsEmpty()) ReportText = FText::FromString(FString::Join(Interrupted, TEXT("\n")));
+
+	// Restored inputs drive Analyze/Import, so the status must describe them rather than an empty panel.
+	MarkInputsChanged();
+	if (PanelStatus == EPanelStatus::Ready)
+		StatusDetail = LOCTEXT("RestoredStatus", "Restored the last executed settings. Run Analyze to inspect the current plan.");
 }
 
 FReply SConVerseDatasmithImportPanel::HandleBrowseForSource()
@@ -545,15 +626,7 @@ FReply SConVerseDatasmithImportPanel::HandleBrowseForSource()
 
 	if (bSelected && !SelectedFiles.IsEmpty())
 	{
-		const FString NewPath = FPaths::ConvertRelativePathToFull(SelectedFiles[0]);
-		if (NewPath != SourcePath)
-		{
-			bHasRunSinceInputChange = false;
-			bLastRunAppliedTessellation = false;
-		}
-		SourcePath = NewPath;
-		SourcePathTextBox->SetText(FText::FromString(SourcePath));
-		MarkInputsChanged();
+		ApplySelectedSource(SelectedFiles[0]);
 	}
 
 	return FReply::Handled();
@@ -570,10 +643,46 @@ FReply SConVerseDatasmithImportPanel::HandleAnalyze()
 	PanelStatus = EPanelStatus::Working;
 	StatusDetail = LOCTEXT("AnalyzingStatus", "Analyzing the Datasmith scene...");
 
-	const FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::Analyze(MakeOptions());
+	FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::Analyze(MakeOptions());
+	if (ConfirmMissingTextures(Result)) Result = FConVerseDatasmithImportService::Analyze(MakeOptions());
 	SetResult(Result, false);
 	bOperationInProgress = false;
 	return FReply::Handled();
+}
+
+void SConVerseDatasmithImportPanel::SetTextureSearchFolders(const TArray<FString>& Folders)
+{
+	ProcessingRecipe->TextureSearchFolders.Reset();
+	for (const FString& Folder : Folders)
+	{
+		FDirectoryPath& Path = ProcessingRecipe->TextureSearchFolders.AddDefaulted_GetRef();
+		Path.Path = Folder;
+	}
+}
+
+bool SConVerseDatasmithImportPanel::ConfirmMissingTextures(const FConVerseOptimizedImportResult& Result)
+{
+	// Only textures can be waived. Missing geometry still fails closed without a prompt.
+	if (Result.Status != EConVerseOptimizedImportStatus::SourceLoadFailed || Result.MissingTextures.IsEmpty() || !Result.MissingMeshFiles.IsEmpty())
+		return false;
+	constexpr int32 MaxListed = 20;
+	TArray<FString> Listed(Result.MissingTextures.GetData(), FMath::Min(Result.MissingTextures.Num(), MaxListed));
+	FString List = FString::Join(Listed, TEXT("\n"));
+	if (Result.MissingTextures.Num() > MaxListed)
+		List += FString::Printf(TEXT("\n...and %d more."), Result.MissingTextures.Num() - MaxListed);
+	const FText Prompt = FText::Format(
+		LOCTEXT("MissingTexturesPrompt",
+			"{0} texture file(s) referenced by this source are missing:\n\n{1}\n\n"
+			"Proceed without them? Affected materials will import without these images, and the report will list each one. "
+			"Choose No to stop and fix the export."),
+		FText::AsNumber(Result.MissingTextures.Num()),
+		FText::FromString(List));
+	const bool bYes = AskYesNo
+		? AskYesNo(Prompt)
+		: FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Prompt, LOCTEXT("MissingTexturesTitle", "Missing Textures")) == EAppReturnType::Yes;
+	if (!bYes) return false;
+	AcceptedMissingTextures = Result.MissingTextures;
+	return true;
 }
 
 FReply SConVerseDatasmithImportPanel::HandleImportAndVerify()
@@ -587,30 +696,140 @@ FReply SConVerseDatasmithImportPanel::HandleImportAndVerify()
 	PanelStatus = EPanelStatus::Working;
 	StatusDetail = LOCTEXT("ImportingStatus", "Importing the optimized scene and verifying the result...");
 
-	const FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::ImportAndVerify(MakeOptions());
+	// Ask the service to park a failed verification rather than roll it back, so the user gets to
+	// decide. The decision is resolved below without returning to the message loop: a parked attempt
+	// owns real assets and actors, so it must never outlive this handler.
+	FConVerseOptimizedImportOptions Options = MakeOptions();
+	Options.bDeferRollbackOnVerificationFailure = true;
+
+	FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	if (ConfirmMissingTextures(Result))
+	{
+		Options.AcceptedMissingTextures = AcceptedMissingTextures;
+		Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	}
+	if (Result.Status == EConVerseOptimizedImportStatus::ManualEditsDetected)
+	{
+		SetResult(Result, true);
+		const FText Prompt = FText::FromString(Result.Summary + TEXT("\n\n") + FString::Join(Result.Diagnostics, TEXT("\n"))
+			+ TEXT("\n\nReplace these tracked edits with the current source? Choose No to cancel."));
+		if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Prompt) == EAppReturnType::Yes)
+		{
+			Options.bReplaceManualEdits = true;
+			Options.bRebuildFromSource = true;
+			Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+		}
+	}
+	if (Result.Status == EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision)
+	{
+		const FText Prompt = FText::Format(
+			LOCTEXT("AcceptFailedVerificationPrompt",
+				"Verification failed for this import.\n\n{0} of {1} groups verified.\n{2}\n\n"
+				"Keeping this result means the imported geometry was NOT confirmed to match the source. "
+				"It will be committed but marked degraded, and optimized reimport will be refused "
+				"against it until you remove it manually.\n\n"
+				"Keep the result anyway?"),
+			FText::AsNumber(Result.VerifiedGroupCount),
+			FText::AsNumber(Result.PlannedGroupCount),
+			FText::FromString(Result.Summary));
+
+		const EAppReturnType::Type Choice = FMessageDialog::Open(
+			EAppMsgType::YesNo,
+			EAppReturnType::No,
+			Prompt,
+			LOCTEXT("AcceptFailedVerificationTitle", "Verification Failed"));
+
+		Result = Choice == EAppReturnType::Yes
+			? FConVerseDatasmithImportService::AcceptFailedVerification(Result.SessionId)
+			: FConVerseDatasmithImportService::DiscardFailedVerification(Result.SessionId);
+	}
+
 	SetResult(Result, true);
 	bOperationInProgress = false;
 	return FReply::Handled();
 }
 
-void SConVerseDatasmithImportPanel::HandleSourcePathChanged(const FText& NewText)
+SConVerseDatasmithImportPanel::~SConVerseDatasmithImportPanel()
 {
-	const FString NewPath = NewText.ToString().TrimStartAndEnd();
-	if (NewPath != SourcePath)
+	CloseMaterialReview();
+}
+
+void SConVerseDatasmithImportPanel::CloseMaterialReview()
+{
+	if (const TSharedPtr<SWindow> Window = MaterialReviewWindow.Pin())
 	{
-		// Whether tessellation applies is a property of the source format, so a new source
-		// invalidates the previous answer. Changing tessellation values alone does not.
+		// Destruction is deferred by Slate; disable stale approvals immediately.
+		Window->SetEnabled(false);
+		if (FSlateApplication::IsInitialized()) Window->RequestDestroyWindow();
+	}
+	MaterialReviewWindow.Reset();
+}
+
+FReply SConVerseDatasmithImportPanel::HandleReviewMaterials()
+{
+	if (bOperationInProgress) return FReply::Handled();
+	if (const TSharedPtr<SWindow> Window = MaterialReviewWindow.Pin()) Window->BringToFront();
+	else MaterialReviewWindow = ConVerseMaterialReview::Open(ProcessingRecipe.Get(), Appearances,
+		FSimpleDelegate::CreateSP(this, &SConVerseDatasmithImportPanel::MarkInputsChanged));
+	return FReply::Handled();
+}
+
+void SConVerseDatasmithImportPanel::ApplyInputOptions(const FConVerseOptimizedImportOptions& Options)
+{
+	if (bApplyingInputs || bOperationInProgress) return;
+	TGuardValue<bool> Applying(bApplyingInputs, true);
+	const FString NewSource = Options.FilePath.TrimStartAndEnd();
+	const FString NewDestination = Options.DestinationPath.TrimStartAndEnd();
+	const bool bSourceChanged = NewSource != SourcePath;
+	if (bSourceChanged || NewDestination != DestinationPath)
+	{
+		CloseMaterialReview();
+		InspectionRows.Reset();
+		Appearances.Reset();
+		LastManifestPath.Reset();
+		if (InspectionList) InspectionList->ClearSelection();
+		RefreshInspection();
+		ReportText = LOCTEXT("ResultCleared", "Source or destination changed. Run Analyze to inspect the current source.");
+	}
+	if (bSourceChanged)
+	{
 		bHasRunSinceInputChange = false;
 		bLastRunAppliedTessellation = false;
+		AcceptedMissingTextures.Reset();
 	}
-	SourcePath = NewPath;
+	SourcePath = NewSource;
+	DestinationPath = NewDestination;
+	InstanceType = Options.InstanceType;
+	MinimumInstanceCount = Options.MinimumInstanceCount;
+	Tessellation = Options.Tessellation;
+	ProcessingRecipe->Processing = Options.Processing;
+	SetTextureSearchFolders(Options.TextureSearchFolders);
+	SourcePathTextBox->SetText(FText::FromString(SourcePath));
+	DestinationPathTextBox->SetText(FText::FromString(DestinationPath));
 	MarkInputsChanged();
+}
+
+void SConVerseDatasmithImportPanel::ApplySelectedSource(const FString& SelectedFile)
+{
+	FConVerseOptimizedImportOptions Options = MakeOptions();
+	Options.FilePath = FPaths::ConvertRelativePathToFull(SelectedFile);
+	ApplyInputOptions(Options);
+}
+
+void SConVerseDatasmithImportPanel::HandleSourcePathChanged(const FText& NewText)
+{
+	if (bApplyingInputs) return;
+	FConVerseOptimizedImportOptions Options = MakeOptions();
+	Options.FilePath = NewText.ToString();
+	ApplyInputOptions(Options);
 }
 
 void SConVerseDatasmithImportPanel::HandleDestinationPathChanged(const FText& NewText)
 {
-	DestinationPath = NewText.ToString().TrimStartAndEnd();
-	MarkInputsChanged();
+	if (bApplyingInputs) return;
+	FConVerseOptimizedImportOptions Options = MakeOptions();
+	Options.DestinationPath = NewText.ToString();
+	ApplyInputOptions(Options);
 }
 
 void SConVerseDatasmithImportPanel::HandleMinimumInstancesChanged(int32 NewValue)
@@ -845,6 +1064,12 @@ FConVerseOptimizedImportOptions SConVerseDatasmithImportPanel::MakeOptions() con
 	Options.InstanceType = InstanceType;
 	Options.MinimumInstanceCount = MinimumInstanceCount;
 	Options.Tessellation = Tessellation;
+	Options.Processing = ProcessingRecipe->Processing;
+	Options.AcceptedMissingTextures = AcceptedMissingTextures;
+	Options.TextureSearchFolders.Reset();
+	for (const FDirectoryPath& Folder : ProcessingRecipe->TextureSearchFolders)
+		if (!Folder.Path.TrimStartAndEnd().IsEmpty()) Options.TextureSearchFolders.Add(Folder.Path.TrimStartAndEnd());
+	Options.bRebuildFromSource = bForceRebuildNext;
 	return Options;
 }
 
@@ -957,6 +1182,13 @@ FText SConVerseDatasmithImportPanel::GetTessellationSummaryText() const
 
 void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResult& Result, bool bWasImport)
 {
+	CloseMaterialReview();
+	FString SessionError;
+	FConVerseDatasmithImportService::SavePreset(FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Presets/Session.json"), MakeOptions(), SessionError);
+	if (Result.ManifestAssetPath.IsValid()) LastManifestPath = Result.ManifestAssetPath;
+	InspectionRows = Result.InspectionRows;
+	Appearances = Result.Appearances;
+	RefreshInspection();
 	ReportText = FText::FromString(Result.Report);
 	RefreshActiveImportProbe();
 
@@ -970,7 +1202,13 @@ void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResu
 
 	if (!bWasImport)
 	{
-		if (Result.bSourceLoaded)
+		if (Result.Status == EConVerseOptimizedImportStatus::CancelledRolledBack)
+		{
+			PanelStatus = EPanelStatus::Cancelled;
+			StatusDetail = FText::FromString(Result.Summary);
+			return;
+		}
+		if (Result.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded || Result.Status == EConVerseOptimizedImportStatus::AnalysisNoEligibleGroups)
 		{
 			PanelStatus = EPanelStatus::Analyzed;
 			StatusDetail = FText::Format(
@@ -1042,17 +1280,31 @@ void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResu
 		return;
 	}
 
+	if (Result.Status == EConVerseOptimizedImportStatus::AcceptedWithFailedVerification)
+	{
+		// Distinct from the rolled-back failure below: here the output was KEPT. The wording must
+		// not let this read as a clean import, because the geometry was never confirmed.
+		PanelStatus = EPanelStatus::ImportedWithFailures;
+		StatusDetail = FText::Format(
+			LOCTEXT("AcceptedWithFailedVerification",
+				"Kept despite failed verification: {0} of {1} optimized groups passed. "
+				"This session is degraded and optimized reimport will be refused against it."),
+			FText::AsNumber(Result.VerifiedGroupCount),
+			FText::AsNumber(Result.PlannedGroupCount));
+		return;
+	}
+
 	if (Result.bVerificationSucceeded)
 	{
 		PanelStatus = EPanelStatus::Verified;
 		StatusDetail = Result.bWasReimport
 			? FText::Format(
-				LOCTEXT("ReimportComplete", "Optimized reimport verified: {0} of {1} optimized groups passed. {2} prior-session actors were removed."),
+				LOCTEXT("ReimportComplete", "Rebuild verified, unsaved: {0} of {1} optimized groups passed. {2} prior-session actors were removed."),
 				FText::AsNumber(Result.VerifiedGroupCount),
 				FText::AsNumber(Result.PlannedGroupCount),
 				FText::AsNumber(Result.RemovedPreviousActorCount))
 			: FText::Format(
-				LOCTEXT("VerificationComplete", "Import verified: {0} of {1} optimized groups passed."),
+				LOCTEXT("VerificationComplete", "Verified, unsaved: {0} of {1} optimized groups passed. Ordinary meshes and lights are listed in the report."),
 				FText::AsNumber(Result.VerifiedGroupCount),
 				FText::AsNumber(Result.PlannedGroupCount));
 	}
@@ -1069,6 +1321,126 @@ void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResu
 		PanelStatus = EPanelStatus::Failed;
 		StatusDetail = LOCTEXT("ImportFailed", "Import failed or was cancelled. See the report and Output Log for details.");
 	}
+}
+
+FReply SConVerseDatasmithImportPanel::HandleRebuild()
+{
+	TGuardValue<bool> Rebuild(bForceRebuildNext, true);
+	return HandleImportAndVerify();
+}
+
+FReply SConVerseDatasmithImportPanel::HandleSaveResult()
+{
+	FString Message;
+	bool bVerified = false;
+	const bool bSaved = FConVerseDatasmithImportService::SaveImportedResult(LastManifestPath, Message, &bVerified);
+	StatusDetail = FText::FromString(Message);
+	PanelStatus = !bSaved ? EPanelStatus::Failed : (bVerified ? EPanelStatus::Verified : EPanelStatus::ImportedWithFailures);
+	return FReply::Handled();
+}
+
+FReply SConVerseDatasmithImportPanel::HandleSavePreset()
+{
+	FString Error;
+	TArray<FString> Files;
+	IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+	if (!Desktop || !Desktop->SaveFileDialog(FSlateApplication::Get().FindBestParentWindowHandleForDialogs(AsShared()), TEXT("Save import preset"),
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Presets")), TEXT("Project.json"), TEXT("Import presets (*.json)|*.json"), EFileDialogFlags::None, Files) || Files.IsEmpty()) return FReply::Handled();
+	const bool bSaved = FConVerseDatasmithImportService::SavePreset(Files[0], MakeOptions(), Error);
+	StatusDetail = FText::FromString(bSaved ? TEXT("Project import preset saved.") : Error);
+	return FReply::Handled();
+}
+
+FReply SConVerseDatasmithImportPanel::HandleLoadPreset()
+{
+	TArray<FString> Files;
+	IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+	if (!Desktop || !Desktop->OpenFileDialog(FSlateApplication::Get().FindBestParentWindowHandleForDialogs(AsShared()), TEXT("Load import preset"),
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Presets")), TEXT(""), TEXT("Import presets (*.json)|*.json"), EFileDialogFlags::None, Files) || Files.IsEmpty()) return FReply::Handled();
+	LoadPresetFromFile(Files[0]);
+	return FReply::Handled();
+}
+
+bool SConVerseDatasmithImportPanel::LoadPresetFromFile(const FString& FilePath)
+{
+	if (bOperationInProgress) return false;
+	FConVerseOptimizedImportOptions Options;
+	FString Error;
+	if (!FConVerseDatasmithImportService::LoadPreset(FilePath, Options, Error))
+	{
+		StatusDetail = FText::FromString(Error);
+		return false;
+	}
+	ApplyInputOptions(Options);
+	StatusDetail = LOCTEXT("PresetLoaded", "Project import preset loaded. Run Analyze to inspect these settings.");
+	return true;
+}
+
+
+void SConVerseDatasmithImportPanel::RefreshInspection()
+{
+	FilteredRows.Reset();
+	for (const auto& Row : InspectionRows)
+	{
+		if (InspectionSearch.IsEmpty() || (Row.SourceElement + TEXT(" ") + Row.SourceIdentity + TEXT(" ") + Row.Label + TEXT(" ") + Row.MeshElement + TEXT(" ") + Row.Outcome).Contains(InspectionSearch))
+			FilteredRows.Add(MakeShared<FConVerseImportInspectionRow>(Row));
+	}
+	if (InspectionList) InspectionList->RequestListRefresh();
+}
+
+TSharedRef<ITableRow> SConVerseDatasmithImportPanel::MakeInspectionRow(TSharedPtr<FConVerseImportInspectionRow> Row, const TSharedRef<STableViewBase>& Owner)
+{
+	return SNew(STableRow<TSharedPtr<FConVerseImportInspectionRow>>, Owner)
+	[
+		SNew(STextBlock).Text(FText::FromString(Row->Label + TEXT(" | ") + Row->Outcome + TEXT(" | ") + (Row->SourceIdentity.IsEmpty() ? Row->SourceElement : Row->SourceIdentity)))
+		.ToolTipText(FText::FromString(TEXT("Source: ") + Row->SourceElement + TEXT("\nMesh: ") + Row->MeshElement + TEXT("\nOutput: ") + Row->ComponentPath.ToString()))
+	];
+}
+
+FReply SConVerseDatasmithImportPanel::FocusInspection()
+{
+	const auto Selected = InspectionList->GetSelectedItems();
+	if (Selected.Num() == 1)
+	{
+		if (auto* Component = Cast<USceneComponent>(Selected[0]->ComponentPath.ResolveObject()))
+		{
+			GEditor->SelectNone(false, true);
+			GEditor->SelectActor(Component->GetOwner(), true, true);
+			if (auto* Instances = Cast<UInstancedStaticMeshComponent>(Component); Instances && Selected[0]->InstanceIndex >= 0 && Instances->GetStaticMesh())
+			{
+				FTransform Transform;
+				if (Instances->GetInstanceTransform(Selected[0]->InstanceIndex, Transform, true))
+				{
+					Instances->SelectInstance(true, Selected[0]->InstanceIndex);
+					GEditor->MoveViewportCamerasToBox(Instances->GetStaticMesh()->GetBoundingBox().TransformBy(Transform), false);
+				}
+			}
+			else GEditor->MoveViewportCamerasToActor(*Component->GetOwner(), false);
+		}
+	}
+	return FReply::Handled();
+}
+
+FReply SConVerseDatasmithImportPanel::OpenInspectionMesh()
+{
+	const auto Selected = InspectionList->GetSelectedItems();
+	if (Selected.Num() == 1)
+		if (auto* Component = Cast<UStaticMeshComponent>(Selected[0]->ComponentPath.ResolveObject()))
+			if (Component->GetStaticMesh()) GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Component->GetStaticMesh());
+	return FReply::Handled();
+}
+
+FReply SConVerseDatasmithImportPanel::SetInspectionException(bool bDisableNanite)
+{
+	const auto Selected = InspectionList->GetSelectedItems();
+	if (Selected.Num() == 1 && !Selected[0]->MeshElement.IsEmpty() && !bOperationInProgress)
+	{
+		auto& Names = bDisableNanite ? ProcessingRecipe->Processing.DisableNaniteMeshElements : ProcessingRecipe->Processing.KeepOrdinaryMeshElements;
+		Names.AddUnique(Selected[0]->MeshElement);
+		MarkInputsChanged();
+		StatusDetail = LOCTEXT("ExceptionAdded", "Mesh exception added. Analyze to review, then rebuild to apply. Save the project preset to retain this choice.");
+	}
+	return FReply::Handled();
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -1,6 +1,29 @@
 # Optimized Datasmith Import Contract and Validation Matrix
 
-Status: Phase 1 contract, version 1, frozen for the first implementation pass on 2026-09-22.
+Status: original contract frozen 2026-09-22, extended by accepted Amendments 1-8. Current implementation uses contract/manifest schema **2**, tracked-state version **1**, and source-inventory version **1**. Reconciled 2026-09-26; clarified 2026-09-27 for shared panel invalidation, cooperative analysis checkpoints, and first naming of an untitled level after engine path redirection. These fixes preserve the existing guarantees and schema versions.
+
+Numbered amendments take precedence over original version-1 wording in their scope. The original scenario matrix remains required behavior, not a statement that every scenario has passed. Current evidence and open gates are recorded in [the execution ledger](ROADMAP_EXECUTION.md) and [validation procedure](Docs/VALIDATION.md). [ADRs](Docs/ADR/README.md) explain the accepted decisions.
+
+Two historical headings share the number **Amendment 4**: tessellation options and the import log. Both apply; their descriptive names distinguish them without changing historical references.
+
+> **Amendment 7 - rendering roadmap (2026-09-26, implemented with release acceptance still open).** New manifests use schema 2. The accepted consolidated roadmap is tracked in `ROADMAP_EXECUTION.md`. The changes below extend the contract; completion requires the recorded build, automation, visual, and packaged acceptance gates.
+>
+> - Analyze shows cancellable source/sidecar/loading/planning/report stages and never returns a partial successful plan. Hashing streams source bytes, without the old 4 GB allocation/size boundary. Blocking translator calls are cancelled at their next safe return. Cooperative checkpoints also cover actor/light traversal, materials, streamed texture fingerprints and dependencies. The same pre-mutation helpers are used by import; cancellation clears partial plan and inspection/review data. Transient progress observers do not affect plan identity or persistence.
+> - Tracked imports may contain zero optimized groups when ordinary geometry or lights remain. These still require ownership, verification, recovery, and reimport protection.
+> - Nanite is an independent policy: all supported owned meshes by default, converted ISM meshes only, or preserve imported settings. Exact mesh-element exceptions can retain ordinary actors or disable Nanite. Effective incompatible materials prevent Nanite; build failure prevents verification.
+> - Approved material replacement is exact source-appearance matching, applied before Nanite and verified against the applied assignments. Unapproved/custom/ambiguous appearances remain imported. External replacement assets never become rollback-owned.
+> - Settings and approved mapping revisions that affect output participate in plan identity. Advisory thresholds do not. Sidecar changes remain warn-only.
+> - Explicit rebuild bypasses only the AlreadyCurrent shortcut. A changed tracked baseline or an older manifest without that baseline requires explicit replacement authorization before mutation. Headless runs require the corresponding explicit option. Quarantined and unknown-future manifests remain blocked.
+> - Actor/component/mesh/material state is recorded for later drift detection; older manifests cannot claim these new checks. Generated material-parameter expression GUIDs are excluded from canonical state, while actual parameter values remain tracked. Source material and photometric evidence must remain distinguishable from observed output state.
+> - Source inventory version 1 records per-material decisions and source light descriptions for before-and-after rebuild previews. Older inventories explicitly report unknown comparison coverage; opening the project never upgrades them automatically.
+> - Verification and disk persistence are separate states. Saving an active result is explicit and reports partial failures. Save-as rebinding requires the old world to be unresolved, matching actor GUIDs/component paths, and proven session ownership in the current world. Saving edited output does not silently establish a new verified baseline. Ambiguous active session ownership blocks replacement.
+>   UE 5.8 Save As of an already-saved level duplicates actor identities. The commandlet refuses that copy before import or copying, and explicit save of a native copy refuses rebinding when GUID/session proof fails. Diagnostics name the original owning map. Initial naming of an unsaved world keeps the guarded rebinding path; no ownership migration is inferred from copied tags.
+>   *Clarified 2026-09-27 after live UI acceptance:* when the editor saves the manifest together with the newly named level, UE's asset-path redirection already rewrites the manifest's soft paths, so the old world no longer appears unresolved. Tracked-state text recorded under the former `/Temp/` world is then compared and persisted as the manifest's current world only when the recorded session owner resolves in that world with the recorded actor GUID and session tag. Without that proof the difference remains tracked drift. Placement, settings and all other state are still compared unchanged.
+> - Interrupted-attempt recovery is diagnostic and never assumes that unproven objects may be deleted. Runtime source metadata lives in a separate cookable module; import orchestration, manifests, and rollback services remain editor-only.
+
+> **Amendment 8 - texture search folders and user-accepted missing textures (2026-09-27).** Before dependency validation, a texture missing beside the source is looked up by file name (case-insensitive) in ordered texture search folders: first folder wins, then sorted path order. The default is Autodesk's shared material library tiers `Autodesk Shared/Materials/Textures/1/Mats`, `2/Mats` and `3/Mats` under Common Program Files; tier 1 matches what Revit exports. It is editable in the panel, saved in presets, and set headless with `-TextureSearchFolders`. A match repoints only the in-memory Datasmith texture element (file and MD5); source, sidecar and library files are never copied or modified. Each resolution is reported and participates in plan identity. The folder list itself does not, so plans that resolve nothing keep their identity.
+>
+> A referenced dependency file still absent from disk still stops Analyze and Import before mutation with `SourceLoadFailed`, and the result lists missing textures and missing mesh files separately. Missing **textures** may be waived only by an explicit decision: the panel shows a Yes/No prompt listing them, and on Yes repeats the operation accepting exactly those entries; the headless commandlet requires `-AllowMissingTextures`. A texture that was not accepted, or any missing **mesh** file, still fails. Accepted textures are listed in the report as "Proceeding without missing texture". Acceptance is held per panel source, cleared when the source changes, and not saved to presets or the session. It does not enter plan identity; a texture restored later changes the sidecar fingerprint and warns under Amendment 5. Ownership, verification, rollback and reimport guarantees are unchanged.
 
 > **Amendment 1 - source formats.** The scope is widened from `.udatasmith` only to every format the enabled Datasmith translators accept, including CAD, Revit, and IFC. Rationale: `LoadFreshSource` already resolves sources through `IExternalSourceModule::GetOrCreateExternalSource`, and the import already runs through `UDatasmithImportFactory::CreateFromExternalSource`, so both paths were format-agnostic from the start; the `.udatasmith` restriction was an artificial validation gate rather than an architectural limit. Translator resolution is now the authoritative format check. This widens capability without weakening any verification, rollback, or ownership guarantee. Sections below that name `.udatasmith` should be read as "the source file" unless they specifically concern the Datasmith exporter format.
 
@@ -40,7 +63,7 @@ Relevant installed source:
 
 ## Immutable option snapshot
 
-`FConVerseOptimizedImportOptions` remains a value type with these fields:
+`FConVerseOptimizedImportOptions` remains a value type. The original core fields are listed below; Amendments 4 and 7 add tessellation, mesh/light/material processing, exact exceptions, and explicit rebuild/replacement behavior. See the [current options declaration](Source/DatasmithHISM/Private/ConVerseDatasmithImportService.h) and [workflow](Docs/IMPORT_WORKFLOW.md) for the complete surface.
 
 | Field | Type | Rule |
 |---|---|---|
@@ -61,7 +84,7 @@ The following values are fixed policy in contract version 1 and are not UI optio
 - full source metadata capture for converted instances;
 - ordinary Datasmith reimport and scene synchronization blocked for committed optimized output.
 
-Changing Source file, Destination content folder, Output component, or Minimum instances invalidates the current analyzed plan and moves the panel back to **Ready**.
+Changing Source file, Destination content folder, Output component, or Minimum instances invalidates the current analyzed plan and moves the panel back to **Ready**. Typing, file selection and preset loading use the same input-application path. Source/destination changes clear old result/save associations and disable/close stale review windows. Same-identity presets retain the imported-result association while invalidating analysis of changed settings. Restoration never initiates import, rebuild, save or approval; session restore uses the last executed settings.
 
 ## Immutable optimization plan
 
@@ -71,7 +94,7 @@ Analyze returns an immutable `FConVerseOptimizedImportPlan`. Import and Verify m
 
 | Field | Required content |
 |---|---|
-| `ContractVersion` | Integer schema version. Starts at 1. |
+| `ContractVersion` | Versioned plan contract; current value 2. Manifest, tracked-state, and inventory versions are checked separately. |
 | `PlanId` | Full hexadecimal MD5 of contract version, source fingerprint, normalized options, ordered groups, and ordered candidates. |
 | `SourceUri` | Canonical file URI. |
 | `SourceFilePath` | Canonical absolute path used for diagnostics. |
@@ -236,14 +259,17 @@ Replace ambiguous success inference with one authoritative status enum. UI state
 | `AnalysisSucceeded` | A deterministic plan with one or more groups was produced. | None |
 | `AnalysisNoEligibleGroups` | Analysis succeeded but no group met the contract. | None |
 | `AlreadyCurrent` | Active committed output has the same source hash, options, and PlanId; verification was rerun. | None beyond report/manifest verification data |
-| `Verified` | Import, conversion, persistence, and every required verification passed. | One committed active session |
+| `Verified` | Import, conversion, in-memory manifest commit, and required verification passed. Disk save is separate. | One committed active session, initially unsaved |
 | `ImportedWithFailuresRolledBack` | Datasmith returned output but conversion or verification failed; cleanup succeeded. | None from the attempted session |
+| `AwaitingFailedVerificationDecision` | Verification failed and the caller asked to decide rather than roll back. **Not terminal.** | Attempt still live and uncommitted; must be accepted or discarded |
+| `AcceptedWithFailedVerification` | Verification failed and the user kept the result anyway. | One committed but **degraded** session; optimized reimport refused against it |
 | `CancelledRolledBack` | Cancellation was observed and cleanup succeeded. | None from the attempted session |
 | `FailedRolledBack` | A failure occurred after mutation began and cleanup succeeded. | None from the attempted session |
 | `OptimizedReimportBlocked` | Existing output or asset ownership made a safe replacement impossible. | Existing active session unchanged |
+| `ManualEditsDetected` | Tracked changes or missing baseline require explicit replacement authorization. | Existing active session unchanged |
 | `RollbackFailed` | Cleanup could not restore the pre-operation inventory. | Unknown partial state, detailed inventory required |
 
-`AnalysisNoEligibleGroups` is not an import success. Import and Verify stops before creating assets or actors when the plan contains zero groups.
+`AnalysisNoEligibleGroups` means analysis found no instancing groups; it does not itself claim an import occurred. Under Amendment 7, Import and Verify may import retained ordinary meshes or lights with zero groups and must still perform ownership, policy, verification, and commit checks. A source with neither source meshes nor lights is not imported as a successful empty session.
 
 ### Required result fields
 
@@ -360,6 +386,21 @@ If any check fails, return `RollbackFailed` and list every remaining object path
 
 Analyze performs no package creation, world mutation, asset-registry notification, or transaction.
 
+> **Amendment 3 - failure injection seam.** Rollback runs only on failure, so it was unreachable from automation and therefore untested. `FConVerseOptimizedImportOptions::FailureInjection` (`EConVerseOptimizedImportFailureInjection`) is a test-only seam that aborts the import at a checkpoint which already routes through `RollBackAttempt`:
+>
+> | Value | Aborts at | Expected status |
+> |---|---|---|
+> | `None` | Normal operation. | Unaffected |
+> | `AfterDatasmithImport` | Immediately after the Datasmith import, while the attempt owns assets and actors. | `ImportedWithFailuresRolledBack` |
+> | `BeforeManifestCommit` | Before `CommitManifestAndOwnership`, after verification passed. Nothing is committed. | `ImportedWithFailuresRolledBack` |
+> | `ObstructRollback` | As `AfterDatasmithImport`, and additionally suppresses the destruction pass inside `RollBackAttempt`. | `RollbackFailed` |
+>
+> `ObstructRollback` does not fake the return value: the verification sweep in step 7 genuinely finds the actors still present and reports failure on its own terms, so the degradation path is exercised rather than asserted. It leaves partial state behind by design and its test cleans up after itself.
+>
+> The seam is deliberately **excluded from `ComputePlanId`**. Plan identity describes committed output, and every non-`None` value aborts before any manifest is committed, so no committed output can exist whose identity depended on it. This is the one documented exception to the "every option that changes output goes into the PlanId" rule, and it holds only because the option can never produce output.
+>
+> The editor panel never sets this field. It is reachable only from automation.
+
 ## Safe first-release reimport policy
 
 Normal Datasmith reimport and normal Datasmith Scene Actor synchronization are unsafe for optimized output because the persisted Datasmith scene contains native HISM elements while ISM mode performs a post-import replacement. The first release uses this policy:
@@ -381,16 +422,135 @@ Final world state must contain one active session for the logical source. Two co
 | Panel state | Service condition | Controls and report |
 |---|---|---|
 | Idle | No valid source path. | Analyze and import disabled. |
-| Ready | Local validation passes and no current plan matches all four inputs. | Analyze enabled. Import may plan internally, but must show the same validation errors as Analyze. |
-| Analyzed | `AnalysisSucceeded` or `AnalysisNoEligibleGroups`. | Show plan ID and counts. Disable Import and Verify for zero groups. |
+| Ready | Local validation passes and no current plan matches the complete normalized option snapshot. | Analyze enabled. Import may plan internally, but must show the same validation errors as Analyze. |
+| Analyzed | `AnalysisSucceeded` or `AnalysisNoEligibleGroups`. | Show plan ID and counts. Zero groups alone do not disable importing retained meshes or lights (Amendment 7). |
 | Working | Service operation active. | Disable all inputs and both start actions. Show stage, progress, and Cancel. |
 | Cancel requested | Cancel requested during a non-interruptible stage. | Keep controls disabled until rollback result. |
-| Verified | `Verified` or `AlreadyCurrent` with verification pass. | Green summary plus structured counts and report path. |
+| Verified, unsaved | `Verified` in memory; disk save not yet complete. | Verification summary, structured counts, and explicit save action. |
+| Already current | `AlreadyCurrent` with re-verification pass. | Report verification, sidecar warnings, and persistence independently. |
+| Saved | Explicit owning-level/assets/manifest save succeeded. | State saved; preserve degraded/unverified state if tracked drift or accepted failures remain. |
+| Manual edits | `ManualEditsDetected` before replacement. | Show detected differences and require Replace with source or Cancel. |
 | Imported with failures | `ImportedWithFailuresRolledBack`. | Red group rows, state that cleanup succeeded, and preserve report. |
 | Cancelled / failed | `CancelledRolledBack`, `FailedRolledBack`, or pre-mutation failure. | Show failing stage and cleanup result. |
 | Rollback failed | `RollbackFailed`. | Persistent critical error with remaining object paths. |
 
 The visible group list is capped at 50 rows. Counts always cover the full plan. The complete structured report is written to the Output Log and to `Saved/DatasmithHISM/ImportReports/<SessionId>.json`; the manifest stores the report path and final summary.
+
+> **Amendment 4 - the import log.** Per-attempt JSON reports already covered every outcome, but a
+> failure was still easy to miss and easy to lose. Three defects are fixed together:
+>
+> 1. **Severity.** Every outcome logged at `Display`, so filtering the Output Log to warnings and
+>    errors hid failures entirely — including `RollbackFailed`, the most serious state the importer
+>    can report. Severity is now derived from the status: `RollbackFailed` logs at `Error`, every
+>    other non-success logs at `Warning`, and only genuine successes stay at `Display`.
+>
+>    `AlreadyCurrent` counts as a success **only** when its re-verification passed and the sidecar is
+>    unchanged. An `AlreadyCurrent` that found drift means committed output no longer matches the
+>    manifest, which is precisely the silent failure this log exists to surface.
+>
+> 2. **Durability.** Report filenames fell back to the `PlanId` when no session existed. Since
+>    `PlanId` is deterministic for a given source and options, an import that failed repeatedly
+>    overwrote its own evidence on every attempt, leaving exactly one artifact no matter how many
+>    times it failed. Sessionless reports are now named
+>    `<UTC yyyymmdd-hhmmss>-<ms>_<counter>_<PlanId>.json`.
+>
+>    The counter is load-bearing, not decorative. A timestamp alone is insufficient: two attempts
+>    routinely land in the same second, and under automation even millisecond resolution collides.
+>    A process-lifetime atomic counter guarantees uniqueness regardless of clock resolution.
+>
+>    Note this path only affects **sessionless** attempts — `Analyze` and pre-session failures. A
+>    failed import is assigned a `SessionId` and is therefore unique for free.
+>
+> 3. **Chronology.** `Saved/DatasmithHISM/ImportLog.csv` is an append-only index with one row per
+>    attempt: `TimestampUtc, Operation, Status, Severity, Source, Destination, PlanId, SessionId,
+>    PlannedGroups, VerifiedGroups, PlannedInstances, VerifiedInstances, Summary, ReportPath`.
+>    Fields are RFC 4180 quoted with embedded quotes doubled and newlines flattened, because
+>    summaries contain commas, quotes and newlines. `Analyze` attempts are logged alongside
+>    `ImportAndVerify` and distinguished by the `Operation` column, since a failing analysis is also
+>    a failure worth seeing.
+>
+> Both writes happen in `SaveAndLogReport`, the single funnel `FinishResult` routes every terminal
+> outcome through, so no exit path can skip the log.
+>
+> **Exactly one row per attempt.** `FinishResult` takes a `bTerminal` flag. The `Verified` checkpoint
+> reports *before* commit so a report survives a later commit failure, then the real exit reports
+> again — two calls for one attempt. That was invisible while each report overwrote its own file, but
+> it double-counted against an append-only log. Only terminal calls append a row. Any new
+> intermediate checkpoint must pass `bTerminal=false`.
+>
+> **Consequence for tests.** Because `RollbackFailed` now logs at `Error`, any test that induces it
+> deliberately must declare `AddExpectedError`, or the automation framework fails it for logging an
+> unexpected error. `ObstructedRollbackDegradesToRollbackFailed` does exactly this.
+>
+> **The log must never change an import's outcome.** A read-only file, or one locked by a
+> spreadsheet, emits a single warning and is otherwise ignored. An import that succeeded must never
+> be reported as failed because logging failed.
+>
+> **Retention is unbounded.** The log is never rotated or truncated: silently discarding failure
+> history would defeat the feature. Rows are roughly 300 bytes, so routine use stays trivially
+> small. Delete the file if it ever needs resetting — it is regenerated with a header on the next
+> attempt.
+
+> **Amendment 6 - a failed verification may be accepted, but only under quarantine.** Until now a
+> single failed check rolled the entire attempt back, discarding groups that verified perfectly and
+> leaving the user with no way to proceed. Acceptance is now possible. This is the only amendment
+> that *weakens* a guarantee, so its limits are contractual.
+>
+> 1. **Acceptance is whole-session, never per-group.** `ConvertGroups` destroys each source HISM
+>    only after every target is built and preflighted — but that still happens *before*
+>    `VerifySession` runs. By the time verification fails the originals are gone, so "keep the good
+>    groups and revert the bad ones" cannot be implemented without re-creating geometry from
+>    snapshots: a second unverified mutation layered on an already-failed import. The user accepts
+>    the whole result or none of it.
+>
+> 2. **The decision is never pre-armed.** There is no "always ignore failures" setting. The option
+>    `bDeferRollbackOnVerificationFailure` only *parks* the attempt and returns
+>    `AwaitingFailedVerificationDecision`; keeping the output requires a separate, explicit
+>    `AcceptFailedVerification` call. A flag that disarmed verification in advance would silently
+>    rot the guarantee across every future import.
+>
+> 3. **`AwaitingFailedVerificationDecision` is not terminal.** A parked attempt owns real assets and
+>    actors and has committed nothing. It **must** be resolved by `AcceptFailedVerification` or
+>    `DiscardFailedVerification`. The panel resolves it with a modal inside the same click handler,
+>    defaulting to discard, so it can never outlive the operation. Pending attempts are held in
+>    memory only and deliberately do not survive an editor restart: resuming a half-finished mutation
+>    against a world that may have changed is more dangerous than losing the ability to accept.
+>
+> 4. **Accepting never claims the checks passed.** `bVerificationSucceeded` stays `false`, the
+>    status is `AcceptedWithFailedVerification`, and the import log records it at `Warning`. The log
+>    reports whether verification passed, not whether the outcome was intended. The **persisted**
+>    record must agree: the committed manifest sets `Verification.State` to `Failed` and
+>    `FailedGroupCount` to the real count. `CommitManifestAndOwnership` is reachable from both the
+>    verified and the accepted path, so it derives these from the result it is given and must never
+>    hardcode `Passed`.
+>
+> 5. **An accepted session is quarantined.** Its manifest sets
+>    `Verification.bAcceptedWithFailedVerification` and stores the per-group failure text, alongside
+>    the `Failed` state required by clause 4.
+>    `ImportAndVerify` then refuses any optimized reimport against that destination with
+>    `OptimizedReimportBlocked`. This is the crux: superseding destroys committed actors using the
+>    manifest's own records, and verification just proved those records untrustworthy. Recovery is
+>    deliberately manual.
+>
+> 6. **Failure to accept falls back to discarding.** If the commit or supersede-preflight fails
+>    during acceptance, the attempt is rolled back rather than left half-committed, so no path leaks
+>    a parked attempt's objects.
+>
+> 7. **The commandlet never defers.** `AcceptedWithFailedVerification` is not a headless pass, so CI
+>    cannot go green on an import whose checks failed.
+>
+> The `CorruptBeforeVerification` injection supports the tests by removing one real instance from one
+> real component before verification, so `VerifySession` fails on its own terms with a genuine count
+> mismatch rather than being told to fail.
+
+### Path guarantees must be visible
+
+The **DatasmithHISM Tools** panel launches two paths with materially different guarantees, and a user cannot infer which applies from the action names alone. The panel must therefore group them under explicit headings:
+
+- **Tracked import - verified, reversible.** The optimized import: records a manifest, verifies its own output, rolls the whole attempt back on failure, and supersedes rather than duplicates on reimport.
+- **Selection tools - in-place, not reversible.** The legacy conversions: operate on already-placed actors, record no manifest, perform no verification, and have no rollback. Editor Undo is the only recovery.
+
+The legacy tooltips must state "no manifest, no verification, no rollback" explicitly. This is a disclosure requirement, not cosmetic copy: it is the only thing standing between a user and an unrecoverable in-place conversion.
 
 ## Synthetic fixture matrix
 
@@ -399,7 +559,7 @@ The generated fixture and automation must use real Datasmith scene elements and 
 | ID | Fixture | Action | Required result |
 |---|---|---|---|
 | S01 | Two leaf actors, same parent, mesh, materials, and settings | Analyze twice | One deterministic group, two candidates, identical PlanId, no created packages or actors. |
-| S02 | One eligible actor with minimum 2 | Analyze, then attempt import | `AnalysisNoEligibleGroups`; no import output. |
+| S02 | One eligible actor with minimum 2 | Analyze, then import | `AnalysisNoEligibleGroups`; subsequent import retains and verifies the ordinary mesh under Amendment 7. |
 | S03 | Same mesh under two different immediate parents | Analyze | Separate group keys; neither crosses the parent boundary. |
 | S04 | Same mesh and parent with one material override variant | Analyze and import | Separate material groups; effective slots on both outputs match source variants. |
 | S05 | Same mesh with visibility, cast-shadow, mobility, layer, or component-status differences | Analyze | One split per differing shared setting. |

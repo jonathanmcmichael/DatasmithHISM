@@ -300,4 +300,63 @@ bool FConVerseHISMBelowThresholdTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseLegacyOffsetsAndSettingsTest,
+	"DatasmithHISM.LegacyConversion.ComponentOffsetsAndSettings",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseLegacyOffsetsAndSettingsTest::RunTest(const FString&)
+{
+	using namespace ConVerseHISMLegacyTestHelpers;
+	UWorld* World = GetTestWorld();
+	if (!World) return false;
+	UStaticMesh* Mesh = LoadSharedMesh();
+	TArray<AActor*> Actors;
+	TArray<FTransform> Expected;
+	TSet<UInstancedStaticMeshComponent*> Before;
+	CollectManagedComponents(*World, Before);
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		AActor* Actor = World->SpawnActor<AActor>();
+		auto* Root = NewObject<USceneComponent>(Actor);
+		Actor->AddInstanceComponent(Root);
+		Root->CreationMethod = EComponentCreationMethod::Native;
+		Actor->SetRootComponent(Root);
+		Root->SetMobility(EComponentMobility::Movable);
+		Root->RegisterComponent();
+		Actor->SetActorLocation(FVector(Index * 200, 1800, 0));
+		auto* Component = NewObject<UStaticMeshComponent>(Actor);
+		Actor->AddInstanceComponent(Component);
+		Component->SetMobility(EComponentMobility::Movable);
+		Component->SetStaticMesh(Mesh);
+		Component->SetupAttachment(Root);
+		Component->SetRelativeLocation(FVector(37, 19, 55));
+		Component->SetCollisionEnabled(Index < 2 ? ECollisionEnabled::NoCollision : ECollisionEnabled::QueryOnly);
+		Component->RegisterComponent();
+		Actors.Add(Actor);
+		Expected.Add(Component->GetComponentTransform());
+	}
+	const auto Output = ConVerseHISM::BuildManagedHISMs(Actors, TEXT("Offsets"), false, 2, false, EConVerseGroupingMode::MaximumOptimization);
+	TestEqual(TEXT("All four actors represented"), Output.Result.SourceActorsConverted, 4);
+	TSet<UInstancedStaticMeshComponent*> After;
+	CollectManagedComponents(*World, After);
+	int32 NewGroups = 0;
+	TArray<FTransform> Actual;
+	for (auto* Component : After)
+	{
+		if (Before.Contains(Component)) continue;
+		++NewGroups;
+		for (int32 Index = 0; Index < Component->GetInstanceCount(); ++Index)
+		{
+			FTransform Transform;
+			Component->GetInstanceTransform(Index, Transform, true);
+			Actual.Add(Transform);
+		}
+	}
+	TestEqual(TEXT("Different collision settings split groups"), NewGroups, 2);
+	for (const auto& Transform : Expected)
+		TestTrue(TEXT("Component offset survives conversion"), Actual.ContainsByPredicate([&](const FTransform& Value) { return Value.Equals(Transform, 0.001); }));
+	Cleanup(*World, Actors, Output);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

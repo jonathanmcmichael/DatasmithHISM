@@ -1,6 +1,13 @@
 #include "ConVerseDatasmithImportService.h"
 
 #include "ConVerseHISMUtils.h"
+#include "ConVerseImportProcessing.h"
+#include "ConVerseSourceMetadata.h"
+#include "DatasmithAssetUserData.h"
+#include "JsonObjectConverter.h"
+#include "FileHelpers.h"
+#include "UObject/SavePackage.h"
+#include "Misc/ScopedEvent.h"
 #include "ConVerseOptimizedImportManifest.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -23,28 +30,32 @@
 #include "ExternalSourceModule.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformMemory.h"
 #include "IDatasmithSceneElements.h"
 #include "Interfaces/Interface_AssetUserData.h"
 #include "Interfaces/IPluginManager.h"
 #include "Materials/MaterialInterface.h"
+#include "MeshDescription.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
 #include "SourceUri.h"
+#include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogConVerseOptimizedImport, Log, All);
+DEFINE_LOG_CATEGORY(LogConVerseOptimizedImport);
 
 namespace ConVerseDatasmithImport
 {
 	using UE::DatasmithImporter::FExternalSource;
 	using UE::DatasmithImporter::FSourceUri;
 
-	constexpr int32 ContractVersion = 1;
+	constexpr int32 ContractVersion = 2;
 	constexpr double TranslationToleranceCm = 0.1;
 	constexpr double RotationToleranceDegrees = 0.1;
 	constexpr double ScaleTolerance = 0.001;
@@ -138,10 +149,12 @@ namespace ConVerseDatasmithImport
 		FString ExporterVersion;
 		FString ExporterSdkVersion;
 		FConVerseOptimizedImportOptions Options;
+		TArray<FString> TextureResolutions;
 		int32 TotalMeshActors = 0;
 		int32 EligibleLeafActors = 0;
 		TMap<EConVerseOptimizedSkipReason, int32> SkipCounts;
 		TArray<FGroupValue> Groups;
+		TArray<FGroupValue> AllMeshActors;
 	};
 
 	struct FGroupBucketKey
@@ -229,10 +242,13 @@ namespace ConVerseDatasmithImport
 		case EConVerseOptimizedImportStatus::AlreadyCurrent: return TEXT("AlreadyCurrent");
 		case EConVerseOptimizedImportStatus::Verified: return TEXT("Verified");
 		case EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack: return TEXT("ImportedWithFailuresRolledBack");
+		case EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision: return TEXT("AwaitingFailedVerificationDecision");
+		case EConVerseOptimizedImportStatus::AcceptedWithFailedVerification: return TEXT("AcceptedWithFailedVerification");
 		case EConVerseOptimizedImportStatus::CancelledRolledBack: return TEXT("CancelledRolledBack");
 		case EConVerseOptimizedImportStatus::FailedRolledBack: return TEXT("FailedRolledBack");
 		case EConVerseOptimizedImportStatus::OptimizedReimportBlocked: return TEXT("OptimizedReimportBlocked");
 		case EConVerseOptimizedImportStatus::RollbackFailed: return TEXT("RollbackFailed");
+		case EConVerseOptimizedImportStatus::ManualEditsDetected: return TEXT("ManualEditsDetected");
 		default: return TEXT("Unknown");
 		}
 	}
@@ -258,27 +274,48 @@ namespace ConVerseDatasmithImport
 		return FMD5::HashBytes(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
 	}
 
-	static bool HashFile(const FString& FilePath, FString& OutHash, int64& OutSize, FString& OutError)
+	static bool CancellationRequested(FScopedSlowTask* Progress, const TFunction<bool()>* Cancel)
 	{
+		return (Progress && Progress->ShouldCancel()) || (Cancel && *Cancel && (*Cancel)());
+	}
+
+	static bool HashFile(const FString& FilePath, FString& OutHash, int64& OutSize, FString& OutError,
+		FScopedSlowTask* Progress = nullptr, const TFunction<bool()>* Cancel = nullptr,
+		FConVerseImportProgress* Work = nullptr, EConVerseImportWorkPhase Phase = EConVerseImportWorkPhase::SourceHash)
+	{
+		if (Work)
+		{
+			const auto Outcome = Work->HashFile(FilePath, OutHash, OutSize, Phase);
+			if (Outcome != EConVerseImportWorkResult::Completed)
+				OutError = Outcome == EConVerseImportWorkResult::Cancelled ? TEXT("Fingerprinting cancelled.") : TEXT("The source file could not be read completely for fingerprinting.");
+			return Outcome == EConVerseImportWorkResult::Completed;
+		}
 		OutSize = IFileManager::Get().FileSize(*FilePath);
 		if (OutSize < 0)
 		{
 			OutError = TEXT("The source file size could not be read.");
 			return false;
 		}
-		if (OutSize > MAX_uint32)
+		TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*FilePath));
+		if (!Reader) { OutError = TEXT("The source file could not be opened for fingerprinting."); return false; }
+		FScopedSlowTask Bytes(FMath::Max(1.0f, float(OutSize)), FText::FromString(TEXT("Reading ") + FPaths::GetCleanFilename(FilePath)), Progress != nullptr);
+		FMD5 MD5;
+		TArray<uint8> Buffer;
+		Buffer.SetNumUninitialized(1024 * 1024);
+		int64 Remaining = OutSize;
+		while (Remaining > 0)
 		{
-			OutError = TEXT("The source file is larger than the supported 4 GB hashing limit.");
-			return false;
+			if (CancellationRequested(Progress, Cancel)) { OutError = TEXT("Fingerprinting cancelled."); return false; }
+			const int32 Count = int32(FMath::Min<int64>(Remaining, Buffer.Num()));
+			Reader->Serialize(Buffer.GetData(), Count);
+			if (Reader->IsError()) { OutError = TEXT("Could not read complete source bytes."); return false; }
+			MD5.Update(Buffer.GetData(), Count);
+			Remaining -= Count;
+			Bytes.EnterProgressFrame(float(Count));
 		}
-
-		const FMD5Hash Signature = FMD5Hash::HashFile(*FilePath);
-		if (!Signature.IsValid())
-		{
-			OutError = TEXT("The source file could not be read for fingerprinting.");
-			return false;
-		}
-		OutHash = LexToString(Signature);
+		uint8 Digest[16];
+		MD5.Final(Digest);
+		OutHash = BytesToHex(Digest, 16).ToLower();
 		return true;
 	}
 
@@ -322,7 +359,8 @@ namespace ConVerseDatasmithImport
 	 * Each entry contributes its relative path, size, and content hash, so a rename, a resize, and
 	 * an edit are all detected, as is a file being added or removed.
 	 */
-	static bool HashDirectory(const FString& DirectoryPath, FSidecarFingerprint& OutFingerprint, FString& OutError)
+	static bool HashDirectory(const FString& DirectoryPath, FSidecarFingerprint& OutFingerprint, FString& OutError,
+		FScopedSlowTask* Progress = nullptr, const TFunction<bool()>* Cancel = nullptr, FConVerseImportProgress* Work = nullptr)
 	{
 		OutFingerprint = FSidecarFingerprint();
 
@@ -336,8 +374,9 @@ namespace ConVerseDatasmithImport
 		TArray<FString> RelativePaths;
 		IFileManager::Get().IterateDirectoryRecursively(
 			*DirectoryPath,
-			[&DirectoryPath, &RelativePaths](const TCHAR* VisitedPath, bool bIsDirectory) -> bool
+			[&DirectoryPath, &RelativePaths, Progress, Cancel, Work](const TCHAR* VisitedPath, bool bIsDirectory) -> bool
 			{
+				if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) return false;
 				if (!bIsDirectory)
 				{
 					FString Relative = VisitedPath;
@@ -347,20 +386,25 @@ namespace ConVerseDatasmithImport
 				return true;
 			});
 
+		if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) { OutError = TEXT("Supporting-file check cancelled."); return false; }
+
 		// Stable ordering is what makes the aggregate reproducible.
 		RelativePaths.Sort();
 
 		FString Aggregate;
+		FScopedSlowTask Files(float(FMath::Max(1, RelativePaths.Num())), FText::FromString(TEXT("Checking supporting files")), Progress != nullptr);
 		for (const FString& Relative : RelativePaths)
 		{
+			if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) { OutError = TEXT("Supporting-file check cancelled."); return false; }
+			Files.EnterProgressFrame(1.0f, FText::FromString(Relative));
 			const FString AbsolutePath = FPaths::Combine(DirectoryPath, Relative);
 
 			FString FileHash;
 			int64 FileSize = 0;
 			FString FileError;
-			if (!HashFile(AbsolutePath, FileHash, FileSize, FileError))
+			if (!HashFile(AbsolutePath, FileHash, FileSize, FileError, Progress, Cancel, Work, EConVerseImportWorkPhase::SidecarHash))
 			{
-				// Includes the inherited 4 GB per-file limit. Surfacing the offending file matters:
+				// Surface the offending file:
 				// silently skipping it would leave a changed asset invisible to the comparison.
 				OutError = FString::Printf(
 					TEXT("The sidecar asset '%s' could not be fingerprinted: %s"),
@@ -603,8 +647,9 @@ namespace ConVerseDatasmithImport
 		const TMap<FString, TSharedPtr<IDatasmithMeshElement>>& MeshesByName,
 		const TSet<FString>& MaterialNames,
 		FPlan& Plan,
-		TMap<FGroupBucketKey, FGroupBucket>& Buckets)
+		TMap<FGroupBucketKey, FGroupBucket>& Buckets, FConVerseImportProgress& Work)
 	{
+		if (!Work.Update(EConVerseImportWorkPhase::GroupPlanning, TraversalOrdinal, 0)) return;
 		if (!Actor.IsValid())
 		{
 			return;
@@ -620,7 +665,25 @@ namespace ConVerseDatasmithImport
 		{
 			++Plan.TotalMeshActors;
 			const TSharedPtr<IDatasmithMeshActorElement> MeshActor = StaticCastSharedPtr<IDatasmithMeshActorElement>(Actor);
-			if (Actor->GetChildrenCount() > 0)
+			FGroupValue& SourceMesh = Plan.AllMeshActors.AddDefaulted_GetRef();
+			SourceMesh.MeshElementName = MeshActor->GetStaticMeshPathName();
+			SourceMesh.bVisible = MeshActor->GetVisibility();
+			SourceMesh.bCastShadow = MeshActor->GetCastShadow();
+			SourceMesh.Mobility = MeshActor->GetMobility();
+			SourceMesh.bIsComponent = MeshActor->IsAComponent();
+			FCandidateValue& SourceCandidate = SourceMesh.Candidates.AddDefaulted_GetRef();
+			SourceCandidate.SourceElementName = MeshActor->GetName();
+			SourceCandidate.SourceLabel = MeshActor->GetLabel();
+			SourceCandidate.HierarchyPath = ActorPath;
+			SourceCandidate.ParentHierarchyPath = ParentPath;
+			SourceCandidate.SourceOrdinal = ActorOrdinal;
+			SourceCandidate.WorldTransform = GetWorldTransform(*MeshActor);
+			SourceCandidate.RelativeTransform = MeshActor->GetRelativeTransform();
+			SourceCandidate.MeshElementName = SourceMesh.MeshElementName;
+			CaptureActorSourceData(Scene, MeshActor, SourceCandidate);
+			if (const auto* Mesh = MeshesByName.Find(SourceMesh.MeshElementName))
+				ResolveEffectiveMaterials(**Mesh, *MeshActor, MaterialNames, SourceMesh.EffectiveMaterials);
+			if (Actor->GetChildrenCount() > 0 || Plan.Options.Processing.KeepOrdinaryMeshElements.Contains(MeshActor->GetStaticMeshPathName()))
 			{
 				IncrementSkip(Plan, EConVerseOptimizedSkipReason::HasChildren);
 			}
@@ -701,11 +764,11 @@ namespace ConVerseDatasmithImport
 			}
 		}
 
-		for (int32 ChildIndex = 0; ChildIndex < Actor->GetChildrenCount(); ++ChildIndex)
+		for (int32 ChildIndex = 0; ChildIndex < Actor->GetChildrenCount() && !Work.IsCancelled(); ++ChildIndex)
 		{
 			GatherPlanCandidates(
 				Scene, Actor->GetChild(ChildIndex), ActorPath, ChildIndex, TraversalOrdinal,
-				MeshesByName, MaterialNames, Plan, Buckets);
+				MeshesByName, MaterialNames, Plan, Buckets, Work);
 		}
 	}
 
@@ -718,6 +781,14 @@ namespace ConVerseDatasmithImport
 		AppendField(Input, TEXT("Destination"), Plan.Options.DestinationPath);
 		AppendField(Input, TEXT("Mode"), InstanceTypeName(Plan.Options.InstanceType));
 		AppendField(Input, TEXT("Minimum"), FString::FromInt(Plan.Options.MinimumInstanceCount));
+		FConVerseImportProcessingSettings IdentitySettings = Plan.Options.Processing;
+		IdentitySettings.ManyLightThreshold = 100;
+		IdentitySettings.AppearanceCatalog.Reset();
+		if (!IdentitySettings.bApplyApprovedMaterials) IdentitySettings.MaterialMappings.Reset();
+		AppendField(Input, TEXT("Processing"), ConVerseImportProcessing::SettingsJson(IdentitySettings));
+		FString MappingIdentity, MappingError;
+		ConVerseImportProcessing::ValidateMappings(Plan.Options.Processing, MappingIdentity, MappingError);
+		AppendField(Input, TEXT("ApprovedMappings"), MappingIdentity);
 		// Tessellation must participate in plan identity. It changes generated geometry without
 		// changing the source file, so omitting it would make a tessellation-only change hash to
 		// the same PlanId, take the AlreadyCurrent branch, and silently discard the new settings.
@@ -725,6 +796,12 @@ namespace ConVerseDatasmithImport
 		AppendField(Input, TEXT("MaxEdgeLength"), FString::SanitizeFloat(Plan.Options.Tessellation.MaxEdgeLength));
 		AppendField(Input, TEXT("NormalTolerance"), FString::SanitizeFloat(Plan.Options.Tessellation.NormalTolerance));
 		AppendField(Input, TEXT("Stitching"), StitchingTechniqueName(Plan.Options.Tessellation.StitchingTechnique));
+		// A texture found in a search folder changes the imported materials, so it participates. The
+		// folder list itself does not: plans that resolve nothing keep their existing identity.
+		for (const FString& Resolution : Plan.TextureResolutions)
+		{
+			AppendField(Input, TEXT("TextureResolution"), Resolution);
+		}
 		for (const FGroupValue& Group : Plan.Groups)
 		{
 			AppendField(Input, TEXT("Group"), Group.SerializedKey);
@@ -742,9 +819,11 @@ namespace ConVerseDatasmithImport
 		const TSharedRef<IDatasmithScene>& Scene,
 		const FConVerseOptimizedImportOptions& Options,
 		const FString& SourceHash,
-		int64 SourceSize)
+		int64 SourceSize, const TArray<FString>& TextureResolutions, FConVerseImportProgress& Work)
 	{
 		FPlan Plan;
+		Plan.TextureResolutions = TextureResolutions;
+		Plan.TextureResolutions.Sort();
 		Plan.SourceFilePath = Options.FilePath;
 		Plan.SourceUri = FSourceUri::FromFilePath(Options.FilePath).ToString();
 		Plan.SourceFileHash = SourceHash;
@@ -762,6 +841,7 @@ namespace ConVerseDatasmithImport
 		TMap<FString, TSharedPtr<IDatasmithMeshElement>> MeshesByName;
 		for (int32 MeshIndex = 0; MeshIndex < Scene->GetMeshesCount(); ++MeshIndex)
 		{
+			if (Work.IsCancelled()) return Plan;
 			const TSharedPtr<IDatasmithMeshElement> Mesh = Scene->GetMesh(MeshIndex);
 			if (Mesh.IsValid())
 			{
@@ -772,6 +852,7 @@ namespace ConVerseDatasmithImport
 		TSet<FString> MaterialNames;
 		for (int32 MaterialIndex = 0; MaterialIndex < Scene->GetMaterialsCount(); ++MaterialIndex)
 		{
+			if (Work.IsCancelled()) return Plan;
 			const TSharedPtr<IDatasmithBaseMaterialElement> Material = Scene->GetMaterial(MaterialIndex);
 			if (Material.IsValid())
 			{
@@ -783,14 +864,16 @@ namespace ConVerseDatasmithImport
 		int32 TraversalOrdinal = 0;
 		for (int32 ActorIndex = 0; ActorIndex < Scene->GetActorsCount(); ++ActorIndex)
 		{
+			if (Work.IsCancelled()) return Plan;
 			GatherPlanCandidates(
 				*Scene, Scene->GetActor(ActorIndex), FString(), ActorIndex, TraversalOrdinal,
-				MeshesByName, MaterialNames, Plan, Buckets);
+				MeshesByName, MaterialNames, Plan, Buckets, Work);
 		}
 
 		TArray<FGroupValue> CandidateGroups;
 		for (TPair<FGroupBucketKey, FGroupBucket>& Pair : Buckets)
 		{
+			if (Work.IsCancelled()) return Plan;
 			FGroupValue Group = MoveTemp(Pair.Value.Group);
 			Group.Candidates.Sort([](const FCandidateValue& Left, const FCandidateValue& Right)
 			{
@@ -813,6 +896,7 @@ namespace ConVerseDatasmithImport
 			return Left.SerializedKey.Compare(Right.SerializedKey, ESearchCase::CaseSensitive) < 0;
 		});
 		Plan.Groups = MoveTemp(CandidateGroups);
+		if (Work.IsCancelled()) return Plan;
 		Plan.PlanId = ComputePlanId(Plan);
 		return Plan;
 	}
@@ -824,6 +908,19 @@ namespace ConVerseDatasmithImport
 		FString& OutError)
 	{
 		OutOptions = Input;
+		OutOptions.Processing.ManyLightThreshold = FMath::Max(1, Input.Processing.ManyLightThreshold);
+		if (uint8(Input.Processing.NanitePolicy) > uint8(EConVerseNanitePolicy::PreserveImported))
+		{ OutError = TEXT("Unsupported Nanite policy."); return false; }
+		auto NormalizeNames = [](TArray<FString>& Names)
+		{
+			Names.Remove(TEXT("")); Names.Sort();
+			for (int32 Index = Names.Num() - 1; Index > 0; --Index) if (Names[Index] == Names[Index - 1]) Names.RemoveAt(Index);
+		};
+		NormalizeNames(OutOptions.Processing.KeepOrdinaryMeshElements);
+		NormalizeNames(OutOptions.Processing.DisableNaniteMeshElements);
+		OutOptions.Processing.DisableNaniteMeshElements.Sort();
+		FString MappingIdentity;
+		if (!ConVerseImportProcessing::ValidateMappings(OutOptions.Processing, MappingIdentity, OutError)) return false;
 		if (Input.InstanceType != EConVerseOptimizedInstanceType::ISM
 			&& Input.InstanceType != EConVerseOptimizedInstanceType::HISM)
 		{
@@ -1183,6 +1280,82 @@ namespace ConVerseDatasmithImport
 		}
 	}
 
+	static int32 ParseDatasmithSlotId(const FString& SlotName)
+	{
+		if (SlotName.IsEmpty())
+		{
+			return INDEX_NONE;
+		}
+		for (const TCHAR Character : SlotName)
+		{
+			if (!FChar::IsDigit(Character))
+			{
+				return INDEX_NONE;
+			}
+		}
+		int32 SlotId = INDEX_NONE;
+		LexFromString(SlotId, *SlotName);
+		return SlotId;
+	}
+
+	/**
+	 * Recovers the Datasmith material slot id behind every imported static mesh slot.
+	 * FDatasmithStaticMaterialTemplate::Apply overwrites both MaterialSlotName and
+	 * ImportedMaterialSlotName with the imported material asset's name, so the numeric slot id only
+	 * survives on the LOD0 mesh description polygon groups. Parsing the FStaticMaterial names alone
+	 * resolves every slot of a multi-material mesh to id 0, which compares slot 1 against slot 0's
+	 * material and fails verification on meshes that are in fact correct.
+	 */
+	static void BuildImportedSlotIds(const UStaticMesh& Mesh, TArray<int32>& OutSlotIds)
+	{
+		const int32 SlotCount = Mesh.GetStaticMaterials().Num();
+		OutSlotIds.Reset();
+		OutSlotIds.Init(INDEX_NONE, SlotCount);
+
+		const FMeshDescription* MeshDescription = Mesh.GetMeshDescription(0);
+		if (MeshDescription != nullptr && MeshDescription->PolygonGroups().Num() == SlotCount)
+		{
+			const FStaticMeshConstAttributes Attributes(*MeshDescription);
+			const TPolygonGroupAttributesConstRef<FName> SlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
+			if (SlotNames.IsValid())
+			{
+				int32 SlotIndex = 0;
+				for (const FPolygonGroupID PolygonGroupID : MeshDescription->PolygonGroups().GetElementIDs())
+				{
+					OutSlotIds[SlotIndex++] = ParseDatasmithSlotId(SlotNames[PolygonGroupID].ToString());
+				}
+			}
+		}
+
+		for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
+		{
+			if (OutSlotIds[SlotIndex] == INDEX_NONE)
+			{
+				OutSlotIds[SlotIndex] = ParseDatasmithSlotId(
+					Mesh.GetStaticMaterials()[SlotIndex].ImportedMaterialSlotName.ToString());
+			}
+		}
+	}
+
+	static const FEffectiveMaterialValue* FindEffectiveMaterial(
+		const FGroupValue& Group,
+		int32 SlotIndex,
+		int32 DatasmithSlotId)
+	{
+		const FEffectiveMaterialValue* Effective = DatasmithSlotId != INDEX_NONE
+			? Group.EffectiveMaterials.FindByPredicate(
+				[DatasmithSlotId](const FEffectiveMaterialValue& Value)
+				{
+					return Value.DatasmithSlotId == DatasmithSlotId;
+				})
+			: nullptr;
+		if (Effective == nullptr && Group.EffectiveMaterials.IsValidIndex(SlotIndex))
+		{
+			Effective = &Group.EffectiveMaterials[SlotIndex];
+		}
+		return Effective;
+	}
+
 	static bool ResolveExpectedAssets(
 		const FGroupValue& Group,
 		UDatasmithScene& ImportedScene,
@@ -1205,17 +1378,11 @@ namespace ConVerseDatasmithImport
 		}
 
 		OutMaterials.SetNum(OutMesh->GetStaticMaterials().Num());
+		TArray<int32> SlotIds;
+		BuildImportedSlotIds(*OutMesh, SlotIds);
 		for (int32 SlotIndex = 0; SlotIndex < OutMesh->GetStaticMaterials().Num(); ++SlotIndex)
 		{
-			const FString SlotName = OutMesh->GetStaticMaterials()[SlotIndex].MaterialSlotName.ToString();
-			int32 SlotId = INDEX_NONE;
-			LexFromString(SlotId, *SlotName);
-			const FEffectiveMaterialValue* Expected = Group.EffectiveMaterials.FindByPredicate(
-				[SlotId](const FEffectiveMaterialValue& Value) { return Value.DatasmithSlotId == SlotId; });
-			if (Expected == nullptr && Group.EffectiveMaterials.IsValidIndex(SlotIndex))
-			{
-				Expected = &Group.EffectiveMaterials[SlotIndex];
-			}
+			const FEffectiveMaterialValue* Expected = FindEffectiveMaterial(Group, SlotIndex, SlotIds[SlotIndex]);
 			if (Expected == nullptr)
 			{
 				OutError = FString::Printf(TEXT("Could not map imported material slot %d to the Datasmith mesh."), SlotIndex);
@@ -1384,7 +1551,6 @@ namespace ConVerseDatasmithImport
 			Target->SetRelativeTransform(Source->GetRelativeTransform());
 			Target->SetMobility(Source->Mobility);
 			UStaticMesh* Mesh = Source->GetStaticMesh();
-			ConVerseHISM::EnableNaniteIfNeeded(Mesh);
 			Target->SetStaticMesh(Mesh);
 			Target->SetVisibility(Source->IsVisible(), true);
 			Target->SetHiddenInGame(Source->bHiddenInGame, true);
@@ -1433,6 +1599,130 @@ namespace ConVerseDatasmithImport
 			Owner->MarkPackageDirty();
 		}
 		return true;
+	}
+
+	static void AttachRuntimeSource(UStaticMeshComponent& Component, const FCandidateValue& Candidate,
+		const FString& Document, int32 InstanceIndex)
+	{
+		AActor* Owner = Component.GetOwner();
+		auto* Data = Owner->FindComponentByClass<UConVerseSourceMetadata>();
+		if (!Data)
+		{
+			Data = NewObject<UConVerseSourceMetadata>(Owner, NAME_None, RF_Transactional);
+			Owner->AddInstanceComponent(Data);
+			Data->RegisterComponent();
+		}
+		auto& Record = Data->Records.AddDefaulted_GetRef();
+		Record.ComponentName = Component.GetFName();
+		Record.InstanceIndex = InstanceIndex;
+		Record.SourceElement = Candidate.SourceElementName;
+		Record.SourceLabel = Candidate.SourceLabel;
+		Record.SourceMesh = Candidate.MeshElementName;
+		Record.SourceDocument = Document;
+		for (const auto& Pair : Candidate.Metadata) Record.Metadata.Add(Pair.Name, Pair.Value);
+	}
+
+	static bool VerifySourceAccounting(UWorld& World, UDatasmithScene& ImportedScene, const FPlan& Plan,
+		const FMutationInventory& Inventory, const FString& SessionId, FConVerseOptimizedImportResult& Result)
+	{
+		TMap<FString, TArray<UStaticMeshComponent*>> ByElement;
+		TSet<UStaticMeshComponent*> OrdinaryComponents;
+		TMap<FString, TArray<UInstancedStaticMeshComponent*>> Groups;
+		GatherSessionComponents(World, SessionId, Groups);
+		for (TActorIterator<AActor> It(&World); It; ++It)
+		{
+			if (Inventory.ExistingActors.Contains(*It)) continue;
+			TInlineComponentArray<UStaticMeshComponent*> Components(*It);
+			for (UStaticMeshComponent* Component : Components)
+			{
+				if (Cast<UInstancedStaticMeshComponent>(Component)) continue;
+				OrdinaryComponents.Add(Component);
+				const FString Id = UDatasmithAssetUserData::GetDatasmithUserDataValueForKey(Component,
+					FName(UDatasmithAssetUserData::UniqueIdMetaDataKey));
+				if (!Id.IsEmpty()) ByElement.FindOrAdd(Id).AddUnique(Component);
+			}
+			if (auto* SceneActor = Cast<ADatasmithSceneActor>(*It))
+			{
+				for (const auto& Pair : SceneActor->RelatedActors)
+				{
+					AActor* Actor = Pair.Value.Get();
+					if (!Actor) continue;
+					if (auto* Mesh = Cast<UStaticMeshComponent>(Actor->GetRootComponent()))
+						if (!Cast<UInstancedStaticMeshComponent>(Mesh)) ByElement.FindOrAdd(Pair.Key.ToString()).AddUnique(Mesh);
+				}
+			}
+		}
+		TSet<FString> Converted;
+		TMap<FString, TPair<FSoftObjectPath, int32>> InstanceOutputs;
+		const FString Document = HashUtf8(Plan.SourceFilePath);
+		for (const auto& Group : Plan.Groups)
+		{
+			const auto* Outputs = Groups.Find(Group.GroupId);
+			for (int32 Index = 0; Index < Group.Candidates.Num(); ++Index)
+			{
+				const auto& Candidate = Group.Candidates[Index];
+				Converted.Add(Candidate.SourceElementName);
+				if (Outputs && Outputs->Num() == 1)
+				{
+					AttachRuntimeSource(*(*Outputs)[0], Candidate, Document, Index);
+					InstanceOutputs.Add(Candidate.SourceElementName, {FSoftObjectPath((*Outputs)[0]), Index});
+				}
+			}
+		}
+		bool bPassed = true;
+		TSet<UStaticMeshComponent*> Accounted;
+		Result.InspectionRows.Reset();
+		for (const auto& Source : Plan.AllMeshActors)
+		{
+			const auto& Candidate = Source.Candidates[0];
+			auto& Row = Result.InspectionRows.AddDefaulted_GetRef();
+			Row.SourceElement = Candidate.SourceElementName;
+			for (const auto& Identity : Candidate.IdentityCandidates)
+				Row.SourceIdentity += (Row.SourceIdentity.IsEmpty() ? FString() : TEXT("; ")) + Identity.Key + TEXT("=") + Identity.Value;
+			Row.Label = Candidate.SourceLabel;
+			Row.MeshElement = Candidate.MeshElementName;
+			if (Converted.Contains(Candidate.SourceElementName))
+			{
+				Row.Outcome = TEXT("Instance");
+				if (const auto* Output = InstanceOutputs.Find(Candidate.SourceElementName))
+				{
+					Row.ComponentPath = Output->Key;
+					Row.InstanceIndex = Output->Value;
+				}
+				if (ByElement.Contains(Candidate.SourceElementName)) { bPassed = false; Row.Outcome = TEXT("FAIL: duplicate ordinary geometry for converted source"); }
+				continue;
+			}
+			const auto* Outputs = ByElement.Find(Candidate.SourceElementName);
+			FString Error;
+			UStaticMesh* Mesh = nullptr;
+			TArray<UMaterialInterface*> Materials;
+			if (!Outputs || Outputs->Num() != 1 || !ResolveExpectedAssets(Source, ImportedScene, Mesh, Materials, Error))
+			{
+				Row.Outcome = TEXT("FAIL: ordinary source has missing, duplicate, or unresolved output. ") + Error;
+				bPassed = false;
+				continue;
+			}
+			UStaticMeshComponent* Component = (*Outputs)[0];
+			Row.ComponentPath = FSoftObjectPath(Component);
+			bool bMatches = !Accounted.Contains(Component) && Component->GetStaticMesh() == Mesh
+				&& TransformsMatch(Component->GetComponentTransform(), Candidate.WorldTransform)
+				&& Component->IsVisible() == Source.bVisible && Component->CastShadow == Source.bCastShadow
+				&& Component->GetNumMaterials() == Materials.Num();
+			for (int32 Slot = 0; Slot < Materials.Num(); ++Slot) bMatches &= Component->GetMaterial(Slot) == Materials[Slot];
+			Accounted.Add(Component);
+			Row.Outcome = bMatches ? TEXT("Ordinary: verified") : TEXT("FAIL: ordinary mesh, placement, visibility, or materials differ");
+			if (bMatches) ++Result.VerifiedOrdinaryMeshes;
+			else bPassed = false;
+			AttachRuntimeSource(*Component, Candidate, Document, INDEX_NONE);
+		}
+		if (Accounted.Num() != OrdinaryComponents.Num())
+		{
+			bPassed = false;
+			Result.Diagnostics.Add(FString::Printf(TEXT("Unaccounted ordinary mesh components: actual=%d accounted=%d"), OrdinaryComponents.Num(), Accounted.Num()));
+		}
+		for (const auto& Row : Result.InspectionRows)
+			if (Row.Outcome.StartsWith(TEXT("FAIL"))) Result.Diagnostics.Add(Row.SourceElement + TEXT(": ") + Row.Outcome);
+		return bPassed;
 	}
 
 	static bool VerifySession(
@@ -1636,6 +1926,15 @@ namespace ConVerseDatasmithImport
 			? EConVerseOptimizedManifestComponentType::HISM
 			: EConVerseOptimizedManifestComponentType::ISM;
 		Manifest->Options.MinimumInstanceCount = Plan.Options.MinimumInstanceCount;
+		Manifest->ProcessingSettingsJson = Result.ProcessingSettingsJson;
+		Manifest->Appearances = Result.Appearances;
+		Manifest->SourceInventoryVersion = 1;
+		Manifest->SourceLightDescriptions = Result.SourceLightDescriptions;
+		Manifest->MaterialDecisions = Result.MaterialDecisions;
+		Manifest->TrackedObjects = Result.TrackedObjects;
+		Manifest->TrackedStateVersion = 1;
+		Manifest->ImportedElements = Result.InspectionRows;
+		Manifest->Diagnostics = Result.Diagnostics;
 		Manifest->PlanId = Plan.PlanId;
 		Manifest->SessionId = Result.SessionId;
 		if (PreviousManifest != nullptr)
@@ -1650,13 +1949,27 @@ namespace ConVerseDatasmithImport
 		Manifest->LevelPath = World.GetCurrentLevel() != nullptr
 			? FSoftObjectPath(World.GetCurrentLevel())
 			: FSoftObjectPath();
-		Manifest->Verification.State = EConVerseOptimizedVerificationState::Passed;
+		// Commit is reachable from the accept-with-failures path as well as the verified path, so the
+		// recorded state has to come from the result. Hardcoding Passed here would let a degraded
+		// session claim it verified, which is exactly what supersede consults later.
+		int32 FailedGroupCount = 0;
+		for (const FConVerseOptimizedGroupVerification& GroupVerification : Result.GroupVerification)
+		{
+			if (!GroupVerification.bPassed)
+			{
+				++FailedGroupCount;
+			}
+		}
+
+		Manifest->Verification.State = Result.bVerificationSucceeded
+			? EConVerseOptimizedVerificationState::Passed
+			: EConVerseOptimizedVerificationState::Failed;
 		Manifest->Verification.CompletedUtc = FDateTime::UtcNow();
 		Manifest->Verification.PlannedGroupCount = Result.PlannedGroupCount;
 		Manifest->Verification.VerifiedGroupCount = Result.VerifiedGroupCount;
 		Manifest->Verification.PlannedInstanceCount = Result.PlannedInstanceCount;
 		Manifest->Verification.VerifiedInstanceCount = Result.VerifiedInstanceCount;
-		Manifest->Verification.FailedGroupCount = 0;
+		Manifest->Verification.FailedGroupCount = FailedGroupCount;
 		Manifest->Verification.Summary = Result.Summary;
 		Manifest->Verification.FullReportArtifactPath = Result.SavedReportPath;
 
@@ -1723,17 +2036,12 @@ namespace ConVerseDatasmithImport
 			GroupRecord.FirstInstanceRecordIndex = Manifest->Instances.Num();
 			GroupRecord.InstanceRecordCount = Group.Candidates.Num();
 
+			TArray<int32> SlotIds;
+			BuildImportedSlotIds(*ImportedMesh, SlotIds);
 			for (int32 SlotIndex = 0; SlotIndex < ImportedMaterials.Num(); ++SlotIndex)
 			{
-				const FString SlotName = ImportedMesh->GetStaticMaterials()[SlotIndex].MaterialSlotName.ToString();
-				int32 SlotId = INDEX_NONE;
-				LexFromString(SlotId, *SlotName);
-				const FEffectiveMaterialValue* Effective = Group.EffectiveMaterials.FindByPredicate(
-					[SlotId](const FEffectiveMaterialValue& Value) { return Value.DatasmithSlotId == SlotId; });
-				if (Effective == nullptr && Group.EffectiveMaterials.IsValidIndex(SlotIndex))
-				{
-					Effective = &Group.EffectiveMaterials[SlotIndex];
-				}
+				const FEffectiveMaterialValue* Effective = FindEffectiveMaterial(
+					Group, SlotIndex, SlotIds.IsValidIndex(SlotIndex) ? SlotIds[SlotIndex] : INDEX_NONE);
 				FConVerseOptimizedMaterialSlotRecord& SlotRecord = GroupRecord.MaterialSlots.AddDefaulted_GetRef();
 				SlotRecord.SlotIndex = SlotIndex;
 				SlotRecord.DatasmithMaterialElementName = Effective != nullptr ? Effective->MaterialElementName : FString();
@@ -1847,8 +2155,10 @@ namespace ConVerseDatasmithImport
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		TArray<FAssetData> Assets;
 		Registry.GetAssetsByPath(FName(*DestinationPath), Assets, true, false);
+		UConVerseOptimizedImportManifest* FoundManifest = nullptr;
 		for (const FAssetData& AssetData : Assets)
 		{
+			if (AssetData.AssetClassPath != UDatasmithScene::StaticClass()->GetClassPathName()) continue;
 			UDatasmithScene* Scene = Cast<UDatasmithScene>(AssetData.GetAsset());
 			if (Scene == nullptr)
 			{
@@ -1885,9 +2195,14 @@ namespace ConVerseDatasmithImport
 				}
 				return nullptr;
 			}
-			return Manifest;
+			if (FoundManifest)
+			{
+				if (OutUnreadableManifestError) *OutUnreadableManifestError = TEXT("Multiple active manifests claim this source and destination. Resolve ownership before importing.");
+				return nullptr;
+			}
+			FoundManifest = Manifest;
 		}
-		return nullptr;
+		return FoundManifest;
 	}
 
 	/** Resolves the prior session's world actors. Destruction is irreversible, so this runs before any mutation. */
@@ -2102,6 +2417,12 @@ namespace ConVerseDatasmithImport
 		}
 
 		Result.VerifiedInstanceCount = VerifiedInstanceTotal;
+		TArray<FString> Differences;
+		if (!ConVerseImportProcessing::CheckState(Manifest, Differences))
+		{
+			bAllPassed = false;
+			Result.Diagnostics.Append(Differences);
+		}
 		return bAllPassed;
 	}
 
@@ -2117,12 +2438,21 @@ namespace ConVerseDatasmithImport
 		return Inventory;
 	}
 
+	/**
+	 * Unwinds an attempt back to the captured inventory.
+	 *
+	 * bObstructForTesting is a test-only seam: it skips destroying the actors this attempt created
+	 * so the verification sweep below genuinely finds them still present and reports failure on its
+	 * own terms. The return value is never faked; the RollbackFailed degradation is reached because
+	 * the rollback really did leave objects behind.
+	 */
 	static bool RollBackAttempt(
 		UWorld& World,
 		const FMutationInventory& Inventory,
 		const FString& SessionId,
 		FConVerseOptimizedImportResult& Result,
-		FString& OutDetails)
+		FString& OutDetails,
+		bool bObstructForTesting = false)
 	{
 		Result.bRollbackAttempted = true;
 		const FString SessionTag = FString::Printf(TEXT("%s%s"), SessionTagPrefix, *SessionId);
@@ -2158,7 +2488,7 @@ namespace ConVerseDatasmithImport
 		});
 		for (AActor* Actor : NewActors)
 		{
-			if (IsValid(Actor))
+			if (IsValid(Actor) && !bObstructForTesting)
 			{
 				World.DestroyActor(Actor, true, true);
 			}
@@ -2176,7 +2506,10 @@ namespace ConVerseDatasmithImport
 			}
 		}
 		Result.CreatedObjectCount = NewActors.Num() + AttemptAssets.Num();
-		if (!AssetsToDelete.IsEmpty())
+		// When obstructing, the created actors are still alive and still reference these assets.
+		// Force-deleting them anyway would null out live references, which is a worse state than
+		// the one under test, so the obstruction leaves the whole attempt intact.
+		if (!AssetsToDelete.IsEmpty() && !bObstructForTesting)
 		{
 			ObjectTools::ForceDeleteObjects(AssetsToDelete, false);
 		}
@@ -2212,6 +2545,30 @@ namespace ConVerseDatasmithImport
 	static void PopulatePlanResult(const FPlan& Plan, FConVerseOptimizedImportResult& Result)
 	{
 		Result.PlanId = Plan.PlanId;
+		TMap<FString, int32> AppearanceIndices;
+		for (int32 Index = 0; Index < Result.Appearances.Num(); ++Index) AppearanceIndices.Add(Result.Appearances[Index].SourceElement, Index);
+		for (const auto& Source : Plan.AllMeshActors)
+		{
+			TSet<FString> Used;
+			for (const auto& Slot : Source.EffectiveMaterials) Used.Add(Slot.MaterialElementName);
+			for (const auto& Name : Used) if (const int32* Index = AppearanceIndices.Find(Name)) ++Result.Appearances[*Index].AffectedSourceElements;
+		}
+		TSet<FString> ConvertedElements;
+		for (const auto& Group : Plan.Groups)
+			for (const auto& Candidate : Group.Candidates) ConvertedElements.Add(Candidate.SourceElementName);
+		for (const auto& Source : Plan.AllMeshActors)
+		{
+			const auto& Candidate = Source.Candidates[0];
+			auto& Row = Result.InspectionRows.AddDefaulted_GetRef();
+			Row.SourceElement = Candidate.SourceElementName;
+			for (const auto& Identity : Candidate.IdentityCandidates)
+				Row.SourceIdentity += (Row.SourceIdentity.IsEmpty() ? FString() : TEXT("; ")) + Identity.Key + TEXT("=") + Identity.Value;
+			Row.Label = Candidate.SourceLabel;
+			Row.MeshElement = Candidate.MeshElementName;
+			Row.Outcome = ConvertedElements.Contains(Candidate.SourceElementName) ? TEXT("Planned instance")
+				: Plan.Options.Processing.KeepOrdinaryMeshElements.Contains(Candidate.MeshElementName) ? TEXT("Ordinary: explicit exception")
+				: TEXT("Ordinary: not eligible or below threshold");
+		}
 		Result.SourceFileHash = Plan.SourceFileHash;
 		Result.PlannedGroupCount = Plan.Groups.Num();
 		Result.TotalSourceMeshActors = Plan.TotalMeshActors;
@@ -2250,6 +2607,7 @@ namespace ConVerseDatasmithImport
 				TEXT("Reimport: yes\nPrevious manifest: %s\nPrevious session: %s\nPrior-session actors removed: %d\n"),
 				*Result.PreviousManifestId, *Result.PreviousSessionId, Result.RemovedPreviousActorCount);
 		}
+		Report += FString::Printf(TEXT("Duration: %.3f seconds\nMesh policy processing (including builds): %.3f seconds\nMesh compilation wait: %.3f seconds\nProcess peak physical memory (process lifetime): %llu bytes\n"), Result.DurationSeconds, Result.MeshProcessingSeconds, Result.MeshBuildSeconds, Result.ProcessPeakPhysicalBytes);
 		Report += FString::Printf(
 			TEXT("Source mesh actors: %d\nEligible leaf actors: %d\nPlanned groups: %d\nPlanned instances: %d\nVerified groups: %d\nVerified instances: %d\n"),
 			Result.TotalSourceMeshActors, Result.EligibleSourceActors, Result.PlannedGroupCount,
@@ -2258,9 +2616,12 @@ namespace ConVerseDatasmithImport
 		{
 			Report += FString::Printf(TEXT("Skipped %s: %d\n"), *SkipReasonName(Count.Reason), Count.Count);
 		}
+		Report += FString::Printf(TEXT("Source mesh assets: %d\nSource lights: %d\nEnabled local lights: %d\nUnitless lights: %d\nIES lights: %d\nNanite meshes enabled: %d\nNanite exclusions: %d\nVerified ordinary meshes: %d\n"),
+			Result.SourceMeshAssetCount, Result.SourceLightCount, Result.EnabledLocalLights, Result.UnitlessLights, Result.IESLights, Result.NaniteEnabledMeshes, Result.NaniteSkippedMeshes, Result.VerifiedOrdinaryMeshes);
+		for (const FString& Diagnostic : Result.Diagnostics) Report += Diagnostic + TEXT("\n");
 		if (Plan != nullptr)
 		{
-			Report += FString::Printf(TEXT("Source: %s\nDestination: %s\nOutput: %s\n"),
+			Report +=  FString::Printf(TEXT("Source: %s\nDestination: %s\nOutput: %s\n"),
 				*Plan->SourceFilePath, *Plan->Options.DestinationPath, *InstanceTypeName(Plan->Options.InstanceType));
 		}
 		for (const FConVerseOptimizedGroupVerification& Group : Result.GroupVerification)
@@ -2288,10 +2649,128 @@ namespace ConVerseDatasmithImport
 		return Value;
 	}
 
-	static void SaveAndLogReport(FConVerseOptimizedImportResult& Result)
+	/**
+	 * True for outcomes where the user got what they asked for. Everything else is a failure the
+	 * import log and the Output Log must make visible.
+	 *
+	 * AlreadyCurrent is a success only when its re-verification passed: an AlreadyCurrent that found
+	 * drift means the committed output no longer matches the manifest, which is exactly the silent
+	 * failure this log exists to surface.
+	 *
+	 * AcceptedWithFailedVerification is NOT a success, even though the user chose it and the output
+	 * was kept. The log records whether the checks passed, not whether the outcome was intended.
+	 * AwaitingFailedVerificationDecision is likewise not a success: it is not even an outcome yet.
+	 */
+	static bool IsSuccessOutcome(const FConVerseOptimizedImportResult& Result)
 	{
+		switch (Result.Status)
+		{
+		case EConVerseOptimizedImportStatus::Verified:
+		case EConVerseOptimizedImportStatus::AnalysisSucceeded:
+			return true;
+		case EConVerseOptimizedImportStatus::AlreadyCurrent:
+			return Result.bVerificationSucceeded && !Result.bSidecarChanged;
+		default:
+			return false;
+		}
+	}
+
+	static const TCHAR* SeverityName(const FConVerseOptimizedImportResult& Result)
+	{
+		if (Result.Status == EConVerseOptimizedImportStatus::RollbackFailed)
+		{
+			return TEXT("Error");
+		}
+		return IsSuccessOutcome(Result) ? TEXT("Info") : TEXT("Warning");
+	}
+
+	static const TCHAR* OperationName(EConVerseOptimizedImportOperation Operation)
+	{
+		switch (Operation)
+		{
+		case EConVerseOptimizedImportOperation::Analyze: return TEXT("Analyze");
+		case EConVerseOptimizedImportOperation::ResolveFailedVerification: return TEXT("ResolveFailedVerification");
+		default: return TEXT("ImportAndVerify");
+		}
+	}
+
+	/** RFC 4180: wrap in quotes and double any embedded quote. Summaries contain commas and newlines. */
+	static FString CsvField(const FString& Input)
+	{
+		FString Value = Input;
+		Value.ReplaceInline(TEXT("\r\n"), TEXT(" "));
+		Value.ReplaceInline(TEXT("\r"), TEXT(" "));
+		Value.ReplaceInline(TEXT("\n"), TEXT(" "));
+		Value.ReplaceInline(TEXT("\""), TEXT("\"\""));
+		return FString::Printf(TEXT("\"%s\""), *Value);
+	}
+
+	static FString ImportLogPath()
+	{
+		return FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/ImportLog.csv");
+	}
+
+	/**
+	 * Appends one row per attempt to the import log.
+	 *
+	 * Deliberately best-effort and non-fatal: an import that actually succeeded must never be
+	 * reported as failed because a log file was read-only or locked by a spreadsheet. A single
+	 * warning is emitted and the outcome is left untouched.
+	 */
+	static void AppendImportLogRow(const FConVerseOptimizedImportResult& Result, const FDateTime& TimestampUtc)
+	{
+		const FString ImportLogFile = ImportLogPath();
+		const bool bNeedsHeader = !FPaths::FileExists(ImportLogFile);
+
+		FString Row;
+		if (bNeedsHeader)
+		{
+			Row += TEXT("TimestampUtc,Operation,Status,Severity,Source,Destination,PlanId,SessionId,")
+				TEXT("PlannedGroups,VerifiedGroups,PlannedInstances,VerifiedInstances,Summary,ReportPath\n");
+		}
+		Row += FString::Printf(
+			TEXT("%s,%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%s,%s\n"),
+			*CsvField(TimestampUtc.ToIso8601()),
+			*CsvField(OperationName(Result.Operation)),
+			*CsvField(StatusName(Result.Status)),
+			*CsvField(SeverityName(Result)),
+			*CsvField(Result.SourceFilePath),
+			*CsvField(Result.DestinationPath),
+			*CsvField(Result.PlanId),
+			*CsvField(Result.SessionId),
+			Result.PlannedGroupCount, Result.VerifiedGroupCount,
+			Result.PlannedInstanceCount, Result.VerifiedInstanceCount,
+			*CsvField(Result.Summary),
+			*CsvField(Result.SavedReportPath));
+
+		if (!FFileHelper::SaveStringToFile(
+			Row, *ImportLogFile, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM,
+			&IFileManager::Get(), EFileWrite::FILEWRITE_Append))
+		{
+			UE_LOG(LogConVerseOptimizedImport, Warning,
+				TEXT("Could not append to the DatasmithHISM import log at %s. The import outcome itself is unaffected."),
+				*ImportLogFile);
+		}
+	}
+
+	static void SaveAndLogReport(FConVerseOptimizedImportResult& Result, bool bAppendToImportLog)
+	{
+		const FDateTime TimestampUtc = FDateTime::UtcNow();
+
+		// Sessionless attempts previously fell back to the PlanId alone, so a repeatedly failing
+		// import overwrote its own evidence every run. PlanId is deterministic for identical
+		// options, so the collision was guaranteed rather than incidental.
+		//
+		// A timestamp alone is not sufficient: two attempts easily land in the same second, and
+		// even millisecond resolution collides under automation. The process-lifetime counter makes
+		// the name unique regardless of clock resolution; the timestamp remains for readability.
+		static TAtomic<uint32> SessionlessReportCounter(0);
 		const FString ReportId = Result.SessionId.IsEmpty()
-			? (Result.PlanId.IsEmpty() ? FGuid::NewGuid().ToString(EGuidFormats::Digits) : Result.PlanId)
+			? FString::Printf(TEXT("%s-%03d_%u_%s"),
+				*TimestampUtc.ToString(TEXT("%Y%m%d-%H%M%S")),
+				TimestampUtc.GetMillisecond(),
+				SessionlessReportCounter.IncrementExchange(),
+				Result.PlanId.IsEmpty() ? *FGuid::NewGuid().ToString(EGuidFormats::Digits) : *Result.PlanId)
 			: Result.SessionId;
 		const FString Directory = FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/ImportReports");
 		IFileManager::Get().MakeDirectory(*Directory, true);
@@ -2304,7 +2783,26 @@ namespace ConVerseDatasmithImport
 		{
 			Result.SavedReportPath.Reset();
 		}
-		UE_LOG(LogConVerseOptimizedImport, Display, TEXT("%s"), *Result.Report);
+
+		// Severity is the point: a failure must be visible when the Output Log is filtered to
+		// warnings and errors, and RollbackFailed must stand out from ordinary failures.
+		if (Result.Status == EConVerseOptimizedImportStatus::RollbackFailed)
+		{
+			UE_LOG(LogConVerseOptimizedImport, Error, TEXT("%s"), *Result.Report);
+		}
+		else if (!IsSuccessOutcome(Result))
+		{
+			UE_LOG(LogConVerseOptimizedImport, Warning, TEXT("%s"), *Result.Report);
+		}
+		else
+		{
+			UE_LOG(LogConVerseOptimizedImport, Display, TEXT("%s"), *Result.Report);
+		}
+
+		if (bAppendToImportLog)
+		{
+			AppendImportLogRow(Result, TimestampUtc);
+		}
 	}
 
 	/**
@@ -2313,14 +2811,21 @@ namespace ConVerseDatasmithImport
 	 */
 	static constexpr float ImportProgressStepCount = 9.0f;
 
+	static void EnterStage(FScopedSlowTask& Progress, float Work, const FText& Label)
+	{
+		UE_LOG(LogConVerseOptimizedImport, Display, TEXT("%s"), *Label.ToString());
+		Progress.EnterProgressFrame(Work, Label);
+	}
+
+
 	/**
 	 * Contract: cancellation is checked at defined checkpoints. Returning true means the caller must
 	 * stop before performing any further mutation. Nothing has been mutated at the checkpoints that
 	 * use this helper, so no rollback is required; later checkpoints route through RollBackAttempt.
 	 */
-	static bool WasCancelled(FScopedSlowTask& SlowTask, FConVerseOptimizedImportResult& Result)
+	static bool WasCancelled(FScopedSlowTask& SlowTask, FConVerseOptimizedImportResult& Result, const TFunction<bool()>* Cancel = nullptr)
 	{
-		if (!SlowTask.ShouldCancel())
+		if (!SlowTask.ShouldCancel() && !(Cancel && *Cancel && (*Cancel)()))
 		{
 			return false;
 		}
@@ -2329,17 +2834,90 @@ namespace ConVerseDatasmithImport
 		return true;
 	}
 
-	static void FinishResult(const FPlan* Plan, FConVerseOptimizedImportResult& Result)
+
+	/**
+	 * An import that failed verification and is waiting for the user to accept or discard it.
+	 *
+	 * Held in memory only, for the lifetime of the editor process. A parked attempt owns real
+	 * assets and actors, so it is deliberately NOT persisted: resuming a half-finished mutation
+	 * across an editor restart, against a world that may have changed underneath it, is far more
+	 * dangerous than losing the ability to accept. If the editor closes with an attempt pending,
+	 * the objects remain in the level as ordinary unmanaged actors with no manifest claiming them,
+	 * which is the same state a user would get from a plain Datasmith import.
+	 *
+	 * Raw pointers are safe here only because resolution revalidates every one of them before use.
+	 */
+	struct FPendingFailedVerification
 	{
-		Result.Report = BuildReport(Plan, Result);
-		SaveAndLogReport(Result);
+		FPlan Plan;
+		FMutationInventory Inventory;
+		FConVerseOptimizedImportResult Result;
+		TWeakObjectPtr<UWorld> World;
+		TWeakObjectPtr<UDatasmithScene> ImportedScene;
+		TWeakObjectPtr<UConVerseOptimizedImportManifest> PreviousManifest;
+		FString FailureDetails;
+	};
+
+	static TMap<FString, TSharedPtr<FPendingFailedVerification>>& PendingFailedVerifications()
+	{
+		static TMap<FString, TSharedPtr<FPendingFailedVerification>> Pending;
+		return Pending;
 	}
+
+	/**
+	 * Builds and saves the report for a result.
+	 *
+	 * bTerminal distinguishes the final outcome of an attempt from an intermediate checkpoint. The
+	 * Verified checkpoint calls this before commit so a report exists if commit later fails, then
+	 * calls it again on the real exit — which would otherwise log the same attempt twice. The import
+	 * log must have exactly one row per attempt, so only terminal calls append.
+	 */
+	static void FinishResult(const FPlan* Plan, FConVerseOptimizedImportResult& Result, bool bTerminal = true)
+	{
+		Result.DurationSeconds = FPlatformTime::Seconds() - Result.StartedAtSeconds;
+		Result.ProcessPeakPhysicalBytes = FPlatformMemory::GetStats().PeakUsedPhysical;
+		Result.Report = BuildReport(Plan, Result);
+		SaveAndLogReport(Result, bTerminal);
+		if (!FConVerseDatasmithImportService::WriteAttemptCheckpoint(Result, bTerminal))
+			UE_LOG(LogConVerseOptimizedImport, Warning, TEXT("Could not update attempt recovery checkpoint for %s."), *Result.SessionId);
+	}
+	static bool FinishPreMutationCancellation(FConVerseImportProgress& Work, FConVerseOptimizedImportResult& Result)
+	{
+		if (!Work.IsCancelled()) return false;
+		Result.Status = EConVerseOptimizedImportStatus::CancelledRolledBack;
+		Result.Summary = TEXT("Analysis cancelled before mutation; no assets or actors were created.");
+		Result.PlanId.Reset();
+		Result.PlannedGroupCount = Result.PlannedInstanceCount = 0;
+		Result.TotalSourceMeshActors = Result.EligibleSourceActors = Result.BelowThresholdActorCount = Result.SkippedActorCount = 0;
+		Result.SourceLightCount = Result.SourceMeshAssetCount = Result.EnabledLocalLights = Result.UnitlessLights = Result.IESLights = 0;
+		Result.InspectionRows.Reset(); Result.Appearances.Reset(); Result.SkipCounts.Reset();
+		Result.SourceLightDescriptions.Reset(); Result.MaterialDecisions.Reset(); Result.Diagnostics.Reset();
+		if (Result.LastCompletedStage == EConVerseOptimizedImportStage::PlanBuilt)
+			Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
+		FinishResult(nullptr, Result);
+		return true;
+	}
+
+}
+
+TArray<FString> ConVerseDefaultTextureSearchFolders()
+{
+	FString Common = FPlatformMisc::GetEnvironmentVariable(TEXT("CommonProgramW6432"));
+	if (Common.IsEmpty()) Common = FPlatformMisc::GetEnvironmentVariable(TEXT("CommonProgramFiles"));
+	if (Common.IsEmpty()) return {};
+	const FString Root = FPaths::Combine(Common.Replace(TEXT("\\"), TEXT("/")), TEXT("Autodesk Shared/Materials/Textures"));
+	return { Root / TEXT("1/Mats"), Root / TEXT("2/Mats"), Root / TEXT("3/Mats") };
 }
 
 FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FConVerseOptimizedImportOptions& Options)
 {
 	using namespace ConVerseDatasmithImport;
 	FConVerseOptimizedImportResult Result;
+	Result.Operation = EConVerseOptimizedImportOperation::Analyze;
+	// Raw input first so an InvalidOptions row still records what was asked for; overwritten with
+	// the normalized values once normalization succeeds.
+	Result.SourceFilePath = Options.FilePath;
+	Result.DestinationPath = Options.DestinationPath;
 	FConVerseOptimizedImportOptions Normalized;
 	FString Error;
 	if (!NormalizeAndValidateOptions(Options, false, Normalized, Error))
@@ -2349,12 +2927,21 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 		FinishResult(nullptr, Result);
 		return Result;
 	}
+	Result.SourceFilePath = Normalized.FilePath;
+	Result.DestinationPath = Normalized.DestinationPath;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::OptionsValidated;
 
+	FScopedSlowTask SlowTask(5.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeProgress", "Analyze Datasmith source"));
+	if (!Normalized.bAutomated) SlowTask.MakeDialog(true);
+	FConVerseImportProgress Work(Normalized, SlowTask);
+	const auto Cancelled = [&]() { return FinishPreMutationCancellation(Work, Result); };
+	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeRead", "Reading source file..."));
+	if (Cancelled()) return Result;
 	FString SourceHash;
 	int64 SourceSize = 0;
-	if (!HashFile(Normalized.FilePath, SourceHash, SourceSize, Error))
+	if (!HashFile(Normalized.FilePath, SourceHash, SourceSize, Error, &SlowTask, &Normalized.CancelRequested, &Work))
 	{
+		if (Cancelled()) return Result;
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
 		Result.Summary = Error;
 		FinishResult(nullptr, Result);
@@ -2364,9 +2951,12 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.SourceFileHash = SourceHash;
 
 	// Fingerprint the sidecar folder as well. This is reported, not folded into PlanId.
+	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeAssets", "Checking supporting assets..."));
+	if (Cancelled()) return Result;
 	FSidecarFingerprint Sidecar;
-	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error))
+	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error, &SlowTask, &Normalized.CancelRequested, &Work))
 	{
+		if (Cancelled()) return Result;
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
 		Result.Summary = Error;
 		FinishResult(nullptr, Result);
@@ -2377,6 +2967,9 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.SidecarFileCount = Sidecar.FileCount;
 	Result.bSidecarExists = Sidecar.bExists;
 
+	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeTranslate", "Loading/translating source (translator progress may be unavailable)..."));
+	if (Cancelled()) return Result;
+	if (!Work.Update(EConVerseImportWorkPhase::Translation, 0, 1)) { Cancelled(); return Result; }
 	TSharedPtr<IDatasmithScene> Scene;
 	const TSharedPtr<FExternalSource> Source = LoadFreshSource(
 		Normalized.FilePath,
@@ -2384,7 +2977,22 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 		Scene,
 		Result.bTessellationApplied,
 		Error);
+	Work.Update(EConVerseImportWorkPhase::Translation, 1, 1);
+	if (Cancelled()) return Result;
 	if (!Source.IsValid() || !Scene.IsValid())
+	{
+		if (Cancelled()) return Result;
+		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
+		Result.Summary = Error;
+		FinishResult(nullptr, Result);
+		return Result;
+	}
+	ConVerseImportProcessing::ResolveMissingTextures(Scene.ToSharedRef(), Normalized, Result);
+	ConVerseImportProcessing::AnalyzeScene(Scene.ToSharedRef(), Normalized, Result, Work);
+	if (Cancelled()) return Result;
+	const auto Dependencies = ConVerseImportProcessing::ValidateDependencies(Scene.ToSharedRef(), Normalized, Result, Error, Work);
+	if (Cancelled()) return Result;
+	if (Dependencies == EConVerseImportWorkResult::Failed)
 	{
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
 		Result.Summary = Error;
@@ -2393,8 +3001,13 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	}
 	Result.bSourceLoaded = true;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
-	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, SourceHash, SourceSize);
+	if (Cancelled()) return Result;
+	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeGroups", "Analyzing meshes and groups..."));
+	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, SourceHash, SourceSize, Result.ResolvedTextures, Work);
+	if (Cancelled()) return Result;
+
 	PopulatePlanResult(Plan, Result);
+	if (Cancelled()) return Result;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::PlanBuilt;
 	Result.Status = Plan.Groups.IsEmpty()
 		? EConVerseOptimizedImportStatus::AnalysisNoEligibleGroups
@@ -2402,6 +3015,61 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.Summary = Plan.Groups.IsEmpty()
 		? TEXT("Analysis completed, but no safe group meets the current threshold.")
 		: FString::Printf(TEXT("Analysis planned %d groups and %d instances."), Result.PlannedGroupCount, Result.PlannedInstanceCount);
+	FString OwnershipError;
+	if (const auto* Previous = FindActiveManifest(Normalized.FilePath, Normalized.DestinationPath, &OwnershipError))
+	{
+		TSet<FString> OldGroups, NewGroups;
+		for (const auto& Group : Previous->Groups) OldGroups.Add(Group.GroupId);
+		for (const auto& Group : Plan.Groups) NewGroups.Add(Group.GroupId);
+		Result.Diagnostics.Add(FString::Printf(TEXT("Rebuild preview: %d groups added, %d removed, %d retained; %d ordinary source mesh elements planned."),
+			NewGroups.Difference(OldGroups).Num(), OldGroups.Difference(NewGroups).Num(), OldGroups.Intersect(NewGroups).Num(), Plan.TotalMeshActors - Result.PlannedInstanceCount));
+		TArray<FString> Differences;
+		ConVerseImportProcessing::CheckState(*Previous, Differences);
+		Result.Diagnostics.Append(Differences);
+		if (Previous->SourceInventoryVersion != 1)
+			Result.Diagnostics.Add(TEXT("Per-light/material change preview is unverified for this older manifest; an explicit rebuild will record the source inventory."));
+		else
+		{
+			auto Preview = [&](const TCHAR* Kind, const TMap<FString, FString>& Before, const TMap<FString, FString>& After)
+			{
+				TSet<FString> UniqueNames;
+				for (const auto& Pair : Before) UniqueNames.Add(Pair.Key);
+				for (const auto& Pair : After) UniqueNames.Add(Pair.Key);
+				TArray<FString> Names = UniqueNames.Array();
+				Names.Sort();
+				for (const FString& Name : Names)
+				{
+					const FString* Old = Before.Find(Name); const FString* New = After.Find(Name);
+					if (!Old || !New || *Old != *New)
+						Result.Diagnostics.Add(FString::Printf(TEXT("%s change %s\n  before: %s\n  after: %s"), Kind, *Name, Old ? **Old : TEXT("<absent>"), New ? **New : TEXT("<removed>")));
+				}
+			};
+			Preview(TEXT("Material"), Previous->MaterialDecisions, Result.MaterialDecisions);
+			Preview(TEXT("Light"), Previous->SourceLightDescriptions, Result.SourceLightDescriptions);
+		}
+	}
+	if (!OwnershipError.IsEmpty()) Result.Diagnostics.Add(OwnershipError);
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> VersionAssets;
+	Registry.GetAssetsByPath(FName(*Normalized.DestinationPath), VersionAssets, true, false);
+	for (const auto& Asset : VersionAssets)
+	{
+		if (Asset.AssetClassPath != UDatasmithScene::StaticClass()->GetClassPathName()) continue;
+		auto* VersionScene = Cast<UDatasmithScene>(Asset.GetAsset());
+		const auto* Version = VersionScene ? Cast<UConVerseOptimizedImportManifest>(VersionScene->GetAssetUserDataOfClass(UConVerseOptimizedImportManifest::StaticClass())) : nullptr;
+		if (!Version || Version->ManifestSchemaVersion > ContractVersion || Version->CommitState != EConVerseOptimizedImportCommitState::Superseded
+			|| !Version->CanonicalSourceFilePath.Equals(Normalized.FilePath, ESearchCase::IgnoreCase)) continue;
+		int64 Bytes = 0;
+		for (const FName& Package : Version->CreatedPackageNames)
+			for (const TCHAR* Extension : {TEXT(".uasset"), TEXT(".ubulk"), TEXT(".uexp"), TEXT(".uptnl")})
+				Bytes += FMath::Max(int64(0), IFileManager::Get().FileSize(*FPackageName::LongPackageNameToFilename(Package.ToString(), Extension)));
+		Result.Diagnostics.Add(FString::Printf(TEXT("Retained superseded session %s: %d packages, %lld on-disk package/bulk bytes (excludes shared DDC; unsaved data has no disk size)."),
+			*Version->SessionId, Version->CreatedPackageNames.Num(), Bytes));
+	}
+
+	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeReport", "Preparing analysis report..."));
+	Work.Update(EConVerseImportWorkPhase::Report, 0, 1);
+	if (Cancelled()) return Result;
 	FinishResult(&Plan, Result);
 	return Result;
 }
@@ -2410,6 +3078,9 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 {
 	using namespace ConVerseDatasmithImport;
 	FConVerseOptimizedImportResult Result;
+	Result.Operation = EConVerseOptimizedImportOperation::ImportAndVerify;
+	Result.SourceFilePath = Options.FilePath;
+	Result.DestinationPath = Options.DestinationPath;
 	FConVerseOptimizedImportOptions Normalized;
 	FString Error;
 	if (!NormalizeAndValidateOptions(Options, true, Normalized, Error))
@@ -2419,6 +3090,8 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		FinishResult(nullptr, Result);
 		return Result;
 	}
+	Result.SourceFilePath = Normalized.FilePath;
+	Result.DestinationPath = Normalized.DestinationPath;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::OptionsValidated;
 	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
 	if (World == nullptr)
@@ -2439,13 +3112,16 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	{
 		SlowTask.MakeDialog(true);
 	}
-	SlowTask.EnterProgressFrame(1.0f,
+	FConVerseImportProgress Work(Normalized, SlowTask);
+	const auto Cancelled = [&]() { return FinishPreMutationCancellation(Work, Result); };
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportHashing", "Hashing the source file..."));
 
 	FString InitialHash;
 	int64 InitialSize = 0;
-	if (!HashFile(Normalized.FilePath, InitialHash, InitialSize, Error))
+	if (!HashFile(Normalized.FilePath, InitialHash, InitialSize, Error, &SlowTask, &Normalized.CancelRequested, &Work))
 	{
+		if (Cancelled()) return Result;
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
 		Result.Summary = Error;
 		FinishResult(nullptr, Result);
@@ -2456,8 +3132,9 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 
 	// Fingerprinted here, ahead of the manifest lookup, so the AlreadyCurrent branch can compare it.
 	FSidecarFingerprint Sidecar;
-	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error))
+	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error, &SlowTask, &Normalized.CancelRequested, &Work))
 	{
+		if (Cancelled()) return Result;
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
 		Result.Summary = Error;
 		FinishResult(nullptr, Result);
@@ -2468,14 +3145,11 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	Result.SidecarFileCount = Sidecar.FileCount;
 	Result.bSidecarExists = Sidecar.bExists;
 
-	if (WasCancelled(SlowTask, Result))
-	{
-		FinishResult(nullptr, Result);
-		return Result;
-	}
+	if (Cancelled()) return Result;
 
-	SlowTask.EnterProgressFrame(1.0f,
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportLoading", "Loading the Datasmith source..."));
+	if (!Work.Update(EConVerseImportWorkPhase::Translation, 0, 1)) { Cancelled(); return Result; }
 	TSharedPtr<IDatasmithScene> Scene;
 	TSharedPtr<FExternalSource> Source = LoadFreshSource(
 		Normalized.FilePath,
@@ -2483,7 +3157,19 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		Scene,
 		Result.bTessellationApplied,
 		Error);
+	Work.Update(EConVerseImportWorkPhase::Translation, 1, 1);
+	if (Cancelled()) return Result;
 	if (!Source.IsValid() || !Scene.IsValid())
+	{
+		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
+		Result.Summary = Error;
+		FinishResult(nullptr, Result);
+		return Result;
+	}
+	ConVerseImportProcessing::ResolveMissingTextures(Scene.ToSharedRef(), Normalized, Result);
+	const auto Dependencies = ConVerseImportProcessing::ValidateDependencies(Scene.ToSharedRef(), Normalized, Result, Error, Work);
+	if (Cancelled()) return Result;
+	if (Dependencies == EConVerseImportWorkResult::Failed)
 	{
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
 		Result.Summary = Error;
@@ -2492,23 +3178,18 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	}
 	Result.bSourceLoaded = true;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
-	if (WasCancelled(SlowTask, Result))
-	{
-		FinishResult(nullptr, Result);
-		return Result;
-	}
+	if (Cancelled()) return Result;
 
-	SlowTask.EnterProgressFrame(1.0f,
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportPlanning", "Traversing the scene and planning groups..."));
-	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, InitialHash, InitialSize);
+	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, InitialHash, InitialSize, Result.ResolvedTextures, Work);
+	if (Cancelled()) return Result;
+	ConVerseImportProcessing::AnalyzeScene(Scene.ToSharedRef(), Normalized, Result, Work);
+	if (Cancelled()) return Result;
 	PopulatePlanResult(Plan, Result);
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::PlanBuilt;
-	if (WasCancelled(SlowTask, Result))
-	{
-		FinishResult(&Plan, Result);
-		return Result;
-	}
-	if (Plan.Groups.IsEmpty())
+	if (Cancelled()) return Result;
+	if (Plan.Groups.IsEmpty() && Plan.TotalMeshActors == 0 && Result.SourceLightCount == 0)
 	{
 		Result.Status = EConVerseOptimizedImportStatus::AnalysisNoEligibleGroups;
 		Result.Summary = TEXT("Import stopped before mutation because the plan contains no eligible groups.");
@@ -2533,16 +3214,36 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 	UConVerseOptimizedImportManifest* PreviousManifest = PreviousManifestGuard.Get();
+	if (PreviousManifest != nullptr && PreviousManifest->Verification.bAcceptedWithFailedVerification)
+	{
+		// The destination is owned by a session that was accepted despite failing verification.
+		// Superseding it would destroy actors based on records verification could not confirm, so
+		// the only safe move is to refuse and let the user remove it deliberately.
+		Result.Status = EConVerseOptimizedImportStatus::OptimizedReimportBlocked;
+		Result.bWasReimport = true;
+		Result.PreviousManifestId = PreviousManifest->ManifestId;
+		Result.PreviousSessionId = PreviousManifest->SessionId;
+		Result.Summary = FString::Printf(
+			TEXT("This destination is owned by session %s, which was accepted despite failing verification. ")
+			TEXT("Optimized reimport is refused because that session's records cannot be trusted to ")
+			TEXT("identify what to remove. Delete its output manually, then import again.%s"),
+			*PreviousManifest->SessionId, *PreviousManifest->Verification.AcceptedFailureDetails);
+		FinishResult(&Plan, Result);
+		return Result;
+	}
 	if (PreviousManifest != nullptr)
 	{
 		Result.bWasReimport = true;
 		Result.PreviousManifestId = PreviousManifest->ManifestId;
 		Result.PreviousSessionId = PreviousManifest->SessionId;
-		if (PreviousManifest->PlanId == Plan.PlanId)
+		if (PreviousManifest->PlanId == Plan.PlanId && !Normalized.bRebuildFromSource)
 		{
 			// Contract: an unchanged source runs verification only. This is read-only and never mutates the world.
 			Result.Status = EConVerseOptimizedImportStatus::AlreadyCurrent;
 			Result.bVerificationSucceeded = ReverifyCommittedSession(*PreviousManifest, Result);
+			Result.InspectionRows = PreviousManifest->ImportedElements;
+			Result.ManifestAssetPath = FSoftObjectPath(PreviousManifest);
+			Result.ImportAssetPath = FSoftObjectPath(PreviousManifest->GetOuter());
 			Result.LastCompletedStage = EConVerseOptimizedImportStage::Verified;
 
 			// The PlanId matched, so the primary file is unchanged. The sidecar may not be: for CAD,
@@ -2588,6 +3289,31 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		}
 	}
 
+	if (PreviousManifest && !Normalized.bReplaceManualEdits)
+	{
+		TArray<FString> Differences;
+		if (!ConVerseImportProcessing::CheckState(*PreviousManifest, Differences))
+		{
+			Result.Status = EConVerseOptimizedImportStatus::ManualEditsDetected;
+			Result.Diagnostics.Append(Differences);
+			Result.Summary = TEXT("Rebuild would replace tracked manual edits or an unrecorded legacy baseline. Review the differences and explicitly replace or cancel.");
+			FinishResult(&Plan, Result);
+			return Result;
+		}
+	}
+
+	if (!Normalized.bAutomated && Result.EnabledLocalLights >= Normalized.Processing.ManyLightThreshold)
+	{
+		const FText Warning = FText::Format(NSLOCTEXT("ConVerseHISM", "ManyLightsBeforeImport", "This source contains {0} enabled local lights. Review MegaLights in Project Settings > Rendering for this scene. The importer will preserve the exported light values and leave rendering settings unchanged.\n\nContinue importing?"), FText::AsNumber(Result.EnabledLocalLights));
+		if (FMessageDialog::Open(EAppMsgType::OkCancel, Warning) == EAppReturnType::Cancel)
+		{
+			Result.Status = EConVerseOptimizedImportStatus::CancelledRolledBack;
+			Result.Summary = TEXT("Import cancelled before creating any output.");
+			FinishResult(&Plan, Result);
+			return Result;
+		}
+	}
+
 	FString PreMutationHash;
 	int64 PreMutationSize = 0;
 	if (!HashFile(Normalized.FilePath, PreMutationHash, PreMutationSize, Error))
@@ -2614,7 +3340,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::MutationPreflight;
-	SlowTask.EnterProgressFrame(1.0f,
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportPreflight", "Preflighting destination and world changes..."));
 	Result.SessionId = FGuid::NewGuid().ToString(EGuidFormats::Digits).ToLower();
 	const FString AssetName = ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(Normalized.FilePath));
@@ -2644,18 +3370,26 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	}
 	// Final cancellation checkpoint before the first mutation. Past this point the operation owns
 	// partial state, so cancellation must unwind through RollBackAttempt instead of returning early.
-	if (WasCancelled(SlowTask, Result))
+	if (WasCancelled(SlowTask, Result, &Normalized.CancelRequested))
 	{
+		FinishResult(&Plan, Result);
+		return Result;
+	}
+	Result.AttemptFolder = AttemptFolder;
+	if (!WriteAttemptCheckpoint(Result, false))
+	{
+		Result.Status = EConVerseOptimizedImportStatus::InvalidOptions;
+		Result.Summary = TEXT("Cannot write the attempt recovery checkpoint. Import stopped before mutation.");
 		FinishResult(&Plan, Result);
 		return Result;
 	}
 	const FMutationInventory Inventory = CaptureMutationInventory(*World, AttemptFolder);
 
-	SlowTask.EnterProgressFrame(1.0f,
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportTransform", "Rewriting the scene into instanced groups..."));
 	ApplyResolvedPlan(Scene.ToSharedRef(), Plan, ResolvedGroups, Result.SessionId);
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SceneTransformed;
-	SlowTask.EnterProgressFrame(1.0f,
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportDatasmith", "Running the Datasmith import..."));
 	const FString PackageName = AttemptFolder / AssetName;
 	TStrongObjectPtr<UPackage> Package(CreatePackage(*PackageName));
@@ -2692,6 +3426,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 
 	Result.bImportSucceeded = true;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::DatasmithImported;
+	WriteAttemptCheckpoint(Result, false);
 	Result.ImportAssetPath = FSoftObjectPath(ImportedScene);
 	FAssetRegistryModule::AssetCreated(ImportedScene);
 	ImportedScene->MarkPackageDirty();
@@ -2709,14 +3444,17 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 
-	SlowTask.EnterProgressFrame(1.0f,
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportConvert", "Converting instanced components..."));
 	TMap<FString, TArray<UInstancedStaticMeshComponent*>> ImportedComponents;
 	GatherSessionComponents(*World, Result.SessionId, ImportedComponents);
 	TArray<FComponentSnapshot> Snapshots;
 	bool bInventoryValid = ImportedComponents.Num() == Plan.Groups.Num();
+	if (bInventoryValid) bInventoryValid = ConVerseImportProcessing::ApplyMaterials(*World, *ImportedScene, Scene.ToSharedRef(),
+		AttemptFolder, Normalized.Processing, Result, Error);
 	for (const FGroupValue& Group : Plan.Groups)
 	{
+		if (!bInventoryValid) break;
 		const TArray<UInstancedStaticMeshComponent*>* Components = ImportedComponents.Find(Group.GroupId);
 		if (Components == nullptr || Components->Num() != 1
 			|| (*Components)[0]->GetClass() != UHierarchicalInstancedStaticMeshComponent::StaticClass())
@@ -2736,25 +3474,89 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	{
 		bInventoryValid = false;
 	}
+	// Test-only seam. Injected here because the attempt now owns imported assets and world actors,
+	// which is exactly the state RollBackAttempt exists to unwind.
+	else if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::AfterDatasmithImport
+		|| Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::ObstructRollback)
+	{
+		bInventoryValid = false;
+		Error = TEXT("Injected failure after the Datasmith import (test-only failure injection).");
+	}
+	if (bInventoryValid) bInventoryValid = ConVerseImportProcessing::ProcessMeshes(*World, *ImportedScene, AttemptFolder, Normalized, Result, Error);
 	if (!bInventoryValid)
 	{
 		FString RollbackDetails;
-		const bool bRolledBack = RollBackAttempt(*World, Inventory, Result.SessionId, Result, RollbackDetails);
-		Result.Status = bRolledBack
-			? EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack
-			: EConVerseOptimizedImportStatus::RollbackFailed;
+		const bool bRolledBack = RollBackAttempt(*World, Inventory, Result.SessionId, Result, RollbackDetails,
+			Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::ObstructRollback);
+		const bool bProcessingCancelled = SlowTask.ShouldCancel() || Error.StartsWith(TEXT("Mesh processing cancelled"));
+		Result.Status = !bRolledBack ? EConVerseOptimizedImportStatus::RollbackFailed
+			: (bProcessingCancelled ? EConVerseOptimizedImportStatus::CancelledRolledBack : EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack);
 		Result.Summary = Error + RollbackDetails;
 		FinishResult(&Plan, Result);
 		return Result;
 	}
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::ComponentsConverted;
+	ConVerseImportProcessing::CaptureState(*World, *ImportedScene, AttemptFolder, Inventory.ExistingActors, Result);
+	WriteAttemptCheckpoint(Result, false);
 
-	SlowTask.EnterProgressFrame(1.0f,
+	if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::CorruptBeforeVerification)
+	{
+		// Test-only seam. Deliberately damages real output so the verification below fails on its
+		// own terms rather than being told to. Nothing about the failure is simulated.
+		TMap<FString, TArray<UInstancedStaticMeshComponent*>> CorruptTargets;
+		GatherSessionComponents(*World, Result.SessionId, CorruptTargets);
+		for (TPair<FString, TArray<UInstancedStaticMeshComponent*>>& Pair : CorruptTargets)
+		{
+			if (!Pair.Value.IsEmpty() && IsValid(Pair.Value[0]) && Pair.Value[0]->GetInstanceCount() > 0)
+			{
+				Pair.Value[0]->RemoveInstance(Pair.Value[0]->GetInstanceCount() - 1);
+				break;
+			}
+		}
+	}
+
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportVerify", "Verifying the imported session..."));
 	Result.bVerificationSucceeded = VerifySession(
 		*World, *ImportedScene, Plan, Result.SessionId, Snapshots, Result);
+	Result.bVerificationSucceeded &= VerifySourceAccounting(*World, *ImportedScene, Plan, Inventory, Result.SessionId, Result);
+	Result.bVerificationSucceeded &= ConVerseImportProcessing::VerifyLights(*World, *ImportedScene, Scene.ToSharedRef(), Inventory.ExistingActors, Result);
 	if (!Result.bVerificationSucceeded)
 	{
+		FString FailedGroupSummary;
+		for (const FConVerseOptimizedGroupVerification& Verification : Result.GroupVerification)
+		{
+			if (!Verification.bPassed)
+			{
+				FailedGroupSummary += FString::Printf(TEXT("\n  %s: %s"), *Verification.GroupId, *Verification.Details);
+			}
+		}
+
+		if (Normalized.bDeferRollbackOnVerificationFailure)
+		{
+			// Park the attempt instead of unwinding it. Nothing is committed and nothing is
+			// destroyed: the objects this attempt created stay exactly as verification found them
+			// until AcceptFailedVerification or DiscardFailedVerification resolves the decision.
+			TSharedPtr<FPendingFailedVerification> Pending = MakeShared<FPendingFailedVerification>();
+			Pending->Plan = Plan;
+			Pending->Inventory = Inventory;
+			Pending->World = World;
+			Pending->ImportedScene = ImportedScene;
+			Pending->PreviousManifest = PreviousManifest;
+			Pending->FailureDetails = FailedGroupSummary;
+
+			Result.Status = EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision;
+			Result.Summary = FString::Printf(
+				TEXT("Import completed, but %d of %d groups failed verification. ")
+				TEXT("Nothing has been committed or rolled back yet; accept or discard this result.%s"),
+				Result.PlannedGroupCount - Result.VerifiedGroupCount, Result.PlannedGroupCount,
+				*FailedGroupSummary);
+			Pending->Result = Result;
+			PendingFailedVerifications().Add(Result.SessionId, Pending);
+			FinishResult(&Plan, Result);
+			return Result;
+		}
+
 		FString RollbackDetails;
 		const bool bRolledBack = RollBackAttempt(*World, Inventory, Result.SessionId, Result, RollbackDetails);
 		Result.Status = bRolledBack
@@ -2767,13 +3569,26 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 
 	Result.Status = EConVerseOptimizedImportStatus::Verified;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::Verified;
-	Result.Summary = FString::Printf(TEXT("Verified %d groups and %d ordered instances."),
-		Result.VerifiedGroupCount, Result.VerifiedInstanceCount);
-	FinishResult(&Plan, Result);
+	Result.Summary = FString::Printf(TEXT("Verified, unsaved: %d groups, %d ordered instances, and %d ordinary mesh elements. Light checks are listed in the report."),
+		Result.VerifiedGroupCount, Result.VerifiedInstanceCount, Result.VerifiedOrdinaryMeshes);
+	// Intermediate checkpoint: commit has not run yet, so this is not the attempt's final outcome
+	// and must not produce an import log row. The exits below each finish the attempt for real.
+	FinishResult(&Plan, Result, /*bTerminal=*/false);
+
+	if (SlowTask.ShouldCancel() || (Normalized.CancelRequested && Normalized.CancelRequested()))
+	{
+		FString RollbackDetails;
+		const bool bRolledBack = RollBackAttempt(*World, Inventory, Result.SessionId, Result, RollbackDetails);
+		Result.Status = bRolledBack ? EConVerseOptimizedImportStatus::CancelledRolledBack : EConVerseOptimizedImportStatus::RollbackFailed;
+		Result.bVerificationSucceeded = false;
+		Result.Summary = TEXT("Import cancelled before commit.") + RollbackDetails;
+		FinishResult(&Plan, Result);
+		return Result;
+	}
 
 	// Point of no return: the session is verified and is about to take ownership, so cancellation is
 	// no longer offered. Superseding is atomic from the user's perspective.
-	SlowTask.EnterProgressFrame(1.0f,
+	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportCommit", "Committing the manifest and superseding the previous session..."));
 
 	// Resolve the prior session before any destruction so a failure here still leaves the old output intact.
@@ -2794,7 +3609,16 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 
-	if (!CommitManifestAndOwnership(*World, *ImportedScene, Plan, Inventory, PreviousManifest, Result, Error))
+	const bool bCommitSucceeded =
+		Normalized.FailureInjection != EConVerseOptimizedImportFailureInjection::BeforeManifestCommit
+		&& CommitManifestAndOwnership(*World, *ImportedScene, Plan, Inventory, PreviousManifest, Result, Error);
+	if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::BeforeManifestCommit)
+	{
+		// Test-only seam. Short-circuited before CommitManifestAndOwnership runs, so nothing is
+		// committed and this is the latest checkpoint that still rolls back.
+		Error = TEXT("Injected failure before the manifest commit (test-only failure injection).");
+	}
+	if (!bCommitSucceeded)
 	{
 		FString RollbackDetails;
 		const bool bRolledBack = RollBackAttempt(*World, Inventory, Result.SessionId, Result, RollbackDetails);
@@ -2849,4 +3673,152 @@ bool FConVerseDatasmithImportService::HasActiveOptimizedImport(const FConVerseOp
 		return false;
 	}
 	return FindActiveManifest(Normalized.FilePath, Normalized.DestinationPath) != nullptr;
+}
+
+FString FConVerseDatasmithImportService::GetImportLogPath()
+{
+	return FPaths::ConvertRelativePathToFull(ConVerseDatasmithImport::ImportLogPath());
+}
+
+bool FConVerseDatasmithImportService::HasPendingFailedVerification(const FString& SessionId)
+{
+	return ConVerseDatasmithImport::PendingFailedVerifications().Contains(SessionId);
+}
+
+FConVerseOptimizedImportResult FConVerseDatasmithImportService::AcceptFailedVerification(const FString& SessionId)
+{
+	using namespace ConVerseDatasmithImport;
+
+	TSharedPtr<FPendingFailedVerification> Pending;
+	if (!PendingFailedVerifications().RemoveAndCopyValue(SessionId, Pending) || !Pending.IsValid())
+	{
+		FConVerseOptimizedImportResult Result;
+		Result.Operation = EConVerseOptimizedImportOperation::ResolveFailedVerification;
+		Result.SessionId = SessionId;
+		Result.Status = EConVerseOptimizedImportStatus::InvalidOptions;
+		Result.Summary = TEXT("No import is awaiting a verification decision for this session. ")
+			TEXT("Pending attempts do not survive an editor restart.");
+		FinishResult(nullptr, Result);
+		return Result;
+	}
+
+	FConVerseOptimizedImportResult Result = Pending->Result;
+	Result.Operation = EConVerseOptimizedImportOperation::ResolveFailedVerification;
+	UWorld* World = Pending->World.Get();
+	UDatasmithScene* ImportedScene = Pending->ImportedScene.Get();
+
+	// The world can change between the failure and the decision. Committing a manifest whose
+	// referents have gone is worse than not committing at all, so a stale attempt is discarded.
+	if (!IsValid(World) || !IsValid(ImportedScene))
+	{
+		Result.Status = EConVerseOptimizedImportStatus::RollbackFailed;
+		Result.Summary = TEXT("The imported scene or world was destroyed before the result could be accepted. ")
+			TEXT("Objects created by this attempt may remain in the level and are not owned by any manifest.");
+		FinishResult(&Pending->Plan, Result);
+		return Result;
+	}
+
+	FString Error;
+	TArray<AActor*> SupersededActors;
+	UConVerseOptimizedImportManifest* PreviousManifest = Pending->PreviousManifest.Get();
+	if (PreviousManifest != nullptr
+		&& !PreflightSupersedeSession(*World, *PreviousManifest, SupersededActors, Error))
+	{
+		// The previous session cannot be safely replaced, so fall back to the behavior that would
+		// have happened automatically rather than leaving two competing sessions in the level.
+		FString RollbackDetails;
+		const bool bRolledBack = RollBackAttempt(*World, Pending->Inventory, Result.SessionId, Result, RollbackDetails);
+		Result.Status = bRolledBack
+			? EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack
+			: EConVerseOptimizedImportStatus::RollbackFailed;
+		Result.Summary = FString::Printf(
+			TEXT("The result could not be accepted because the previous optimized session could not be superseded: %s%s"),
+			*Error, *RollbackDetails);
+		FinishResult(&Pending->Plan, Result);
+		return Result;
+	}
+
+	if (!CommitManifestAndOwnership(
+		*World, *ImportedScene, Pending->Plan, Pending->Inventory, PreviousManifest, Result, Error))
+	{
+		FString RollbackDetails;
+		const bool bRolledBack = RollBackAttempt(*World, Pending->Inventory, Result.SessionId, Result, RollbackDetails);
+		Result.Status = bRolledBack
+			? EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack
+			: EConVerseOptimizedImportStatus::RollbackFailed;
+		Result.Summary = FString::Printf(TEXT("The result could not be accepted: manifest commit failed: %s%s"),
+			*Error, *RollbackDetails);
+		FinishResult(&Pending->Plan, Result);
+		return Result;
+	}
+
+	// Quarantine the committed manifest. It describes output that verification could not confirm,
+	// so it must never be used as the basis for superseding anything later.
+	if (UConVerseOptimizedImportManifest* Committed =
+		Cast<UConVerseOptimizedImportManifest>(ImportedScene->GetAssetUserDataOfClass(
+			UConVerseOptimizedImportManifest::StaticClass())))
+	{
+		Committed->Modify();
+		Committed->Verification.bAcceptedWithFailedVerification = true;
+		Committed->Verification.AcceptedFailureDetails = Pending->FailureDetails;
+		ImportedScene->MarkPackageDirty();
+	}
+
+	if (PreviousManifest != nullptr)
+	{
+		FString SupersedeDetails;
+		if (RemoveSupersededSession(*World, SupersededActors, Result.RemovedPreviousActorCount, SupersedeDetails))
+		{
+			MarkManifestSuperseded(*PreviousManifest);
+		}
+	}
+
+	// bVerificationSucceeded stays false. Accepting changes what happens to the output, never the
+	// record of whether it passed.
+	Result.Status = EConVerseOptimizedImportStatus::AcceptedWithFailedVerification;
+	Result.Summary = FString::Printf(
+		TEXT("Accepted despite failed verification: %d of %d groups verified. ")
+		TEXT("This session is committed but degraded, and optimized reimport is refused against it.%s"),
+		Result.VerifiedGroupCount, Result.PlannedGroupCount, *Pending->FailureDetails);
+	FinishResult(&Pending->Plan, Result);
+	return Result;
+}
+
+FConVerseOptimizedImportResult FConVerseDatasmithImportService::DiscardFailedVerification(const FString& SessionId)
+{
+	using namespace ConVerseDatasmithImport;
+
+	TSharedPtr<FPendingFailedVerification> Pending;
+	if (!PendingFailedVerifications().RemoveAndCopyValue(SessionId, Pending) || !Pending.IsValid())
+	{
+		FConVerseOptimizedImportResult Result;
+		Result.Operation = EConVerseOptimizedImportOperation::ResolveFailedVerification;
+		Result.SessionId = SessionId;
+		Result.Status = EConVerseOptimizedImportStatus::InvalidOptions;
+		Result.Summary = TEXT("No import is awaiting a verification decision for this session. ")
+			TEXT("Pending attempts do not survive an editor restart.");
+		FinishResult(nullptr, Result);
+		return Result;
+	}
+
+	FConVerseOptimizedImportResult Result = Pending->Result;
+	Result.Operation = EConVerseOptimizedImportOperation::ResolveFailedVerification;
+	UWorld* World = Pending->World.Get();
+	if (!IsValid(World))
+	{
+		Result.Status = EConVerseOptimizedImportStatus::RollbackFailed;
+		Result.Summary = TEXT("The world was destroyed before the result could be discarded. ")
+			TEXT("Objects created by this attempt may remain and are not owned by any manifest.");
+		FinishResult(&Pending->Plan, Result);
+		return Result;
+	}
+
+	FString RollbackDetails;
+	const bool bRolledBack = RollBackAttempt(*World, Pending->Inventory, Result.SessionId, Result, RollbackDetails);
+	Result.Status = bRolledBack
+		? EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack
+		: EConVerseOptimizedImportStatus::RollbackFailed;
+	Result.Summary = TEXT("Discarded after failed verification.") + RollbackDetails;
+	FinishResult(&Pending->Plan, Result);
+	return Result;
 }

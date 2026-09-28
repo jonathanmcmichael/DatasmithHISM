@@ -1,6 +1,7 @@
 #include "ConVerseHISMUtils.h"
 
 #include "ConVerseStaticMeshConsolidationUtils.h"
+#include "ISMPartition/ISMComponentDescriptor.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h" // UHierarchicalInstancedStaticMeshComponent is a UInstancedStaticMeshComponent subclass; the include
                                                                   // keeps the full type available so GetComponents<UInstancedStaticMeshComponent> also returns legacy
                                                                   // HISM components created by earlier versions of this plugin when ClearManagedHISMComponents runs.
@@ -38,19 +39,21 @@ namespace ConVerseHISM
 			// Actors with identical geometry but different materials produce different keys
 			// and get separate ISM components, preserving each variant's appearance.
 			FString MaterialSignature;
+			FISMComponentDescriptorBase Settings;
 
 			bool operator==(const FHISMGroupKey& Other) const
 			{
 				return FamilyTypeActor == Other.FamilyTypeActor
 					&& GeometrySignature == Other.GeometrySignature
-					&& MaterialSignature == Other.MaterialSignature;
+					&& MaterialSignature == Other.MaterialSignature
+					&& Settings == Other.Settings;
 			}
 
 			friend uint32 GetTypeHash(const FHISMGroupKey& Key)
 			{
 				return HashCombine(
 					HashCombine(GetTypeHash(Key.FamilyTypeActor), GetTypeHash(Key.GeometrySignature)),
-					GetTypeHash(Key.MaterialSignature));
+					HashCombine(GetTypeHash(Key.MaterialSignature), GetTypeHash(Key.Settings)));
 			}
 		};
 
@@ -82,13 +85,15 @@ namespace ConVerseHISM
 			FString FamilyLabel;
 			FString GeometrySignature;
 			FString MaterialSignature;
+			FISMComponentDescriptorBase Settings;
 
 			bool operator==(const FHISMAnalysisKey& Other) const
 			{
 				return CleanupBoundary == Other.CleanupBoundary
 					&& FamilyLabel == Other.FamilyLabel
 					&& GeometrySignature == Other.GeometrySignature
-					&& MaterialSignature == Other.MaterialSignature;
+					&& MaterialSignature == Other.MaterialSignature
+					&& Settings == Other.Settings;
 			}
 
 			friend uint32 GetTypeHash(const FHISMAnalysisKey& Key)
@@ -571,6 +576,8 @@ namespace ConVerseHISM
 			Key.FamilyTypeActor = FamilyTypeActor;
 			Key.GeometrySignature = GetCachedMeshSignature(MeshComponent->GetStaticMesh(), SignatureCache);
 			Key.MaterialSignature = BuildMaterialSignature(MeshComponent);
+			Key.Settings.InitFrom(MeshComponent);
+			Key.GeometrySignature += MeshComponent->GetStaticMesh()->GetBoundingBox().GetCenter().ToString();
 			return Key;
 		}
 
@@ -581,14 +588,16 @@ namespace ConVerseHISM
 				return FTransform::Identity;
 			}
 
-			// Revit/Datasmith imports in this workflow are flattened, so the source object transform is
-			// the actor transform itself. Using actor space here avoids depending on stale or identity
-			// component-to-world values from Dataprep preview actors.
-			return Actor->GetActorTransform();
+			// Component placement includes offsets below a non-mesh actor root.
+			MeshComponent->UpdateComponentToWorld();
+			return MeshComponent->GetComponentTransform();
 		}
 
 		static void CopyRelevantComponentProperties(const UStaticMeshComponent* SourceComponent, UInstancedStaticMeshComponent* TargetComponent)
 		{
+			FISMComponentDescriptorBase Settings;
+			Settings.InitFrom(SourceComponent);
+			Settings.InitComponent(TargetComponent);
 			TargetComponent->SetMobility(SourceComponent->Mobility);
 			TargetComponent->SetCollisionEnabled(SourceComponent->GetCollisionEnabled());
 			TargetComponent->SetCollisionProfileName(SourceComponent->GetCollisionProfileName());
@@ -885,6 +894,8 @@ namespace ConVerseHISM
 			Key.FamilyLabel = FamilyLabel;
 			Key.GeometrySignature = GetCachedMeshSignature(MeshComponent->GetStaticMesh(), SignatureCache);
 			Key.MaterialSignature = BuildMaterialSignature(MeshComponent);
+			Key.Settings.InitFrom(MeshComponent);
+			Key.GeometrySignature += MeshComponent->GetStaticMesh()->GetBoundingBox().GetCenter().ToString();
 
 			FHISMAnalysisGroupData& GroupData = Groups.FindOrAdd(Key);
 			++GroupData.ActorCount;

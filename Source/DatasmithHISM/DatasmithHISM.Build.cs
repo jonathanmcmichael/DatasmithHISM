@@ -11,6 +11,7 @@ public class DatasmithHISM : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
+				"DatasmithHISMRuntime",
 				"DataprepCore",
 				"Engine"
 			});
@@ -30,6 +31,10 @@ public class DatasmithHISM : ModuleRules
 				"EditorFramework",
 				"ExternalSource",
 				"InputCore",
+				"Json",
+				"JsonUtilities",
+				"PropertyEditor",
+				"Settings",
 				"MaterialEditor",
 				"MeshDescription",
 				"MeshMergeUtilities",

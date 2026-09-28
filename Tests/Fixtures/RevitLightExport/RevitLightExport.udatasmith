@@ -1,0 +1,26 @@
+<?xml version='1.0' encoding='utf-8'?>
+<DatasmithUnrealScene>
+  <Version>0.24</Version>
+  <SDKVersion>5.3.0-24761556</SDKVersion>
+  <Host>Revit</Host>
+  <Application Vendor="Autodesk Inc." ProductName="Revit" ProductVersion="2025" />
+  <ResourcePath>C:/Users/jonathanmc/Desktop</ResourcePath>
+  <User ID="36e8bd8d4c231742057d8489bc7cd3f3" OS="Windows 11 (25H2) [10.0.26200.9457]" />
+  <Light name="92094f736c42db158d9b8821a7e343a3" type="PointLight" enabled="1" label="Lighting_Fixtures_Bollard_Light_Incandescent_-_120V" layer="Light Source">
+    <Transform tx="-2272.664966" ty="-478.789993" tz="1910.079971" sx="1.0" sy="1.0" sz="1.0" qx="0.0" qy="0.0" qz="0.0" qw="1.0" qhex64="000000000000000000000000000000000000000000000000000000000000F03F" />
+    <Color usetemp="0" temperature="2800.0" R="1.0" G="1.0" B="1.0" />
+    <IESTexture name="BL1A19_IES" />
+    <IESbrightness scale="-1" />
+    <IESrotation qhex64="010000000000E03F010000000000E03F010000000000E0BF020000000000E03F" qhex="0000003F0000003F000000BF0000003F" />
+    <Intensity value="100.0" />
+    <IntensityUnits value="Unitless" />
+    <tag value="Revit.Element.Id.2052881" />
+    <tag value="Revit.Element.UniqueId.c527d6db-3cd7-41e5-bb3a-3dcd744150fb-001f5311" />
+    <tag value="Revit.DB.FamilyInstance.Mirrored.False" />
+    <tag value="Revit.DB.FamilyInstance.HandFlipped.False" />
+    <tag value="Revit.DB.FamilyInstance.FaceFlipped.False" />
+  </Light>
+  <Texture name="BL1A19_IES" label="BL1A19_IES" texturemode="7" texturefilter="3" textureaddressx="0" textureaddressy="0" rgbcurve="-1.000000" srgb="0" file="RevitLightExport_Assets/BL1A19.IES">
+    <Hash value="eaca446f2b8ea7c8e188ae3cc5f8080f" />
+  </Texture>
+</DatasmithUnrealScene>

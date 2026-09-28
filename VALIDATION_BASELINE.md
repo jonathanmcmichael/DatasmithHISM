@@ -1,43 +1,22 @@
-# DatasmithHISM Validation Baseline
+# DatasmithHISM validation baseline
 
-Recorded: 2026-09-23
+Current baseline: **2026-09-27, Unreal Engine 5.8.3**. The project root is not a Git working tree; the plugin directory is. The earlier 2026-09-23 baseline is [archived](Docs/History/2026-09-26/VALIDATION_BASELINE.md).
 
-## Environment
+[Current fixes and executed evidence](Docs/Validation/2026-09-27-live-ui.md) record live UI results, a successful build and 32 tests with 55 source hashes. The earlier [closeout checks](Docs/Validation/2026-09-27-closeout.md) remain a historical documentation-only record.
 
-- Project: `D:\Unreal\Sandbox\AdvancedHISM\AdvancedHISM.uproject`
-- Engine: Unreal Engine 5.8.3 (`++UE5+Release-5.8-CL-58210709`)
-- Plugin: `Plugins/DatasmithHISM`
-- Source control: unavailable; `D:\Unreal\Sandbox\AdvancedHISM` is not a Git working tree.
+| Check | Recorded result |
+|---|---|
+| Editor build | Passed |
+| Full DatasmithHISM automation | 33/33 passed; process exit 0; no controller errors |
+| Save / initial save-as / fresh-process reopen | Passed for generated validation content |
+| Read-only owning-map save | Correctly failed with exit 1; map unchanged; attributes restored |
+| Named-map copy and manual-drift persistence | Identity-changing copy refused; original re-verifies; saving drift does not accept a new baseline |
+| Real read-only asset / simulated map write-capacity failure | Both report incomplete save; affected bytes unchanged; retry succeeds |
+| Actual pre-commit process interruption / restart | Known paths reported; 4 saved evidence files unchanged |
+| Windows Development cook/archive | Passed |
+| Packaged NullRHI and DX12 startup/runtime | Passed source/mesh/material/light/IES/collision smoke checks |
+| Full release acceptance | Incomplete |
 
-## Build evidence
+Automation is runnable; optional-platform SDK messages did not block the suite. Optimizer-aware replacement and rollback are implemented and exercised. Representative source fixtures now exist, but the extracted joist payload lacks webbing, full exports have missing textures, and Revit photometric calibration remains unresolved.
 
-The following command completed successfully on 2026-09-23:
-
-`C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat AdvancedHISMEditor Win64 Development D:\Unreal\Sandbox\AdvancedHISM\AdvancedHISM.uproject -WaitMutex`
-
-UnrealBuildTool reported the target was up to date and returned `Result: Succeeded`.
-
-## Available fixtures
-
-- Two generated automation fixtures are present under `Saved/DatasmithHISM/Automation`, each with a `.udatasmith` file and `.udsmesh` sidecar.
-- `Saved/Autosaves/Temp/Untitled_1_Auto1.umap` is an editor autosave only.
-- No representative IFC input, external Datasmith export, or imported validation map is present in the workspace.
-
-## Editor smoke-test checklist
-
-Run these checks only against disposable content:
-
-1. Open **Tools > Optimized Datasmith Import**, select a `.udatasmith` source and a new `/Game/...` destination, then run **Analyze**. Confirm no assets or actors are created.
-2. Run **Import and Verify** with ISM output. Confirm the report succeeds and owned output is created only in the selected destination.
-3. Repeat with HISM output. Confirm the requested component class and instance counts.
-4. Run **Dedupe Meshes** as a dry run. Confirm no asset references or assets change.
-5. Run **Dedupe Meshes**, decline confirmation, and confirm no references, assets, or Managed ISMs change.
-6. Run **Dedupe Meshes**, accept confirmation, then use Undo. Confirm references and source assets are restored.
-7. Run **Explode** on a managed ISM/HISM component, validate replacement actors, then use Undo.
-8. Execute the equivalent Dataprep actions and confirm no interactive dialog blocks the pipeline.
-
-## Known validation gaps
-
-- `DatasmithHISM.OptimizedImport.GeneratedFixtureEndToEnd` compiles but cannot currently run from the packaged command-line editor because optional LinuxArm64 and VisionOS SDK validation aborts before the test runner starts.
-- Validate the importer with a representative Revit or IFC `.udatasmith` file and its `_Assets` folder when one is available.
-- Optimizer-aware reimport is not implemented. Test changed sources by importing into a new destination folder.
+Use [validation procedure and required scenarios](Docs/VALIDATION.md), [earlier Phase 2 evidence](Docs/Validation/2026-09-26-phase2.md), [current source hashes/results](Docs/Validation/2026-09-27-preset-cancellation-evidence.json), [earlier package evidence](Docs/Validation/2026-09-26.md), and the [fixture index](Tests/Fixtures/README.md). This pointer does not create new test evidence.
