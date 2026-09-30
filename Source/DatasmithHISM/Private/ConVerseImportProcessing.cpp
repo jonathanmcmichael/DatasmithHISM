@@ -814,6 +814,7 @@ namespace ConVerseImportProcessing
 				Mesh->Modify();
 				Mesh->GetNaniteSettings().bEnabled = bEnable;
 				Mesh->PostEditChange();
+				++Result.NaniteRebuiltMeshes;
 			}
 			Meshes.Add(Mesh);
 		}

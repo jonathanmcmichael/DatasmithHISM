@@ -37,6 +37,7 @@
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
 #include "UObject/GarbageCollection.h"
+#include "UObject/GCObject.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -1418,6 +1419,9 @@ bool FConVerseOptimizedImportRollbackTest::RunTest(const FString& Parameters)
 			Result.Status == EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack);
 		TestTrue(*FString::Printf(TEXT("%s attempted a rollback"), ModeName), Result.bRollbackAttempted);
 		TestTrue(*FString::Printf(TEXT("%s rollback succeeded"), ModeName), Result.bRollbackSucceeded);
+		// Without an external referencer, the batch reference check must clear the attempt; falling
+		// back here would silently restore the per-object ForceDeleteObjects cost.
+		TestTrue(*FString::Printf(TEXT("%s used the batch asset delete"), ModeName), Result.bRollbackUsedBatchDelete);
 
 		// Without this the test could pass against a no-op rollback that never had anything to undo.
 		TestTrue(*FString::Printf(TEXT("%s had real created objects to unwind"), ModeName),
@@ -1560,6 +1564,140 @@ bool FConVerseOptimizedImportRollbackFailureTest::RunTest(const FString& Paramet
 		}
 	}
 
+	TArray<FAssetData> LeftoverAssets;
+	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get()
+		.GetAssetsByPath(FName(*Options.DestinationPath), LeftoverAssets, true, false);
+	TArray<UObject*> AssetsToDelete;
+	for (const FAssetData& AssetData : LeftoverAssets)
+	{
+		if (UObject* Asset = AssetData.GetAsset())
+		{
+			AssetsToDelete.Add(Asset);
+		}
+	}
+	if (!AssetsToDelete.IsEmpty())
+	{
+		ObjectTools::ForceDeleteObjects(AssetsToDelete, false);
+	}
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+
+	IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+	return true;
+}
+
+namespace ConVerseOptimizedImportAutomation
+{
+	// Holds an asset the way a non-UObject editor system does: visible to the garbage collector,
+	// invisible to property-based reference replacement.
+	struct FExternalAssetHolder : public FGCObject
+	{
+		TObjectPtr<UObject> Held;
+		virtual void AddReferencedObjects(FReferenceCollector& Collector) override { Collector.AddReferencedObject(Held); }
+		virtual FString GetReferencerName() const override { return TEXT("ConVerseRollbackExternalReferencerTest"); }
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConVerseRollbackExternalReferencerTest,
+	"DatasmithHISM.OptimizedImport.RollbackExternalReferencerUsesCheckedDelete",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Rollback deletes attempt assets with one batch reference check instead of ForceDeleteObjects'
+ * per-object checks. That shortcut is only safe if a reference the batch check cannot explain sends
+ * it back to the checked engine path. The holder takes an attempt mesh from OnAssetsPreDelete, after
+ * reference replacement and before the batch check, through the real rollback entry point.
+ * Must fail if DeleteAttemptAssets ever skips its referencer check.
+ */
+bool FConVerseRollbackExternalReferencerTest::RunTest(const FString& Parameters)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	(void)Parameters;
+
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is available"), World))
+	{
+		return false;
+	}
+
+	FFixtureFiles Fixture;
+	FString FixtureError;
+	if (!TestTrue(TEXT("A valid temporary Datasmith fixture is exported"), CreateFixture(Fixture, FixtureError)))
+	{
+		AddError(FixtureError);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+
+	const FString TestRunId = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = FString::Printf(TEXT("/Game/__ConVerseAutomation/%s/RollbackExternalRef"), *TestRunId);
+	Options.InstanceType = EConVerseOptimizedInstanceType::HISM;
+	Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+	Options.bAutomated = true;
+	Options.FailureInjection = EConVerseOptimizedImportFailureInjection::AfterDatasmithImport;
+
+	TSet<AActor*> PreExistingActors;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		PreExistingActors.Add(*It);
+	}
+
+	// The first broadcast is the batch path's, before its reference check: take a mesh. The second can
+	// only come from ForceDeleteObjects, before its per-object checks: release it, so the checked path
+	// completes instead of refusing an in-use asset (which would also fire an engine ensure).
+	FExternalAssetHolder Holder;
+	bool bHeldAnAttemptMesh = false;
+	int32 PreDeleteBroadcasts = 0;
+	const FString DestinationPrefix = Options.DestinationPath + TEXT("/");
+	const FDelegateHandle Handle = FEditorDelegates::OnAssetsPreDelete.AddLambda(
+		[&Holder, &bHeldAnAttemptMesh, &PreDeleteBroadcasts, DestinationPrefix](const TArray<UObject*>& Objects)
+		{
+			if (++PreDeleteBroadcasts > 1)
+			{
+				Holder.Held = nullptr;
+				return;
+			}
+			for (UObject* Object : Objects)
+			{
+				if (Object != nullptr && Object->IsA<UStaticMesh>() && Object->GetPackage()->GetName().StartsWith(DestinationPrefix))
+				{
+					Holder.Held = Object;
+					bHeldAnAttemptMesh = true;
+					return;
+				}
+			}
+		});
+
+	const FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	FEditorDelegates::OnAssetsPreDelete.Remove(Handle);
+	Holder.Held = nullptr;
+
+	TestTrue(TEXT("The rollback was attempted"), Result.bRollbackAttempted);
+	TestTrue(TEXT("An attempt mesh was held before the batch reference check"), bHeldAnAttemptMesh);
+	TestFalse(TEXT("An external referencer sends rollback to ForceDeleteObjects"), Result.bRollbackUsedBatchDelete);
+	TestEqual(TEXT("ForceDeleteObjects ran after the batch check refused"), PreDeleteBroadcasts, 2);
+	TestTrue(TEXT("The checked path still rolls back cleanly"), Result.bRollbackSucceeded);
+	TestEqual(TEXT("The checked path leaves no remaining objects"), Result.RemainingObjectCount, 0);
+	TestFalse(TEXT("The failed attempt claims no active manifest"),
+		FConVerseDatasmithImportService::HasActiveOptimizedImport(Options));
+
+	TArray<AActor*> LeftoverActors;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (!PreExistingActors.Contains(*It))
+		{
+			LeftoverActors.Add(*It);
+		}
+	}
+	for (AActor* Actor : LeftoverActors)
+	{
+		if (IsValid(Actor))
+		{
+			World->EditorDestroyActor(Actor, true);
+		}
+	}
 	TArray<FAssetData> LeftoverAssets;
 	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get()
 		.GetAssetsByPath(FName(*Options.DestinationPath), LeftoverAssets, true, false);

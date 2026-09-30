@@ -45,6 +45,9 @@
 #include "Misc/ScopedSlowTask.h"
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
+#include "ComponentRecreateRenderStateContext.h"
+#include "Editor/Transactor.h"
+#include "UObject/ReferencerFinder.h"
 #include "SourceUri.h"
 #include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
@@ -2579,6 +2582,69 @@ namespace ConVerseDatasmithImport
 	 * own terms. The return value is never faked; the RollbackFailed degradation is reached because
 	 * the rollback really did leave objects behind.
 	 */
+	/**
+	 * Deletes a rolled-back attempt's assets. Returns true when the batch path was used.
+	 *
+	 * ObjectTools::ForceDeleteObjects runs a whole-heap referencer search once per object and again
+	 * once per package: 6,596 searches and ~110 s of a ~119 s rollback for the 3,298-package ARCH
+	 * attempt (2026-09-30 trace). This performs the same reference replacement and pre-delete
+	 * notification once, then a single referencer search over every object in the attempt's packages.
+	 * References from inside those packages die with them; an undo-buffer-only reference resets the
+	 * transaction, as DeleteSingleObject does. Any other surviving referencer falls back to
+	 * ForceDeleteObjects unchanged. The batch check skips the engine's reachability walk, so it can
+	 * only be stricter than the per-object check, never looser.
+	 */
+	static bool DeleteAttemptAssets(TArray<UObject*>& Assets)
+	{
+		{
+			FGlobalComponentRecreateRenderStateContext ReregisterContext;
+			ObjectTools::ForceReplaceReferences(nullptr, Assets);
+		}
+		FEditorDelegates::OnAssetsPreDelete.Broadcast(Assets);
+
+		TSet<const UPackage*> Packages;
+		for (UObject* Asset : Assets)
+		{
+			Packages.Add(Asset->GetPackage());
+		}
+		TArray<UObject*> Contained;
+		for (const UPackage* Package : Packages)
+		{
+			GetObjectsWithPackage(Package, Contained, EGetObjectsFlags::IncludeNestedObjects);
+		}
+
+		const UObject* Transactor = GEditor != nullptr ? GEditor->Trans.Get() : nullptr;
+		bool bReferencedByUndo = false;
+		for (UObject* Referencer : FReferencerFinder::GetAllReferencers(Contained, nullptr, EReferencerFinderFlags::SkipWeakReferences))
+		{
+			if (!IsValid(Referencer))
+			{
+				continue;
+			}
+			const UPackage* ReferencerPackage = Cast<UPackage>(Referencer);
+			if (Packages.Contains(ReferencerPackage != nullptr ? ReferencerPackage : Referencer->GetPackage()))
+			{
+				continue;
+			}
+			if (Referencer == Transactor)
+			{
+				bReferencedByUndo = true;
+				continue;
+			}
+			UE_LOG(LogConVerseOptimizedImport, Display,
+				TEXT("Rollback found external referencer %s; deleting attempt assets with ForceDeleteObjects."),
+				*Referencer->GetFullName());
+			ObjectTools::ForceDeleteObjects(Assets, false);
+			return false;
+		}
+		if (bReferencedByUndo)
+		{
+			GEditor->ResetTransaction(NSLOCTEXT("ConVerseHISM", "RollbackResetsUndo", "Roll back optimized import"));
+		}
+		ObjectTools::DeleteObjectsUnchecked(Assets);
+		return true;
+	}
+
 	static bool RollBackAttempt(
 		UWorld& World,
 		const FMutationInventory& Inventory,
@@ -2644,7 +2710,7 @@ namespace ConVerseDatasmithImport
 		// the one under test, so the obstruction leaves the whole attempt intact.
 		if (!AssetsToDelete.IsEmpty() && !bObstructForTesting)
 		{
-			ObjectTools::ForceDeleteObjects(AssetsToDelete, false);
+			Result.bRollbackUsedBatchDelete = DeleteAttemptAssets(AssetsToDelete);
 		}
 
 		TArray<FAssetData> RemainingAssets;
@@ -2741,6 +2807,16 @@ namespace ConVerseDatasmithImport
 				*Result.PreviousManifestId, *Result.PreviousSessionId, Result.RemovedPreviousActorCount);
 		}
 		Report += FString::Printf(TEXT("Duration: %.3f seconds\nMesh policy processing (including builds): %.3f seconds\nMesh compilation wait: %.3f seconds\nProcess peak physical memory (process lifetime): %llu bytes\n"), Result.DurationSeconds, Result.MeshProcessingSeconds, Result.MeshBuildSeconds, Result.ProcessPeakPhysicalBytes);
+		Report += FString::Printf(TEXT("Meshes rebuilt for a Nanite change: %d\n"), Result.NaniteRebuiltMeshes);
+		for (const TPair<FString, double>& Stage : Result.StageSeconds)
+		{
+			Report += FString::Printf(TEXT("Stage %s %.3f seconds\n"), *Stage.Key, Stage.Value);
+		}
+		if (!Result.OpenStage.IsEmpty())
+		{
+			Report += FString::Printf(TEXT("Stage %s %.3f seconds (open when reported)\n"),
+				*Result.OpenStage, FPlatformTime::Seconds() - Result.OpenStageStartedAtSeconds);
+		}
 		Report += FString::Printf(
 			TEXT("Source mesh actors: %d\nEligible leaf actors: %d\nPlanned groups: %d\nPlanned instances: %d\nVerified groups: %d\nVerified instances: %d\n"),
 			Result.TotalSourceMeshActors, Result.EligibleSourceActors, Result.PlannedGroupCount,
@@ -2768,6 +2844,8 @@ namespace ConVerseDatasmithImport
 		{
 			Report += FString::Printf(TEXT("Rollback attempted: yes\nRollback succeeded: %s\nCreated objects: %d\nRemaining objects: %d\n"),
 				Result.bRollbackSucceeded ? TEXT("yes") : TEXT("no"), Result.CreatedObjectCount, Result.RemainingObjectCount);
+			Report += FString::Printf(TEXT("Rollback asset delete: %s\n"),
+				Result.bRollbackUsedBatchDelete ? TEXT("batch") : TEXT("ForceDeleteObjects or skipped"));
 		}
 		return Report;
 	}
@@ -2944,8 +3022,15 @@ namespace ConVerseDatasmithImport
 	 */
 	static constexpr float ImportProgressStepCount = 9.0f;
 
-	static void EnterStage(FScopedSlowTask& Progress, float Work, const FText& Label)
+	static void EnterStage(FScopedSlowTask& Progress, FConVerseOptimizedImportResult& Result, float Work, const FText& Label)
 	{
+		const double Now = FPlatformTime::Seconds();
+		if (!Result.OpenStage.IsEmpty())
+		{
+			Result.StageSeconds.Emplace(Result.OpenStage, Now - Result.OpenStageStartedAtSeconds);
+		}
+		Result.OpenStage = Label.ToString();
+		Result.OpenStageStartedAtSeconds = Now;
 		UE_LOG(LogConVerseOptimizedImport, Display, TEXT("%s"), *Label.ToString());
 		Progress.EnterProgressFrame(Work, Label);
 	}
@@ -3074,7 +3159,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	if (!Normalized.bAutomated) SlowTask.MakeDialog(true);
 	FConVerseImportProgress Work(Normalized, SlowTask);
 	const auto Cancelled = [&]() { return FinishPreMutationCancellation(Work, Result); };
-	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeRead", "Reading source file..."));
+	EnterStage(SlowTask, Result, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeRead", "Reading source file..."));
 	if (Cancelled()) return Result;
 	FString SourceHash;
 	int64 SourceSize = 0;
@@ -3090,7 +3175,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.SourceFileHash = SourceHash;
 
 	// Fingerprint the sidecar folder as well. This is reported, not folded into PlanId.
-	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeAssets", "Checking supporting assets..."));
+	EnterStage(SlowTask, Result, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeAssets", "Checking supporting assets..."));
 	if (Cancelled()) return Result;
 	FSidecarFingerprint Sidecar;
 	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error, &SlowTask, &Normalized.CancelRequested, &Work))
@@ -3106,7 +3191,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.SidecarFileCount = Sidecar.FileCount;
 	Result.bSidecarExists = Sidecar.bExists;
 
-	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeTranslate",
+	EnterStage(SlowTask, Result, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeTranslate",
 		"Translating source; the editor may be unresponsive. Cancel takes effect when translation returns."));
 	// The translator call below is synchronous and can freeze Slate for a while, and EnterProgressFrame's
 	// UI update is throttled (FFeedbackContext::RequestUpdateUI, at most 5/sec, process-wide), so the
@@ -3163,7 +3248,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.bSourceLoaded = true;
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
 	if (Cancelled()) return Result;
-	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeGroups", "Analyzing meshes and groups..."));
+	EnterStage(SlowTask, Result, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeGroups", "Analyzing meshes and groups..."));
 	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, SourceHash, SourceSize, Result.ResolvedTextureIdentities, Work);
 	if (Cancelled()) return Result;
 
@@ -3228,7 +3313,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 			*Version->SessionId, Version->CreatedPackageNames.Num(), Bytes));
 	}
 
-	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeReport", "Preparing analysis report..."));
+	EnterStage(SlowTask, Result, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeReport", "Preparing analysis report..."));
 	Work.Update(EConVerseImportWorkPhase::Report, 0, 1);
 	if (Cancelled()) return Result;
 	FinishResult(&Plan, Result);
@@ -3275,7 +3360,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	}
 	FConVerseImportProgress Work(Normalized, SlowTask);
 	const auto Cancelled = [&]() { return FinishPreMutationCancellation(Work, Result); };
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportHashing", "Hashing the source file..."));
 
 	FString InitialHash;
@@ -3308,7 +3393,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 
 	if (Cancelled()) return Result;
 
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportLoading",
 			"Translating source; the editor may be unresponsive. Cancel takes effect when translation returns."));
 	// See the matching comment in Analyze: the translator call below is synchronous, its stage label is
@@ -3354,7 +3439,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
 	if (Cancelled()) return Result;
 
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportPlanning", "Traversing the scene and planning groups..."));
 	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, InitialHash, InitialSize, Result.ResolvedTextureIdentities, Work);
 	if (Cancelled()) return Result;
@@ -3521,7 +3606,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::MutationPreflight;
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportPreflight", "Preflighting destination and world changes..."));
 	Result.SessionId = FGuid::NewGuid().ToString(EGuidFormats::Digits).ToLower();
 	const FString AssetName = ObjectTools::SanitizeObjectName(FPaths::GetBaseFilename(Normalized.FilePath));
@@ -3566,11 +3651,11 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	}
 	const FMutationInventory Inventory = CaptureMutationInventory(*World, AttemptFolder);
 
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportTransform", "Rewriting the scene into instanced groups..."));
 	ApplyResolvedPlan(Scene.ToSharedRef(), Plan, ResolvedGroups, Result.SessionId);
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SceneTransformed;
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportDatasmith", "Running the Datasmith import..."));
 	const FString PackageName = AttemptFolder / AssetName;
 	TStrongObjectPtr<UPackage> Package(CreatePackage(*PackageName));
@@ -3625,7 +3710,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportConvert", "Converting instanced components..."));
 	TMap<FString, TArray<UInstancedStaticMeshComponent*>> ImportedComponents;
 	GatherSessionComponents(*World, Result.SessionId, ImportedComponents);
@@ -3728,7 +3813,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		else if (AnyLight) AnyLight->Intensity += 100000.0f;
 	}
 
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportVerify", "Verifying the imported session..."));
 	Result.bVerificationSucceeded = VerifySession(
 		*World, *ImportedScene, Plan, Result.SessionId, Snapshots, Result);
@@ -3813,7 +3898,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 
 	// Point of no return: the session is verified and is about to take ownership, so cancellation is
 	// no longer offered. Superseding is atomic from the user's perspective.
-	EnterStage(SlowTask, 1.0f,
+	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportCommit", "Committing the manifest and superseding the previous session..."));
 
 	// Resolve the prior session before any destruction so a failure here still leaves the old output intact.

@@ -306,6 +306,13 @@ struct FConVerseOptimizedImportResult
 	double DurationSeconds = 0.0;
 	double MeshBuildSeconds = 0.0;
 	double MeshProcessingSeconds = 0.0;
+	// Wall time per progress stage, in entry order. The stage still open when a report is built is
+	// reported as elapsed-so-far, so failed and cancelled attempts still show where time went.
+	TArray<TPair<FString, double>> StageSeconds;
+	FString OpenStage;
+	double OpenStageStartedAtSeconds = 0.0;
+	// Meshes whose Nanite flag was flipped after import, each forcing a rebuild of an already-built mesh.
+	int32 NaniteRebuiltMeshes = 0;
 	uint64 ProcessPeakPhysicalBytes = 0;
 
 	FSoftObjectPath ImportAssetPath;
@@ -319,6 +326,9 @@ struct FConVerseOptimizedImportResult
 
 	bool bRollbackAttempted = false;
 	bool bRollbackSucceeded = false;
+	// True when rollback removed the attempt's assets with one batch reference check; false when it
+	// found an external referencer and fell back to ObjectTools::ForceDeleteObjects.
+	bool bRollbackUsedBatchDelete = false;
 	int32 CreatedObjectCount = 0;
 	int32 RemainingObjectCount = 0;
 	// True when the resolved translator exposed tessellation options and they were applied.

@@ -422,6 +422,14 @@ Analyze performs no package creation, world mutation, asset-registry notificatio
 >
 > The editor panel never sets this field. It is reachable only from automation.
 
+> **Amendment 12 - batch asset deletion in step 3.** Step 3 previously called `ObjectTools::ForceDeleteObjects`, which runs a whole-heap referencer search once per object and again once per package. A 2026-09-30 CPU trace of the ARCH rollback (3,298 attempt packages) recorded 6,596 `GatherObjectReferencersForDeletion` calls totalling 110.7 s of a ~119 s rollback. `DeleteAttemptAssets` now performs the same reference replacement (`ForceReplaceReferences` inside a render-state recreate context) and `OnAssetsPreDelete` broadcast once, then a **single** `FReferencerFinder` search over every object in the attempt's packages, and deletes with `ObjectTools::DeleteObjectsUnchecked`. Three points are contractual:
+>
+> 1. **Referencers inside the attempt's packages are ignored**, because they are deleted in the same batch. A reference held only by the undo buffer resets the transaction, exactly as `DeleteSingleObject` does.
+> 2. **Any other surviving referencer falls back to `ForceDeleteObjects` unchanged.** The batch check omits the engine's reachability walk, so it can only be stricter than the per-object check; a disagreement costs time, never safety. Steps 6-8 still verify the outcome independently, and a refused delete still degrades to `RollbackFailed`.
+> 3. **The chosen path is observable.** `bRollbackUsedBatchDelete` is set on the result and reported as `Rollback asset delete: batch | ForceDeleteObjects or skipped`. `InducedFailureRollsBackCleanly` requires the batch path in both injection modes; `RollbackExternalReferencerUsesCheckedDelete` holds an attempt mesh through an `FGCObject` from the batch path's `OnAssetsPreDelete` and requires the fallback to run and still roll back cleanly. That test was confirmed to fail with the referencer check disabled.
+>
+> Measured effect on the headless ARCH rollback: verification plus rollback fell from 137.1 s to 7.1 s; the whole failed attempt from 165.0 s to 43.5 s. Successful imports never reach this path and are unaffected.
+
 ## Safe first-release reimport policy
 
 Normal Datasmith reimport and normal Datasmith Scene Actor synchronization are unsafe for optimized output because the persisted Datasmith scene contains native HISM elements while ISM mode performs a post-import replacement. The first release uses this policy:
