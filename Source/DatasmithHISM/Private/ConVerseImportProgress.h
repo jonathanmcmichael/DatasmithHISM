@@ -76,6 +76,7 @@ private:
 		case EConVerseImportWorkPhase::SourceActors: return NSLOCTEXT("ConVerseHISM", "WorkActors", "Analyzing source actors and lights");
 		case EConVerseImportWorkPhase::Materials: return NSLOCTEXT("ConVerseHISM", "WorkMaterials", "Analyzing materials");
 		case EConVerseImportWorkPhase::TextureHash: return NSLOCTEXT("ConVerseHISM", "WorkTexture", "Fingerprinting texture bytes");
+		case EConVerseImportWorkPhase::TextureSearch: return NSLOCTEXT("ConVerseHISM", "WorkTextureSearch", "Searching texture libraries");
 		case EConVerseImportWorkPhase::Dependencies: return NSLOCTEXT("ConVerseHISM", "WorkDependencies", "Checking source dependencies");
 		case EConVerseImportWorkPhase::GroupPlanning: return NSLOCTEXT("ConVerseHISM", "WorkGroups", "Planning source groups");
 		default: return NSLOCTEXT("ConVerseHISM", "WorkReport", "Preparing analysis report");

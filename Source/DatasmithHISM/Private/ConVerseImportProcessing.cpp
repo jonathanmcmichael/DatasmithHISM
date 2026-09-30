@@ -112,16 +112,41 @@ namespace ConVerseImportProcessing
 		return true;
 	}
 
-	static FString TextureFingerprint(const FString& File, FConVerseImportProgress* Progress)
+	enum class EAppearanceFingerprintResult : uint8
 	{
-		if (!Progress) return LexToString(FMD5Hash::HashFile(*File));
+		Completed,
+		Cancelled,
+		Missing,
+		Failed
+	};
+
+	static EAppearanceFingerprintResult TextureFingerprint(
+		const FString& File, FConVerseImportProgress* Progress, FString& OutFingerprint)
+	{
+		OutFingerprint.Reset();
+		if (!FPaths::FileExists(File)) return EAppearanceFingerprintResult::Missing;
+		if (!Progress)
+		{
+			const FMD5Hash HashValue = FMD5Hash::HashFile(*File);
+			if (!HashValue.IsValid()) return EAppearanceFingerprintResult::Failed;
+			OutFingerprint = LexToString(HashValue);
+			return EAppearanceFingerprintResult::Completed;
+		}
 		FString Content;
 		int64 Size = 0;
-		return Progress->HashFile(File, Content, Size, EConVerseImportWorkPhase::TextureHash) == EConVerseImportWorkResult::Completed ? Content : FString();
+		const EConVerseImportWorkResult Outcome = Progress->HashFile(
+			File, Content, Size, EConVerseImportWorkPhase::TextureHash);
+		if (Outcome == EConVerseImportWorkResult::Cancelled) return EAppearanceFingerprintResult::Cancelled;
+		if (Outcome == EConVerseImportWorkResult::Failed) return EAppearanceFingerprintResult::Failed;
+		OutFingerprint = MoveTemp(Content);
+		return EAppearanceFingerprintResult::Completed;
 	}
 
-	static FString AppearanceFingerprint(const TSharedRef<IDatasmithScene>& Scene, IDatasmithBaseMaterialElement& Material, const FString& SourceFile, FConVerseImportProgress* Progress = nullptr)
+	static EAppearanceFingerprintResult AppearanceFingerprint(const TSharedRef<IDatasmithScene>& Scene,
+		IDatasmithBaseMaterialElement& Material, const FString& SourceFile,
+		FString& OutFingerprint, FConVerseImportProgress* Progress = nullptr)
 	{
+		OutFingerprint.Reset();
 		// Revit exports material instances. Their typed properties include UV transforms and texture references.
 		// Display names are deliberately excluded so a rename does not approve a changed appearance.
 		if (!Material.IsA(EDatasmithElementType::MaterialInstance))
@@ -131,14 +156,16 @@ namespace ConVerseImportProcessing
 			for (int32 Index = 0; Index < Scene->GetTexturesCount(); ++Index)
 			{
 				const auto& Texture = Scene->GetTexture(Index);
-				if (!Texture.IsValid()) return FString();
+				if (!Texture.IsValid()) return EAppearanceFingerprintResult::Failed;
 				FString File = Texture->GetFile();
 				if (FPaths::IsRelative(File)) File = FPaths::ConvertRelativePathToFull(FPaths::GetPath(SourceFile), File);
-				const FString Content = TextureFingerprint(File, Progress);
-				if (Content.IsEmpty()) return FString();
+				FString Content;
+				const EAppearanceFingerprintResult TextureResult = TextureFingerprint(File, Progress, Content);
+				if (TextureResult != EAppearanceFingerprintResult::Completed) return TextureResult;
 				Evidence += Content + LexToString(Texture->CalculateElementHash(true));
 			}
-			return Hash(Evidence);
+			OutFingerprint = Hash(Evidence);
+			return EAppearanceFingerprintResult::Completed;
 		}
 		auto& Instance = static_cast<IDatasmithMaterialInstanceElement&>(Material);
 		TArray<FString> Properties;
@@ -146,7 +173,7 @@ namespace ConVerseImportProcessing
 			int32(Instance.GetQuality()), Instance.GetCustomMaterialPathName()));
 		for (int32 Index = 0; Index < Instance.GetPropertiesCount(); ++Index)
 		{
-			if (Progress && Progress->IsCancelled()) return FString();
+			if (Progress && Progress->IsCancelled()) return EAppearanceFingerprintResult::Cancelled;
 			const auto& Property = Instance.GetProperty(Index);
 			if (!Property.IsValid()) continue;
 			FString Value = Property->GetValue();
@@ -160,19 +187,21 @@ namespace ConVerseImportProcessing
 					{
 						FString File = Texture->GetFile();
 						if (FPaths::IsRelative(File)) File = FPaths::ConvertRelativePathToFull(FPaths::GetPath(SourceFile), File);
-						const FString Content = TextureFingerprint(File, Progress);
-						if (Content.IsEmpty()) return FString();
+						FString Content;
+						const EAppearanceFingerprintResult TextureResult = TextureFingerprint(File, Progress, Content);
+						if (TextureResult != EAppearanceFingerprintResult::Completed) return TextureResult;
 						Value = Content + TEXT("|") + LexToString(Texture->CalculateElementHash(true));
 						bResolved = true;
 						break;
 					}
 				}
-				if (!bResolved && !Value.IsEmpty()) return FString();
+				if (!bResolved && !Value.IsEmpty()) return EAppearanceFingerprintResult::Failed;
 			}
 			Properties.Add(FString::Printf(TEXT("%s|%d|%d:%s"), Property->GetName(), int32(Property->GetPropertyType()), Value.Len(), *Value));
 		}
 		Properties.Sort();
-		return Hash(FString::Join(Properties, TEXT("\n")));
+		OutFingerprint = Hash(FString::Join(Properties, TEXT("\n")));
+		return EAppearanceFingerprintResult::Completed;
 	}
 
 	EConVerseImportWorkResult AnalyzeScene(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
@@ -230,8 +259,15 @@ namespace ConVerseImportProcessing
 			auto& Row = Result.Appearances.AddDefaulted_GetRef();
 			Row.SourceElement = Material->GetName();
 			Row.Name = Material->GetLabel();
-			Row.Fingerprint = AppearanceFingerprint(Scene, *Material, Options.FilePath, &Progress);
-			if (Progress.IsCancelled()) return EConVerseImportWorkResult::Cancelled;
+			const EAppearanceFingerprintResult FingerprintResult = AppearanceFingerprint(
+				Scene, *Material, Options.FilePath, Row.Fingerprint, &Progress);
+			if (FingerprintResult == EAppearanceFingerprintResult::Cancelled)
+				return EConVerseImportWorkResult::Cancelled;
+			if (FingerprintResult == EAppearanceFingerprintResult::Failed)
+				return EConVerseImportWorkResult::Failed;
+			// Dependency validation already proved every missing texture was explicitly accepted.
+			// Only a genuinely missing referenced file may omit its appearance fingerprint; an
+			// unrelated read/hash failure above remains fatal even when another texture is missing.
 			Row.Evidence = FString::Printf(TEXT("Source: %s %s; exporter %s. Appearance variant: %s.\n"), Scene->GetProductName(), Scene->GetProductVersion(), Scene->GetExporterVersion(), *Row.Fingerprint);
 			if (Material->IsA(EDatasmithElementType::MaterialInstance))
 			{
@@ -279,14 +315,21 @@ namespace ConVerseImportProcessing
 
 	// Exporters sometimes reference library textures (for example Autodesk's shared material images)
 	// without copying them beside the source. Only the in-memory element is repointed; nothing is copied.
-	void ResolveMissingTextures(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
-		FConVerseOptimizedImportResult& Result)
+	EConVerseImportWorkResult ResolveMissingTextures(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
+		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress)
 	{
 		Result.ResolvedTextures.Reset();
+		Result.ResolvedTextureIdentities.Reset();
+		OutError.Reset();
+		TArray<FString> ResolvedTextures;
+		TArray<FString> ResolvedTextureIdentities;
 		TMap<FString, FString> ByName;
+		constexpr int32 MaxIndexedTextureFiles = 250000;
+		constexpr int32 MaxVisitedTextureDirectories = 100000;
 		bool bIndexed = false;
 		for (int32 Index = 0; Index < Scene->GetTexturesCount(); ++Index)
 		{
+			if (Progress.IsCancelled()) return EConVerseImportWorkResult::Cancelled;
 			const TSharedPtr<IDatasmithTextureElement> Texture = Scene->GetTexture(Index);
 			if (!Texture.IsValid()) continue;
 			FString Path(Texture->GetFile());
@@ -300,7 +343,51 @@ namespace ConVerseImportProcessing
 				{
 					if (Folder.IsEmpty() || !FPaths::DirectoryExists(Folder)) continue;
 					TArray<FString> Files;
-					IFileManager::Get().FindFilesRecursive(Files, *Folder, TEXT("*"), true, false);
+					TArray<FString> PendingDirectories{FPaths::ConvertRelativePathToFull(Folder)};
+					TSet<FString> VisitedDirectories;
+					int64 Visited = 0;
+					while (!PendingDirectories.IsEmpty())
+					{
+						PendingDirectories.Sort([](const FString& Left, const FString& Right) { return Left > Right; });
+						FString Directory = PendingDirectories.Pop(EAllowShrinking::No);
+						FPaths::NormalizeDirectoryName(Directory);
+						Directory = FPaths::ConvertRelativePathToFull(Directory);
+						FString DirectoryKey = Directory;
+#if PLATFORM_WINDOWS
+						DirectoryKey.ToLowerInline();
+#endif
+						if (VisitedDirectories.Contains(DirectoryKey)) continue;
+						if (VisitedDirectories.Num() >= MaxVisitedTextureDirectories)
+						{
+							OutError = FString::Printf(
+								TEXT("Texture search folder '%s' exceeded the safety limit of %d directories."),
+								*Folder, MaxVisitedTextureDirectories);
+							return EConVerseImportWorkResult::Failed;
+						}
+						VisitedDirectories.Add(DirectoryKey);
+						if (!Progress.Update(EConVerseImportWorkPhase::TextureSearch, Visited++, 0))
+							return EConVerseImportWorkResult::Cancelled;
+						TArray<FString> Names;
+						IFileManager::Get().FindFiles(Names, *(Directory / TEXT("*")), true, false);
+						Names.Sort();
+						for (const FString& Name : Names)
+						{
+							if (Files.Num() >= MaxIndexedTextureFiles)
+							{
+								OutError = FString::Printf(
+									TEXT("Texture search folder '%s' exceeded the safety limit of %d files."),
+									*Folder, MaxIndexedTextureFiles);
+								return EConVerseImportWorkResult::Failed;
+							}
+							Files.Add(Directory / Name);
+							if (!Progress.Update(EConVerseImportWorkPhase::TextureSearch, Visited++, 0))
+								return EConVerseImportWorkResult::Cancelled;
+						}
+						TArray<FString> Directories;
+						IFileManager::Get().FindFiles(Directories, *(Directory / TEXT("*")), false, true);
+						Directories.Sort();
+						for (const FString& Name : Directories) PendingDirectories.Add(Directory / Name);
+					}
 					Files.Sort();
 					for (const FString& File : Files)
 						if (!ByName.Contains(FPaths::GetCleanFilename(File).ToLower())) ByName.Add(FPaths::GetCleanFilename(File).ToLower(), File);
@@ -309,13 +396,49 @@ namespace ConVerseImportProcessing
 			}
 			if (const FString* Found = ByName.Find(FPaths::GetCleanFilename(Path).ToLower()))
 			{
+				FString ContentHash;
+				int64 ContentSize = 0;
+				const EConVerseImportWorkResult HashResult = Progress.HashFile(
+					*Found, ContentHash, ContentSize, EConVerseImportWorkPhase::TextureHash);
+				if (HashResult != EConVerseImportWorkResult::Completed)
+				{
+					if (HashResult == EConVerseImportWorkResult::Failed)
+						OutError = TEXT("A resolved texture-library file could not be fingerprinted: ") + *Found;
+					return HashResult;
+				}
+				FMD5Hash ParsedHash;
+				LexFromString(ParsedHash, *ContentHash);
 				Texture->SetFile(**Found);
-				Texture->SetFileHash(FMD5Hash::HashFile(**Found));
-				Result.ResolvedTextures.Add(FString(Texture->GetName()) + TEXT(": ") + Path + TEXT(" -> ") + *Found);
+				Texture->SetFileHash(ParsedHash);
+				ResolvedTextures.Add(FString(Texture->GetName()) + TEXT(": ") + Path + TEXT(" -> ") + *Found);
+				FString CanonicalReferenced = FPaths::ConvertRelativePathToFull(Path);
+				FString CanonicalResolved = FPaths::ConvertRelativePathToFull(*Found);
+				FPaths::NormalizeFilename(CanonicalReferenced);
+				FPaths::NormalizeFilename(CanonicalResolved);
+#if PLATFORM_WINDOWS
+				// Windows paths are case-insensitive. Enumeration may preserve the caller's alias casing,
+				// which must not manufacture a different output identity for the same selected file.
+				CanonicalReferenced.ToLowerInline();
+				CanonicalResolved.ToLowerInline();
+#endif
+				auto AddIdentityField = [](FString& Target, const FString& Name, const FString& Value)
+				{
+					Target += FString::Printf(TEXT("%d:%s=%d:%s;"), Name.Len(), *Name, Value.Len(), *Value);
+				};
+				FString Identity;
+				AddIdentityField(Identity, TEXT("Element"), Texture->GetName());
+				AddIdentityField(Identity, TEXT("ReferencedPath"), CanonicalReferenced);
+				AddIdentityField(Identity, TEXT("ResolvedPath"), CanonicalResolved);
+				AddIdentityField(Identity, TEXT("Size"), FString::Printf(TEXT("%lld"), ContentSize));
+				AddIdentityField(Identity, TEXT("Hash"), ContentHash);
+				ResolvedTextureIdentities.Add(MoveTemp(Identity));
 			}
 		}
+		Result.ResolvedTextures = MoveTemp(ResolvedTextures);
+		Result.ResolvedTextureIdentities = MoveTemp(ResolvedTextureIdentities);
 		for (const FString& Resolved : Result.ResolvedTextures)
 			Result.Diagnostics.Add(TEXT("Missing texture found in search folder: ") + Resolved);
+		return EConVerseImportWorkResult::Completed;
 	}
 
 	EConVerseImportWorkResult ValidateDependencies(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
@@ -456,22 +579,39 @@ namespace ConVerseImportProcessing
 		return bPassed;
 	}
 
-	bool ApplyMaterials(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
+	EConVerseImportWorkResult ApplyMaterials(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
 		const FString& AttemptFolder, const FConVerseImportProcessingSettings& Settings,
-		FConVerseOptimizedImportResult& Result, FString& OutError)
+		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress)
 	{
 		for (auto& Appearance : Result.Appearances)
 			if (const auto* Material = ImportedScene.Materials.Find(FName(*Appearance.SourceElement))) Appearance.ImportedMaterial = Material->ToSoftObjectPath();
-		if (!Settings.bApplyApprovedMaterials) return true;
+		if (!Settings.bApplyApprovedMaterials) return EConVerseImportWorkResult::Completed;
 		FString Identity;
-		if (!ValidateMappings(Settings, Identity, OutError)) return false;
+		if (!ValidateMappings(Settings, Identity, OutError)) return EConVerseImportWorkResult::Failed;
 		UDataTable* Table = Settings.MaterialMappings.Get();
 		TMap<UMaterialInterface*, UMaterialInterface*> Replacements;
 		for (int32 Index = 0; Index < Source->GetMaterialsCount(); ++Index)
 		{
+			if (Progress.IsCancelled()) return EConVerseImportWorkResult::Cancelled;
 			const auto& Material = Source->GetMaterial(Index);
 			if (!Material.IsValid()) continue;
-			const FString Fingerprint = AppearanceFingerprint(Source, *Material, Result.SourceFilePath);
+			FString Fingerprint;
+			const EAppearanceFingerprintResult FingerprintResult = AppearanceFingerprint(
+				Source, *Material, Result.SourceFilePath, Fingerprint, &Progress);
+			if (FingerprintResult == EAppearanceFingerprintResult::Missing)
+			{
+				Result.Diagnostics.Add(FString::Printf(
+					TEXT("Approved material lookup skipped for %s because its explicitly accepted texture dependency is missing; the imported material is retained."),
+					Material->GetName()));
+				continue;
+			}
+			if (FingerprintResult != EAppearanceFingerprintResult::Completed)
+			{
+				if (FingerprintResult != EAppearanceFingerprintResult::Cancelled)
+					OutError = TEXT("An imported material appearance texture could not be fingerprinted.");
+				return FingerprintResult == EAppearanceFingerprintResult::Cancelled
+					? EConVerseImportWorkResult::Cancelled : EConVerseImportWorkResult::Failed;
+			}
 			for (const auto& Pair : Table->GetRowMap())
 			{
 				const auto& Row = *reinterpret_cast<const FConVerseMaterialMappingRow*>(Pair.Value);
@@ -479,9 +619,9 @@ namespace ConVerseImportProcessing
 				auto* Imported = ImportedScene.Materials.Find(FName(Material->GetName()));
 				UMaterialInterface* Original = Imported ? Imported->LoadSynchronous() : nullptr;
 				UMaterialInterface* Replacement = Row.Replacement.Get();
-				if (!Original || !Replacement) { OutError = TEXT("An approved material mapping could not resolve its imported source or target."); return false; }
+				if (!Original || !Replacement) { OutError = TEXT("An approved material mapping could not resolve its imported source or target."); return EConVerseImportWorkResult::Failed; }
 				if (UMaterialInterface** Existing = Replacements.Find(Original); Existing && *Existing != Replacement)
-				{ OutError = TEXT("Different approved targets resolve to one shared imported material. Resolve this ambiguity before replacement."); return false; }
+				{ OutError = TEXT("Different approved targets resolve to one shared imported material. Resolve this ambiguity before replacement."); return EConVerseImportWorkResult::Failed; }
 				Replacements.Add(Original, Replacement);
 				Result.Diagnostics.Add(FString::Printf(TEXT("Approved material: %s | original=%s | replacement=%s | fingerprint=%s"),
 					*Row.CatalogId, *Original->GetPathName(), *Replacement->GetPathName(), *Fingerprint));
@@ -506,7 +646,7 @@ namespace ConVerseImportProcessing
 					if (UMaterialInterface** Target = Replacements.Find(Component->GetMaterial(Slot))) Component->SetMaterial(Slot, *Target);
 			}
 		}
-		return true;
+		return Progress.IsCancelled() ? EConVerseImportWorkResult::Cancelled : EConVerseImportWorkResult::Completed;
 	}
 
 	bool ProcessMeshes(UWorld& World, UDatasmithScene& Scene, const FString& AttemptFolder,

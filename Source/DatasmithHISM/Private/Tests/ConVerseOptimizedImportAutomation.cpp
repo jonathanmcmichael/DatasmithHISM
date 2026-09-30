@@ -1933,6 +1933,188 @@ bool FConVerseOptimizedImportDiscardFailedVerificationTest::RunTest(const FStrin
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConVerseOptimizedImportAcceptedReimportRemovalFailureTest,
+	"DatasmithHISM.OptimizedImport.AcceptedFailedVerificationPreservesPreviousSessionOnRemovalFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** S25 through the explicit failed-verification decision path: acceptance is not success unless
+ * the predecessor can be removed without touching it. */
+bool FConVerseOptimizedImportAcceptedReimportRemovalFailureTest::RunTest(const FString& Parameters)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	(void)Parameters;
+
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is available"), World)) return false;
+
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("A valid temporary Datasmith fixture is exported"), CreateFixture(Fixture, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = FString::Printf(TEXT("/Game/__ConVerseAutomation/%s/AcceptRemovalFailure"),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12));
+	Options.InstanceType = EConVerseOptimizedInstanceType::HISM;
+	Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+	Options.bAutomated = true;
+
+	const FConVerseOptimizedImportResult First = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	UDatasmithScene* FirstScene = Cast<UDatasmithScene>(First.ImportAssetPath.ResolveObject());
+	UConVerseOptimizedImportManifest* FirstManifest = FirstScene != nullptr
+		? Cast<UConVerseOptimizedImportManifest>(FirstScene->GetAssetUserDataOfClass(UConVerseOptimizedImportManifest::StaticClass()))
+		: nullptr;
+	if (!TestTrue(TEXT("The predecessor import verifies"), First.Status == EConVerseOptimizedImportStatus::Verified)
+		|| !TestNotNull(TEXT("The predecessor manifest exists"), FirstManifest)
+		|| !TestTrue(TEXT("The predecessor has multiple removal candidates"), FirstManifest->CreatedActors.Num() > 1))
+	{
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+	const int32 ActorCountWithPredecessor = CountWorldActors(*World);
+
+	FFixtureFiles ChangedFixture;
+	if (!TestTrue(TEXT("The source changes before reimport"),
+		CreateFixture(ChangedFixture, Error, 1, Fixture.RootDirectory)))
+	{
+		CleanupCommittedImport(*World, FirstManifest, FirstScene);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+
+	Options.bDeferRollbackOnVerificationFailure = true;
+	Options.FailureInjection =
+		EConVerseOptimizedImportFailureInjection::CorruptBeforeVerificationAndFailPreviousSessionRemoval;
+	const FConVerseOptimizedImportResult Parked = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	if (!TestTrue(TEXT("The failed reimport parks with a real predecessor"),
+		Parked.Status == EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision)
+		|| !TestEqual(TEXT("The parked reimport names the predecessor"), Parked.PreviousManifestId, FirstManifest->ManifestId))
+	{
+		if (FConVerseDatasmithImportService::HasPendingFailedVerification(Parked.SessionId))
+		{
+			FConVerseDatasmithImportService::DiscardFailedVerification(Parked.SessionId);
+		}
+		CleanupCommittedImport(*World, FirstManifest, FirstScene);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+
+	const FConVerseOptimizedImportResult Accepted =
+		FConVerseDatasmithImportService::AcceptFailedVerification(Parked.SessionId);
+	TestTrue(TEXT("Removal failure is not reported as accepted"),
+		Accepted.Status == EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack);
+	TestTrue(TEXT("The failed acceptance reports the removal boundary"),
+		Accepted.Summary.Contains(TEXT("previous optimized session could not be removed")));
+	TestTrue(TEXT("The injected fault follows at least one successful removal preflight"),
+		Accepted.Summary.Contains(TEXT("after 1 predecessor candidate(s) cleared validation")));
+	TestTrue(TEXT("The failed acceptance rolls back the new attempt"), Accepted.bRollbackSucceeded);
+	TestEqual(TEXT("Removal preflight destroys no predecessor actors"), Accepted.RemovedPreviousActorCount, 0);
+	TestEqual(TEXT("No duplicate attempt actors survive"), CountWorldActors(*World), ActorCountWithPredecessor);
+	TestTrue(TEXT("The predecessor manifest remains active"),
+		FirstManifest->CommitState == EConVerseOptimizedImportCommitState::Active);
+	TestTrue(TEXT("The predecessor remains the active optimized import"),
+		FConVerseDatasmithImportService::HasActiveOptimizedImport(Options));
+
+	CleanupCommittedImport(*World, FirstManifest, FirstScene);
+	IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConVerseOptimizedImportPathReuseOwnershipTest,
+	"DatasmithHISM.OptimizedImport.SupersedePathReuseRequiresSessionTag",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/** A recorded path is diagnostic, not ownership. Even explicit manual-edit replacement must not
+ * destroy an unrelated actor that later occupies that path. */
+bool FConVerseOptimizedImportPathReuseOwnershipTest::RunTest(const FString& Parameters)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	(void)Parameters;
+
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is available"), World)) return false;
+
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("A valid temporary Datasmith fixture is exported"), CreateFixture(Fixture, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = FString::Printf(TEXT("/Game/__ConVerseAutomation/%s/PathReuse"),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12));
+	Options.InstanceType = EConVerseOptimizedInstanceType::ISM;
+	Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+	Options.bAutomated = true;
+
+	const FConVerseOptimizedImportResult First = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	UDatasmithScene* FirstScene = Cast<UDatasmithScene>(First.ImportAssetPath.ResolveObject());
+	UConVerseOptimizedImportManifest* FirstManifest = FirstScene != nullptr
+		? Cast<UConVerseOptimizedImportManifest>(FirstScene->GetAssetUserDataOfClass(UConVerseOptimizedImportManifest::StaticClass()))
+		: nullptr;
+	if (!TestTrue(TEXT("The predecessor import verifies"), First.Status == EConVerseOptimizedImportStatus::Verified)
+		|| !TestNotNull(TEXT("The predecessor manifest exists"), FirstManifest)
+		|| !TestTrue(TEXT("The predecessor records actors"), !FirstManifest->CreatedActors.IsEmpty()))
+	{
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Name = *FString::Printf(TEXT("ConVerseUnrelatedPathReuse_%s"),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12));
+	AActor* UnrelatedActor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, SpawnParameters);
+	if (!TestNotNull(TEXT("A controlled unrelated actor is created"), UnrelatedActor))
+	{
+		CleanupCommittedImport(*World, FirstManifest, FirstScene);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+
+	// Model a stale/reused locator deterministically: preserve the real predecessor actor, but make
+	// one manifest record lose its GUID and point at the unrelated actor. Supersede must treat the
+	// path only as a locator and reject it because the session tag does not prove ownership.
+	const FConVerseOptimizedCreatedActorRecord OriginalRecord = FirstManifest->CreatedActors[0];
+	FirstManifest->CreatedActors[0].ActorGuid.Invalidate();
+	FirstManifest->CreatedActors[0].ActorPath = FSoftObjectPath(UnrelatedActor);
+
+	FFixtureFiles ChangedFixture;
+	if (!TestTrue(TEXT("The source changes before the destructive preflight"),
+		CreateFixture(ChangedFixture, Error, 1, Fixture.RootDirectory)))
+	{
+		FirstManifest->CreatedActors[0] = OriginalRecord;
+		World->EditorDestroyActor(UnrelatedActor, true);
+		CleanupCommittedImport(*World, FirstManifest, FirstScene);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+
+	Options.bReplaceManualEdits = true;
+	const FConVerseOptimizedImportResult Blocked = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	TestTrue(TEXT("Path reuse blocks supersede and rolls back the new attempt"),
+		Blocked.Status == EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack);
+	TestTrue(TEXT("The refusal identifies path reuse as insufficient ownership"),
+		Blocked.Summary.Contains(TEXT("path reuse is not proof of ownership")));
+	TestTrue(TEXT("The unrelated actor survives replacement authorization"), IsValid(UnrelatedActor));
+	TestTrue(TEXT("The predecessor manifest remains active"),
+		FirstManifest->CommitState == EConVerseOptimizedImportCommitState::Active);
+
+	FirstManifest->CreatedActors[0] = OriginalRecord;
+	World->EditorDestroyActor(UnrelatedActor, true);
+	CleanupCommittedImport(*World, FirstManifest, FirstScene);
+	IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+	return true;
+}
+
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseAnalyzeCancellationTest,
 	"DatasmithHISM.OptimizedImport.AnalyzeCancellationLeavesNoPartialPlan",
@@ -2057,7 +2239,7 @@ bool FConVerseApprovedMaterialsTest::RunTest(const FString&)
 	using namespace ConVerseOptimizedImportAutomation;
 	FFixtureFiles Fixture;
 	FString Error;
-	if (!TestTrue(TEXT("Create source"), CreateFixture(Fixture, Error))) return false;
+	if (!TestTrue(TEXT("Create source"), CreateFixture(Fixture, Error, 3, FString(), false, false, false, true))) return false;
 	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
 	FConVerseOptimizedImportOptions Options;
 	Options.FilePath = Fixture.SceneFile;
@@ -2085,6 +2267,32 @@ bool FConVerseApprovedMaterialsTest::RunTest(const FString&)
 	Options.Processing.AppearanceCatalog = Catalog.Get();
 	Options.Processing.MaterialMappings = Table.Get();
 	Options.Processing.bApplyApprovedMaterials = true;
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	const auto WorldBeforeCancellation = SnapshotWorld(*World);
+	const auto AssetsBeforeCancellation = SnapshotAssets();
+	int32 TextureHashNotifications = 0;
+	bool bCancelMaterialHash = false;
+	Options.ProgressObserver = [&](EConVerseImportWorkPhase Phase, int64 Completed, int64)
+	{
+		if (Phase == EConVerseImportWorkPhase::TextureHash && Completed > 0
+			&& ++TextureHashNotifications >= 5) bCancelMaterialHash = true;
+	};
+	Options.CancelRequested = [&]() { return bCancelMaterialHash; };
+	const auto CancelledImport = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	TestTrue(TEXT("Cancellation reaches post-import material fingerprinting"), bCancelMaterialHash);
+	TestTrue(TEXT("Post-import material cancellation rolls back explicitly"),
+		CancelledImport.Status == EConVerseOptimizedImportStatus::CancelledRolledBack);
+	TestTrue(TEXT("Post-import material cancellation crossed the mutation boundary"),
+		CancelledImport.bImportSucceeded && CancelledImport.bRollbackAttempted
+		&& CancelledImport.CreatedObjectCount > 0
+		&& CancelledImport.LastCompletedStage == EConVerseOptimizedImportStage::RolledBack);
+	TestTrue(TEXT("Post-import material cancellation restores world inventory"),
+		WorldBeforeCancellation.OrderIndependentCompareEqual(SnapshotWorld(*World)));
+	TestTrue(TEXT("Post-import material cancellation restores asset inventory"),
+		AssetsBeforeCancellation.Difference(SnapshotAssets()).IsEmpty()
+		&& SnapshotAssets().Difference(AssetsBeforeCancellation).IsEmpty());
+	Options.ProgressObserver = {};
+	Options.CancelRequested = {};
 	FString Identity;
 	TestTrue(TEXT("Approved mapping validates"), ConVerseImportProcessing::ValidateMappings(Options.Processing, Identity, Error));
 	const FString PresetFile = Fixture.RootDirectory / TEXT("Preset.json");
@@ -2481,25 +2689,113 @@ bool FConVersePanelMissingTexturesTest::RunTest(const FString&)
 		const FString Library = Fixture.RootDirectory / TEXT("Library/Mats");
 		const FString LibraryCopy = Library / FPaths::GetCleanFilename(Fixture.TextureFile).ToUpper();
 		TestTrue(TEXT("Create disposable texture library"), IFileManager::Get().Copy(*LibraryCopy, *MovedTexture) == COPY_OK);
+		const FString LibraryHash = HashFile(LibraryCopy);
+		for (int32 Index = 0; Index < 32; ++Index)
+		{
+			const FString Directory = Library / FString::Printf(TEXT("Nested%02d"), Index);
+			IFileManager::Get().MakeDirectory(*Directory, true);
+			TestTrue(TEXT("Create searchable library entry"), FFileHelper::SaveStringToFile(
+				TEXT("search fixture"), *(Directory / FString::Printf(TEXT("Entry%02d.txt"), Index))));
+		}
 		FConVerseOptimizedImportOptions Searched = Options;
 		Searched.TextureSearchFolders = {Fixture.RootDirectory / TEXT("Empty"), Fixture.RootDirectory / TEXT("Library")};
+		for (const bool bImport : {false, true})
+		{
+			bool bCancelSearch = false;
+			int32 SearchNotifications = 0;
+			Searched.ProgressObserver = [&](EConVerseImportWorkPhase Phase, int64, int64)
+			{
+				if (Phase == EConVerseImportWorkPhase::TextureSearch && ++SearchNotifications >= 8) bCancelSearch = true;
+			};
+			Searched.CancelRequested = [&]() { return bCancelSearch; };
+			const auto CancelledSearch = bImport
+				? FConVerseDatasmithImportService::ImportAndVerify(Searched)
+				: FConVerseDatasmithImportService::Analyze(Searched);
+			const FString Case = bImport ? TEXT("Import search") : TEXT("Analyze search");
+			TestTrue(*(Case + TEXT(" exposes cancellable progress")), bCancelSearch && SearchNotifications >= 8);
+			TestTrue(*(Case + TEXT(" reports cancellation")),
+				CancelledSearch.Status == EConVerseOptimizedImportStatus::CancelledRolledBack);
+			TestTrue(*(Case + TEXT(" retains no partial resolution")), CancelledSearch.ResolvedTextures.IsEmpty()
+				&& CancelledSearch.PlanId.IsEmpty() && CancelledSearch.Appearances.IsEmpty());
+		}
+		Searched.ProgressObserver = {};
+		Searched.CancelRequested = {};
 		const auto Resolved = FConVerseDatasmithImportService::Analyze(Searched);
 		TestTrue(TEXT("Texture found in a search folder needs no acceptance"), Resolved.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
 		TestEqual(TEXT("Resolution is reported"), Resolved.ResolvedTextures.Num(), 1);
-		TestTrue(TEXT("Resolution names the library file"), !Resolved.ResolvedTextures.IsEmpty() && Resolved.ResolvedTextures[0].EndsWith(LibraryCopy));
+		TestTrue(TEXT("Resolution names the library file"), !Resolved.ResolvedTextures.IsEmpty() && Resolved.ResolvedTextures[0].EndsWith(FPaths::ConvertRelativePathToFull(LibraryCopy)));
 		TestTrue(TEXT("Nothing is left missing"), Resolved.MissingTextures.IsEmpty());
-		FConVerseOptimizedImportOptions AcceptedOnly = Options;
-		AcceptedOnly.bAllowMissingTextures = true;
-		TestNotEqual(TEXT("A resolved texture changes plan identity"), Resolved.PlanId, FConVerseDatasmithImportService::Analyze(AcceptedOnly).PlanId);
-		TestTrue(TEXT("Resolution does not restore the source-side file"), !FPaths::FileExists(Fixture.TextureFile));
+		TestEqual(TEXT("Unchanged resolution has stable plan identity"),
+			FConVerseDatasmithImportService::Analyze(Searched).PlanId, Resolved.PlanId);
+		const FString NoMatchFolder = Fixture.RootDirectory / TEXT("NoMatch");
+		IFileManager::Get().MakeDirectory(*NoMatchFolder, true);
+		FConVerseOptimizedImportOptions EquivalentSearch = Searched;
+		EquivalentSearch.TextureSearchFolders.Insert(NoMatchFolder, 0);
+		TestEqual(TEXT("A no-match search-folder change keeps equivalent resolution identity"),
+			FConVerseDatasmithImportService::Analyze(EquivalentSearch).PlanId, Resolved.PlanId);
+#if PLATFORM_WINDOWS
+		FConVerseOptimizedImportOptions CaseAliasedSearch = Searched;
+		CaseAliasedSearch.TextureSearchFolders[1] = CaseAliasedSearch.TextureSearchFolders[1].ToUpper();
+		TestEqual(TEXT("Windows path-case aliases keep equivalent resolution identity"),
+			FConVerseDatasmithImportService::Analyze(CaseAliasedSearch).PlanId, Resolved.PlanId);
+#endif
+
 		UWorld* ResolvedWorld = GEditor->GetEditorWorldContext().World();
 		const auto ResolvedImport = FConVerseDatasmithImportService::ImportAndVerify(Searched);
 		auto* ResolvedManifest = Cast<UConVerseOptimizedImportManifest>(ResolvedImport.ManifestAssetPath.ResolveObject());
 		auto* ResolvedScene = Cast<UDatasmithScene>(ResolvedImport.ImportAssetPath.ResolveObject());
 		TestTrue(TEXT("Import using the library texture verifies"), ResolvedImport.Status == EConVerseOptimizedImportStatus::Verified);
 		TestTrue(TEXT("Import report names the search-folder texture"), ResolvedImport.Report.Contains(TEXT("Missing texture found in search folder")));
+
+		TestTrue(TEXT("Change resolved texture bytes in place"),
+			FFileHelper::SaveStringToFile(TEXT("changed-library-texture-bytes"), *LibraryCopy,
+				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM, &IFileManager::Get(), FILEWRITE_Append));
+		const auto ChangedContent = FConVerseDatasmithImportService::Analyze(Searched);
+		TestTrue(TEXT("Changed resolved texture still analyzes"),
+			ChangedContent.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+		TestNotEqual(TEXT("Same resolved path with different bytes changes plan identity"),
+			ChangedContent.PlanId, Resolved.PlanId);
+		const auto ChangedImport = FConVerseDatasmithImportService::ImportAndVerify(Searched);
+		auto* ChangedManifest = Cast<UConVerseOptimizedImportManifest>(ChangedImport.ManifestAssetPath.ResolveObject());
+		auto* ChangedScene = Cast<UDatasmithScene>(ChangedImport.ImportAssetPath.ResolveObject());
+		TestTrue(TEXT("Committed import does not take AlreadyCurrent after resolved bytes change"),
+			ChangedImport.Status == EConVerseOptimizedImportStatus::Verified
+			&& ChangedImport.Status != EConVerseOptimizedImportStatus::AlreadyCurrent);
+		TestTrue(TEXT("Resolved byte change creates and verifies a replacement output"),
+			ChangedImport.bWasReimport && ChangedImport.PlanId == ChangedContent.PlanId
+			&& ChangedImport.PlanId != ResolvedImport.PlanId && ChangedImport.RemovedPreviousActorCount > 0
+			&& ChangedManifest != nullptr && ChangedScene != nullptr);
+		TestTrue(TEXT("Restore resolved texture bytes"),
+			IFileManager::Get().Copy(*LibraryCopy, *MovedTexture, true, true) == COPY_OK);
+		TestEqual(TEXT("Restored resolved bytes restore plan identity"),
+			FConVerseDatasmithImportService::Analyze(Searched).PlanId, Resolved.PlanId);
+
+		const FString AlternateLibrary = Fixture.RootDirectory / TEXT("AlternateLibrary");
+		const FString AlternateCopy = AlternateLibrary / FPaths::GetCleanFilename(Fixture.TextureFile);
+		IFileManager::Get().MakeDirectory(*AlternateLibrary, true);
+		TestTrue(TEXT("Create competing deterministic texture match"),
+			FFileHelper::SaveStringToFile(TEXT("alternate texture bytes"), *AlternateCopy));
+		FConVerseOptimizedImportOptions LibraryFirst = Searched;
+		LibraryFirst.TextureSearchFolders = {Fixture.RootDirectory / TEXT("Library"), AlternateLibrary};
+		FConVerseOptimizedImportOptions AlternateFirst = Searched;
+		AlternateFirst.TextureSearchFolders = {AlternateLibrary, Fixture.RootDirectory / TEXT("Library")};
+		const auto LibraryFirstResult = FConVerseDatasmithImportService::Analyze(LibraryFirst);
+		const auto AlternateFirstResult = FConVerseDatasmithImportService::Analyze(AlternateFirst);
+		TestTrue(TEXT("Ordered folder precedence selects the first matching library"),
+			!LibraryFirstResult.ResolvedTextures.IsEmpty() && LibraryFirstResult.ResolvedTextures[0].EndsWith(FPaths::ConvertRelativePathToFull(LibraryCopy))
+			&& !AlternateFirstResult.ResolvedTextures.IsEmpty() && AlternateFirstResult.ResolvedTextures[0].EndsWith(FPaths::ConvertRelativePathToFull(AlternateCopy)));
+		TestNotEqual(TEXT("Different deterministic winning resolution changes plan identity"),
+			LibraryFirstResult.PlanId, AlternateFirstResult.PlanId);
+		TestEqual(TEXT("Deterministic precedence is stable across repeated analysis"),
+			FConVerseDatasmithImportService::Analyze(AlternateFirst).PlanId, AlternateFirstResult.PlanId);
+		FConVerseOptimizedImportOptions AcceptedOnly = Options;
+		AcceptedOnly.bAllowMissingTextures = true;
+		TestNotEqual(TEXT("A resolved texture changes plan identity"), Resolved.PlanId, FConVerseDatasmithImportService::Analyze(AcceptedOnly).PlanId);
+		TestTrue(TEXT("Resolution does not restore the source-side file"), !FPaths::FileExists(Fixture.TextureFile));
+		CleanupCommittedImport(*ResolvedWorld, ChangedManifest, ChangedScene);
 		CleanupCommittedImport(*ResolvedWorld, ResolvedManifest, ResolvedScene);
 		TestTrue(TEXT("Source-side texture is still absent after import"), !FPaths::FileExists(Fixture.TextureFile));
+		TestEqual(TEXT("Analyze and import leave resolved library bytes unchanged"), HashFile(LibraryCopy), LibraryHash);
 	}
 
 	// Service: textures fail until the exact missing set is accepted; geometry never can be.
@@ -2512,6 +2808,25 @@ bool FConVersePanelMissingTexturesTest::RunTest(const FString&)
 	TestTrue(TEXT("Accepting a different texture does not proceed"), FConVerseDatasmithImportService::Analyze(Other).Status == EConVerseOptimizedImportStatus::SourceLoadFailed);
 	FConVerseOptimizedImportOptions Accepted = Options;
 	Accepted.AcceptedMissingTextures = Refused.MissingTextures;
+	// Approved-material processing must remain enabled safely: a deliberately accepted absent
+	// texture has no trustworthy fingerprint, so no approval applies and the imported material stays.
+	TStrongObjectPtr<UDataTable> MissingTextureMappings(NewObject<UDataTable>(GetTransientPackage()));
+	MissingTextureMappings->RowStruct = FConVerseMaterialMappingRow::StaticStruct();
+	FConVerseMaterialMappingRow UnrelatedMapping;
+	UnrelatedMapping.CatalogId = TEXT("UnrelatedFixture");
+	UnrelatedMapping.SourceFingerprint = TEXT("unrelated-fingerprint");
+	UnrelatedMapping.Replacement = LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	UnrelatedMapping.bApproved = true;
+	MissingTextureMappings->AddRow(TEXT("UnrelatedFixture"), UnrelatedMapping);
+	TStrongObjectPtr<UDataTable> MissingTextureCatalog(NewObject<UDataTable>(GetTransientPackage()));
+	MissingTextureCatalog->RowStruct = FConVerseAppearanceCatalogRow::StaticStruct();
+	FConVerseAppearanceCatalogRow UnrelatedCatalog;
+	UnrelatedCatalog.CatalogId = UnrelatedMapping.CatalogId;
+	MissingTextureCatalog->AddRow(TEXT("UnrelatedFixture"), UnrelatedCatalog);
+	Accepted.Processing.MaterialMappings = MissingTextureMappings.Get();
+	Accepted.Processing.AppearanceCatalog = MissingTextureCatalog.Get();
+	Accepted.Processing.bApplyApprovedMaterials = true;
 	const auto Analyzed = FConVerseDatasmithImportService::Analyze(Accepted);
 	TestTrue(TEXT("Accepted missing texture proceeds"), Analyzed.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
 	TestTrue(TEXT("Accepted texture is listed in the report"), Analyzed.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("Proceeding without missing texture")); }));
@@ -2526,6 +2841,8 @@ bool FConVersePanelMissingTexturesTest::RunTest(const FString&)
 	ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
 	TestTrue(TEXT("Import without the accepted texture verifies"), Imported.Status == EConVerseOptimizedImportStatus::Verified);
 	TestTrue(TEXT("Import report lists the accepted texture"), Imported.Report.Contains(TEXT("Proceeding without missing texture")));
+	TestTrue(TEXT("Accepted missing texture skips only material approval lookup"),
+		Imported.Report.Contains(TEXT("Approved material lookup skipped")));
 
 	const FString MovedMesh = Fixture.MeshFile + TEXT(".missing-test");
 	if (TestTrue(TEXT("Remove disposable mesh"), IFileManager::Get().Move(*MovedMesh, *Fixture.MeshFile)))

@@ -9,11 +9,13 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Editor.h"
 #include "Materials/MaterialInterface.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Logging/LogMacros.h"
 #include "Misc/ScopedSlowTask.h"
+#include "Subsystems/EditorActorSubsystem.h"
 
 #define LOCTEXT_NAMESPACE "ConVerseHISMUtils"
 
@@ -21,6 +23,68 @@ DEFINE_LOG_CATEGORY_STATIC(LogConVerseHISM, Log, All);
 
 namespace ConVerseHISM
 {
+#if WITH_DEV_AUTOMATION_TESTS
+	static TWeakObjectPtr<AActor> ManagedActorDeleteObstructionForTesting;
+	static int32 ManagedActorDeleteRequestedCountForTesting = 0;
+	static int32 ManagedActorDeleteSucceededCountForTesting = 0;
+#endif
+
+	int32 DeleteManagedActorOutputs(const TArray<UObject*>& ObjectsToDelete)
+	{
+		TArray<AActor*> ActorsToDelete;
+		for (UObject* ObjectToDelete : ObjectsToDelete)
+		{
+			if (AActor* ActorToDelete = Cast<AActor>(ObjectToDelete); IsValid(ActorToDelete))
+			{
+				ActorsToDelete.Add(ActorToDelete);
+			}
+		}
+
+#if WITH_DEV_AUTOMATION_TESTS
+		ManagedActorDeleteRequestedCountForTesting = ActorsToDelete.Num();
+		ManagedActorDeleteSucceededCountForTesting = 0;
+#endif
+
+		if (ActorsToDelete.IsEmpty() || GEditor == nullptr)
+		{
+			return 0;
+		}
+
+		UEditorActorSubsystem* EditorActorSubsystem = GEditor->GetEditorSubsystem<UEditorActorSubsystem>();
+		if (EditorActorSubsystem == nullptr)
+		{
+			return 0;
+		}
+
+		TArray<AActor*> AttemptedActorObjects;
+		TArray<TWeakObjectPtr<AActor>> AttemptedActors;
+		for (AActor* ActorToDelete : ActorsToDelete)
+		{
+#if WITH_DEV_AUTOMATION_TESTS
+			if (ActorToDelete == ManagedActorDeleteObstructionForTesting.Get())
+			{
+				continue;
+			}
+#endif
+			AttemptedActorObjects.Add(ActorToDelete);
+			AttemptedActors.Add(ActorToDelete);
+		}
+		EditorActorSubsystem->DestroyActors(AttemptedActorObjects);
+
+		int32 DeletedActorCount = 0;
+		for (const TWeakObjectPtr<AActor>& AttemptedActor : AttemptedActors)
+		{
+			if (!AttemptedActor.IsValid())
+			{
+				++DeletedActorCount;
+			}
+		}
+#if WITH_DEV_AUTOMATION_TESTS
+		ManagedActorDeleteSucceededCountForTesting = DeletedActorCount;
+#endif
+		return DeletedActorCount;
+	}
+
 	namespace
 	{
 		// Preserve the existing tags so reruns still recognize content created by the old module.
@@ -975,7 +1039,43 @@ namespace ConVerseHISM
 			Result.FailedSourceActorDeletes);
 	}
 
-	FBuildOutput BuildManagedHISMs(const TArray<AActor*>& Actors, const FString& ComponentNamePrefix, bool bUseHISM, int32 MinInstanceCount, bool bAutoDetectFromNanite, EConVerseGroupingMode GroupingMode, const TArray<FString>& StoreyBoundaryPatterns)
+#if WITH_DEV_AUTOMATION_TESTS
+	static int32 ProgressDialogRequestCountForTesting = 0;
+
+	void ResetProgressDialogRequestCountForTesting()
+	{
+		ProgressDialogRequestCountForTesting = 0;
+	}
+
+	int32 GetProgressDialogRequestCountForTesting()
+	{
+		return ProgressDialogRequestCountForTesting;
+	}
+
+	void SetManagedActorDeleteObstructionForTesting(AActor* Actor)
+	{
+		ManagedActorDeleteObstructionForTesting = Actor;
+	}
+
+	void ResetManagedActorDeleteResultForTesting()
+	{
+		ManagedActorDeleteObstructionForTesting.Reset();
+		ManagedActorDeleteRequestedCountForTesting = 0;
+		ManagedActorDeleteSucceededCountForTesting = 0;
+	}
+
+	int32 GetManagedActorDeleteRequestedCountForTesting()
+	{
+		return ManagedActorDeleteRequestedCountForTesting;
+	}
+
+	int32 GetManagedActorDeleteSucceededCountForTesting()
+	{
+		return ManagedActorDeleteSucceededCountForTesting;
+	}
+#endif
+
+	FBuildOutput BuildManagedHISMs(const TArray<AActor*>& Actors, const FString& ComponentNamePrefix, bool bUseHISM, int32 MinInstanceCount, bool bAutoDetectFromNanite, EConVerseGroupingMode GroupingMode, const TArray<FString>& StoreyBoundaryPatterns, bool bShowProgressDialog)
 	{
 		FBuildOutput Output;
 		Output.Result.ActorsConsidered = Actors.Num();
@@ -992,7 +1092,13 @@ namespace ConVerseHISM
 			FScopedSlowTask GroupingTask(
 				static_cast<float>(Actors.Num()),
 				LOCTEXT("GroupingActors", "Grouping actors by geometry and material..."));
-			GroupingTask.MakeDialog(true);
+			if (bShowProgressDialog)
+			{
+#if WITH_DEV_AUTOMATION_TESTS
+				++ProgressDialogRequestCountForTesting;
+#endif
+				GroupingTask.MakeDialog(true);
+			}
 
 		for (AActor* Actor : Actors)
 		{
@@ -1107,7 +1213,13 @@ namespace ConVerseHISM
 			FScopedSlowTask BuildTask(
 				static_cast<float>(Groups.Num()),
 				LOCTEXT("BuildingISMs", "Building ISM components..."));
-			BuildTask.MakeDialog(true);
+			if (bShowProgressDialog)
+			{
+#if WITH_DEV_AUTOMATION_TESTS
+				++ProgressDialogRequestCountForTesting;
+#endif
+				BuildTask.MakeDialog(true);
+			}
 
 		for (TPair<FHISMGroupKey, FHISMGroupData>& GroupPair : Groups)
 		{

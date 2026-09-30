@@ -14,7 +14,7 @@ These tools operate on actors/assets already in the editor. They do not acquire 
 | Enable Nanite | Enables Nanite on selected referenced mesh assets; this selection utility does not use the tracked importer's compatibility/ownership/verification pass |
 | Batch ISMs | Uses Unreal's `MergeComponentsToInstances`; no family-aware or geometry-signature equivalence contract |
 
-Dedupe's interactive confirmation now precedes reference changes. Declining does not partially repoint the selection. The reference audit checks loaded components and on-disk package referencers, skipping external/uncertain use. Permanent asset deletion should not be described as guaranteed recoverable through Undo. Dataprep runs suppress dialogs.
+Dedupe's interactive confirmation now precedes reference changes. Declining does not partially repoint the selection. The reference audit checks loaded components and on-disk package referencers, skipping external/uncertain use. Permanent asset deletion should not be described as guaranteed recoverable through Undo. Progress presentation is caller-controlled: interactive library conversion may show cancellable slow-task dialogs, while Dataprep Create and Create by Category explicitly run without them.
 
 ## Managed conversion
 
@@ -34,10 +34,10 @@ Primary Blueprint entry points remain in `UConVerseHISMLibrary`: `CreateISMsFrom
 
 Other editor APIs include `UConVerseBatchHISMLibrary::BatchSelectionToHISMs`, `UConVerseStaticMeshConsolidationLibrary::ConsolidateSimilarStaticMeshes`, the consolidation widget base class, and `UConVersePowdercoatMaterialLibrary::CreatePowdercoatSubstrateMaterial`. These editor utilities are not runtime import APIs.
 
-Dataprep exposes Create, Analyze, Create by Category, and Consolidate Similar Meshes operations. Their display names may retain historical HISM wording; `bUseHISM` and `bAutoDetectFromNanite` determine the actual component type. Category label filtering is a selection convenience, not source identity or geometric equivalence.
+Dataprep exposes Create, Analyze, Create by Category, and Consolidate Similar Meshes operations. Their display names may retain historical HISM wording; `bUseHISM` and `bAutoDetectFromNanite` determine the actual component type. Category label filtering is a selection convenience, not source identity or geometric equivalence. Conversion deletion summaries report the number actually deleted; partial failure remains explicit in the result summary and warning log.
 
 Preserve tags `ConVerseManagedHISM` and `ConVerseManagedFamilyType` and public Blueprint compatibility. Source files: [library](../Source/DatasmithHISM/Public/ConVerseHISMLibrary.h), [conversion helper](../Source/DatasmithHISM/Private/ConVerseHISMUtils.cpp), [dedupe library](../Source/DatasmithHISM/Private/ConVerseStaticMeshConsolidationLibrary.cpp).
 
 ## Evidence
 
-Four legacy automation tests pass: behavior payload retention, below-threshold cleanup, effective material overrides, and component offsets/settings. Dedupe external-reference/confirmation and Explode failure/undo workflows still need the broader interactive acceptance listed in [validation](VALIDATION.md). A passing legacy safety test does not establish full BIM grouping coverage.
+Four previously executed legacy automation tests pass: behavior payload retention, below-threshold cleanup, effective material overrides, and component offsets/settings. A fifth regression source now executes both real Dataprep conversion wrappers, checks their silent presentation policy, and injects one deletion obstruction through the real Create wrapper to verify requested-versus-successful counts. That new coverage remains unbuilt and unexecuted in this checkout, so dialog-free and partial-failure acceptance remain pending the next editor build and automation run. Dedupe external-reference/confirmation and Explode failure/undo workflows still need the broader interactive acceptance listed in [validation](VALIDATION.md). A passing legacy safety test does not establish full BIM grouping coverage.

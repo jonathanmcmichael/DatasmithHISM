@@ -127,7 +127,10 @@ enum class EConVerseOptimizedImportFailureInjection : uint8
 	// Remove one instance from one converted component just before verification runs.
 	// Nothing is faked: VerifySession compares against the immutable plan and fails on its own
 	// terms with a real instance-count mismatch. Exercises the accept/discard decision path.
-	CorruptBeforeVerification
+	CorruptBeforeVerification,
+	// Corrupt real output, park it for an explicit decision, then fail before removing any actor
+	// from the previous session. Exercises acceptance rollback without damaging the predecessor.
+	CorruptBeforeVerificationAndFailPreviousSessionRemoval
 };
 
 /** Transient work notifications. These do not participate in output identity or persistence. */
@@ -139,6 +142,7 @@ enum class EConVerseImportWorkPhase : uint8
 	SourceActors,
 	Materials,
 	TextureHash,
+	TextureSearch,
 	Dependencies,
 	GroupPlanning,
 	Report
@@ -275,6 +279,8 @@ struct FConVerseOptimizedImportResult
 	TArray<FString> MissingMeshFiles;
 	/** Textures found in TextureSearchFolders, as "<element>: <referenced path> -> <resolved path>". */
 	TArray<FString> ResolvedTextures;
+	/** Canonical resolution evidence used by PlanId; includes resolved content size and hash. */
+	TArray<FString> ResolvedTextureIdentities;
 	TArray<FConVerseTrackedObjectState> TrackedObjects;
 	TArray<FConVerseImportInspectionRow> InspectionRows;
 	TArray<FConVerseAppearanceReviewRow> Appearances;

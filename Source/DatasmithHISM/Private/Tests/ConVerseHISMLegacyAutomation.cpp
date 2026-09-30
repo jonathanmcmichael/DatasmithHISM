@@ -4,6 +4,8 @@
 
 #include "ConVerseHISMLibrary.h"
 #include "ConVerseHISMUtils.h"
+#include "Dataprep/ConVerseCategoryGroupHISMOperation.h"
+#include "Dataprep/ConVerseCreateHISMOperation.h"
 
 #include "Components/AudioComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -126,6 +128,30 @@ namespace ConVerseHISMLegacyTestHelpers
 			}
 		}
 		return nullptr;
+	}
+
+	static void CollectWorldActors(UWorld& World, TSet<AActor*>& OutActors)
+	{
+		for (TActorIterator<AActor> It(&World); It; ++It)
+		{
+			OutActors.Add(*It);
+		}
+	}
+
+	static void CleanupActorsCreatedAfter(UWorld& World, const TSet<AActor*>& PreExistingActors)
+	{
+		TArray<AActor*> ActorsToDestroy;
+		for (TActorIterator<AActor> It(&World); It; ++It)
+		{
+			if (!PreExistingActors.Contains(*It))
+			{
+				ActorsToDestroy.Add(*It);
+			}
+		}
+		for (AActor* Actor : ActorsToDestroy)
+		{
+			World.DestroyActor(Actor);
+		}
 	}
 }
 
@@ -356,6 +382,106 @@ bool FConVerseLegacyOffsetsAndSettingsTest::RunTest(const FString&)
 	for (const auto& Transform : Expected)
 		TestTrue(TEXT("Component offset survives conversion"), Actual.ContainsByPredicate([&](const FTransform& Value) { return Value.Equals(Transform, 0.001); }));
 	Cleanup(*World, Actors, Output);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConVerseDataprepWrappersAreDialogFreeTest,
+	"DatasmithHISM.LegacyConversion.DataprepWrappersAreDialogFree",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FConVerseDataprepWrappersAreDialogFreeTest::RunTest(const FString&)
+{
+	using namespace ConVerseHISMLegacyTestHelpers;
+
+	UWorld* World = GetTestWorld();
+	UStaticMesh* Mesh = LoadSharedMesh();
+	if (!TestNotNull(TEXT("editor world is available"), World)
+		|| !TestNotNull(TEXT("shared cube mesh loads"), Mesh))
+	{
+		return false;
+	}
+
+	{
+		TSet<AActor*> PreExistingActors;
+		TSet<UInstancedStaticMeshComponent*> PreExistingManaged;
+		CollectWorldActors(*World, PreExistingActors);
+		CollectManagedComponents(*World, PreExistingManaged);
+		AStaticMeshActor* ActorA = SpawnMeshActor(*World, Mesh, FVector(0.0, 2100.0, 0.0), TEXT("Dataprep_Create_A"));
+		AStaticMeshActor* ActorB = SpawnMeshActor(*World, Mesh, FVector(200.0, 2100.0, 0.0), TEXT("Dataprep_Create_B"));
+		if (!TestNotNull(TEXT("standard Dataprep actor A spawned"), ActorA)
+			|| !TestNotNull(TEXT("standard Dataprep actor B spawned"), ActorB))
+		{
+			CleanupActorsCreatedAfter(*World, PreExistingActors);
+			return false;
+		}
+
+		UConVerseCreateHISMOperation* Operation = NewObject<UConVerseCreateHISMOperation>();
+		Operation->GroupingMode = EConVerseGroupingMode::MaximumOptimization;
+		ConVerseHISM::ResetProgressDialogRequestCountForTesting();
+		TArray<UObject*> Inputs = { ActorA, ActorB };
+		Operation->Execute(Inputs);
+		TestEqual(TEXT("standard Dataprep wrapper requests no progress dialogs"),
+			ConVerseHISM::GetProgressDialogRequestCountForTesting(), 0);
+		TestNotNull(TEXT("standard Dataprep wrapper performs conversion"),
+			FindNewManagedComponent(*World, PreExistingManaged));
+		CleanupActorsCreatedAfter(*World, PreExistingActors);
+	}
+
+	{
+		TSet<AActor*> PreExistingActors;
+		TSet<UInstancedStaticMeshComponent*> PreExistingManaged;
+		CollectWorldActors(*World, PreExistingActors);
+		CollectManagedComponents(*World, PreExistingManaged);
+		AStaticMeshActor* ActorA = SpawnMeshActor(*World, Mesh, FVector(0.0, 2400.0, 0.0), TEXT("Dataprep_Category_A"));
+		AStaticMeshActor* ActorB = SpawnMeshActor(*World, Mesh, FVector(200.0, 2400.0, 0.0), TEXT("Dataprep_Category_B"));
+		if (!TestNotNull(TEXT("category Dataprep actor A spawned"), ActorA)
+			|| !TestNotNull(TEXT("category Dataprep actor B spawned"), ActorB))
+		{
+			CleanupActorsCreatedAfter(*World, PreExistingActors);
+			return false;
+		}
+
+		UConVerseCategoryGroupHISMOperation* Operation = NewObject<UConVerseCategoryGroupHISMOperation>();
+		Operation->CategoryFilter = TEXT("Dataprep_Category");
+		Operation->GroupingMode = EConVerseGroupingMode::MaximumOptimization;
+		ConVerseHISM::ResetProgressDialogRequestCountForTesting();
+		TArray<UObject*> Inputs = { ActorA, ActorB };
+		Operation->Execute(Inputs);
+		TestEqual(TEXT("category Dataprep wrapper requests no progress dialogs"),
+			ConVerseHISM::GetProgressDialogRequestCountForTesting(), 0);
+		TestNotNull(TEXT("category Dataprep wrapper performs conversion"),
+			FindNewManagedComponent(*World, PreExistingManaged));
+		CleanupActorsCreatedAfter(*World, PreExistingActors);
+	}
+
+	{
+		TSet<AActor*> PreExistingActors;
+		CollectWorldActors(*World, PreExistingActors);
+		AStaticMeshActor* ActorA = SpawnMeshActor(*World, Mesh, FVector(0.0, 2700.0, 0.0), TEXT("Dataprep_Delete_A"));
+		AStaticMeshActor* ActorB = SpawnMeshActor(*World, Mesh, FVector(200.0, 2700.0, 0.0), TEXT("Dataprep_Delete_B"));
+		if (!TestNotNull(TEXT("deletion Dataprep actor A spawned"), ActorA)
+			|| !TestNotNull(TEXT("deletion Dataprep actor B spawned"), ActorB))
+		{
+			CleanupActorsCreatedAfter(*World, PreExistingActors);
+			return false;
+		}
+
+		UConVerseCreateHISMOperation* Operation = NewObject<UConVerseCreateHISMOperation>();
+		Operation->GroupingMode = EConVerseGroupingMode::MaximumOptimization;
+		ConVerseHISM::ResetManagedActorDeleteResultForTesting();
+		ConVerseHISM::SetManagedActorDeleteObstructionForTesting(ActorB);
+		TArray<UObject*> Inputs = { ActorA, ActorB };
+		Operation->Execute(Inputs);
+		TestEqual(TEXT("Dataprep wrapper reports both queued deletion candidates"),
+			ConVerseHISM::GetManagedActorDeleteRequestedCountForTesting(), 2);
+		TestEqual(TEXT("Dataprep wrapper reports only the actor actually destroyed"),
+			ConVerseHISM::GetManagedActorDeleteSucceededCountForTesting(), 1);
+		TestTrue(TEXT("controlled deletion failure leaves the obstructed source actor alive"), IsValid(ActorB));
+		ConVerseHISM::ResetManagedActorDeleteResultForTesting();
+		CleanupActorsCreatedAfter(*World, PreExistingActors);
+	}
+
 	return true;
 }
 

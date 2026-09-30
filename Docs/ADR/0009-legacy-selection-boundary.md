@@ -8,7 +8,7 @@ Legacy selection tools process already-placed actors and may delete actors or du
 
 ## Decision
 
-Maintain the legacy API and tags without representing those operations as verified, rollback-safe tracked import. Keep library-layer transactions and headless Dataprep operation. Confirm dedupe before reference changes, audit external/uncertain references, and stage Explode replacements before source removal.
+Maintain the legacy API and tags without representing those operations as verified, rollback-safe tracked import. Keep library-layer transactions and make progress-dialog presentation caller-controlled so Dataprep operations remain headless. Dataprep deletion diagnostics report successful and failed deletions separately. Confirm dedupe before reference changes, audit external/uncertain references, and stage Explode replacements before source removal.
 
 Managed grouping includes effective materials, component descriptor settings and a mesh-origin discriminator. Copy component world transforms and effective properties. Preserve behavior-bearing actors, failed instance sources and below-threshold groups. A bare native scene-component root can remain transform scaffolding.
 
@@ -18,4 +18,4 @@ Routing tracked sessions through legacy conversion would bypass their manifest l
 
 ## Evidence and follow-up
 
-Four legacy safety/placement/material tests pass. Dedupe/Explode interactive recovery, BIM hierarchy/storey, partial selection, Dataprep breadth and auto-detection remain separate checks. See [legacy guide](../LEGACY_TOOLS.md) and [conversion source](../../Source/DatasmithHISM/Private/ConVerseHISMUtils.cpp).
+Four legacy safety/placement/material tests have executed successfully. Wrapper-level regression source for dialog-free Dataprep Create/Create by Category and a controlled partial-deletion failure has been added but remains unbuilt and unexecuted in this checkout; it is not yet acceptance evidence. Dedupe/Explode interactive recovery, BIM hierarchy/storey, partial selection, broader Dataprep behavior and auto-detection remain separate checks. See [legacy guide](../LEGACY_TOOLS.md) and [conversion source](../../Source/DatasmithHISM/Private/ConVerseHISMUtils.cpp).

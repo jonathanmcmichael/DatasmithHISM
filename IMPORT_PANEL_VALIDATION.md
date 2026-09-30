@@ -8,7 +8,7 @@ Two historical headings share the number **Amendment 4**: tessellation options a
 
 > **Amendment 7 - rendering roadmap (2026-09-26, implemented with release acceptance still open).** New manifests use schema 2. The accepted consolidated roadmap is tracked in `ROADMAP_EXECUTION.md`. The changes below extend the contract; completion requires the recorded build, automation, visual, and packaged acceptance gates.
 >
-> - Analyze shows cancellable source/sidecar/loading/planning/report stages and never returns a partial successful plan. Hashing streams source bytes, without the old 4 GB allocation/size boundary. Blocking translator calls are cancelled at their next safe return. Cooperative checkpoints also cover actor/light traversal, materials, streamed texture fingerprints and dependencies. The same pre-mutation helpers are used by import; cancellation clears partial plan and inspection/review data. Transient progress observers do not affect plan identity or persistence.
+> - Analyze shows cancellable source/sidecar/loading/planning/report stages and never returns a partial successful plan. Hashing streams source bytes, without the old 4 GB allocation/size boundary. Blocking translator calls are cancelled at their next safe return. Cooperative checkpoints also cover actor/light traversal, materials, streamed texture fingerprints, recursive texture-library discovery and dependencies. Texture discovery preserves ordered-folder/sorted-path precedence, visits each normalized directory once, indexes at most 250,000 files and 100,000 directories per folder, and fails before mutation if either bound is exceeded. The same pre-mutation helpers are used by import; cancellation clears partial plan, resolution, dependency and inspection/review data. Post-import appearance fingerprint cancellation rolls the owned attempt back and reports `CancelledRolledBack`; fingerprint I/O failures fail and roll back rather than silently skipping an approved mapping. An explicitly accepted absent texture is distinct from an I/O failure: it has no applicable appearance fingerprint, so approved lookup is skipped and the imported material is retained. Transient progress observers do not affect plan identity or persistence.
 > - Tracked imports may contain zero optimized groups when ordinary geometry or lights remain. These still require ownership, verification, recovery, and reimport protection.
 > - Nanite is an independent policy: all supported owned meshes by default, converted ISM meshes only, or preserve imported settings. Exact mesh-element exceptions can retain ordinary actors or disable Nanite. Effective incompatible materials prevent Nanite; build failure prevents verification.
 > - Approved material replacement is exact source-appearance matching, applied before Nanite and verified against the applied assignments. Unapproved/custom/ambiguous appearances remain imported. External replacement assets never become rollback-owned.
@@ -21,7 +21,7 @@ Two historical headings share the number **Amendment 4**: tessellation options a
 >   *Clarified 2026-09-27 after live UI acceptance:* when the editor saves the manifest together with the newly named level, UE's asset-path redirection already rewrites the manifest's soft paths, so the old world no longer appears unresolved. Tracked-state text recorded under the former `/Temp/` world is then compared and persisted as the manifest's current world only when the recorded session owner resolves in that world with the recorded actor GUID and session tag. Without that proof the difference remains tracked drift. Placement, settings and all other state are still compared unchanged.
 > - Interrupted-attempt recovery is diagnostic and never assumes that unproven objects may be deleted. Runtime source metadata lives in a separate cookable module; import orchestration, manifests, and rollback services remain editor-only.
 
-> **Amendment 8 - texture search folders and user-accepted missing textures (2026-09-27).** Before dependency validation, a texture missing beside the source is looked up by file name (case-insensitive) in ordered texture search folders: first folder wins, then sorted path order. The default is Autodesk's shared material library tiers `Autodesk Shared/Materials/Textures/1/Mats`, `2/Mats` and `3/Mats` under Common Program Files; tier 1 matches what Revit exports. It is editable in the panel, saved in presets, and set headless with `-TextureSearchFolders`. A match repoints only the in-memory Datasmith texture element (file and MD5); source, sidecar and library files are never copied or modified. Each resolution is reported and participates in plan identity. The folder list itself does not, so plans that resolve nothing keep their identity.
+> **Amendment 8 - texture search folders and user-accepted missing textures (2026-09-27; identity clarified 2026-09-29).** Before dependency validation, a texture missing beside the source is looked up by file name (case-insensitive) in ordered texture search folders: first folder wins, then sorted path order. The default is Autodesk's shared material library tiers `Autodesk Shared/Materials/Textures/1/Mats`, `2/Mats` and `3/Mats` under Common Program Files; tier 1 matches what Revit exports. It is editable in the panel, saved in presets, and set headless with `-TextureSearchFolders`. A match repoints only the in-memory Datasmith texture element (file and MD5); source, sidecar and library files are never copied or modified. Each resolution is reported and participates in plan identity through canonical resolution evidence including the selected file's byte size and streamed content hash. Canonical Windows paths are case-folded after normalization because path-case aliases select the same file. Changing that file's bytes in place therefore changes `PlanId`; an unchanged or equivalently selected resolution remains stable. The folder list itself does not, so adding, removing, or reordering folders that produce no different match keeps plan identity unchanged.
 >
 > A referenced dependency file still absent from disk still stops Analyze and Import before mutation with `SourceLoadFailed`, and the result lists missing textures and missing mesh files separately. Missing **textures** may be waived only by an explicit decision: the panel shows a Yes/No prompt listing them, and on Yes repeats the operation accepting exactly those entries; the headless commandlet requires `-AllowMissingTextures`. A texture that was not accepted, or any missing **mesh** file, still fails. Accepted textures are listed in the report as "Proceeding without missing texture". Acceptance is held per panel source, cleared when the source changes, and not saved to presets or the session. It does not enter plan identity; a texture restored later changes the sidecar fingerprint and warns under Amendment 5. Ownership, verification, rollback and reimport guarantees are unchanged.
 
@@ -532,9 +532,15 @@ The visible group list is capped at 50 rows. Counts always cover the full plan. 
 >    manifest's own records, and verification just proved those records untrustworthy. Recovery is
 >    deliberately manual.
 >
-> 6. **Failure to accept falls back to discarding.** If the commit or supersede-preflight fails
->    during acceptance, the attempt is rolled back rather than left half-committed, so no path leaks
->    a parked attempt's objects.
+> 6. **Failure to accept falls back to discarding.** If the commit, supersede preflight, or removal
+>    of the previous active session fails during acceptance, the attempt is rolled back rather than
+>    reported as accepted or left half-committed. The previous manifest stays `Active`; a failed
+>    removal may not expose two active manifests or duplicate active geometry.
+>    Supersede removal is two-phase: every recorded actor must clear the complete non-mutating
+>    removal preflight before destruction of the first actor begins. A failure on any later
+>    candidate therefore leaves all predecessor actors intact; the replacement is rolled back.
+>    Removal is restricted to an editor world and rejects the World Settings actor, covering the
+>    normal `UWorld::DestroyActor` refusal conditions before entering the destruction phase.
 >
 > 7. **The commandlet never defers.** `AcceptedWithFailedVerification` is not a headless pass, so CI
 >    cannot go green on an import whose checks failed.
@@ -542,6 +548,11 @@ The visible group list is capped at 50 rows. Counts always cover the full plan. 
 > The `CorruptBeforeVerification` injection supports the tests by removing one real instance from one
 > real component before verification, so `VerifySession` fails on its own terms with a genuine count
 > mismatch rather than being told to fail.
+
+> **Supersede actor resolution fails closed.** Actor GUID is the primary ownership proof. A recorded
+> actor path may be used only as a recovery locator, and the actor found there must be in the owning
+> world and carry the manifest's exact session tag. A path that has been reused by an unrelated actor
+> blocks replacement even when the user authorized replacing tracked manual edits.
 
 ### Path guarantees must be visible
 

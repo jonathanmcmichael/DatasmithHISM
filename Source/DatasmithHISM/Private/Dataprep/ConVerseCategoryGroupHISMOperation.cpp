@@ -1,43 +1,6 @@
 #include "Dataprep/ConVerseCategoryGroupHISMOperation.h"
 
 #include "ConVerseHISMUtils.h"
-#include "Subsystems/EditorActorSubsystem.h"
-
-namespace
-{
-	static int32 DeleteManagedCategoryActorOutputs(const TArray<UObject*>& ObjectsToDelete)
-	{
-		if (ObjectsToDelete.IsEmpty() || GEditor == nullptr)
-		{
-			return 0;
-		}
-
-		TArray<AActor*> ActorsToDelete;
-		ActorsToDelete.Reserve(ObjectsToDelete.Num());
-		for (UObject* ObjectToDelete : ObjectsToDelete)
-		{
-			if (AActor* ActorToDelete = Cast<AActor>(ObjectToDelete))
-			{
-				if (IsValid(ActorToDelete))
-				{
-					ActorsToDelete.Add(ActorToDelete);
-				}
-			}
-		}
-
-		if (ActorsToDelete.IsEmpty())
-		{
-			return 0;
-		}
-
-		if (UEditorActorSubsystem* EditorActorSubsystem = GEditor->GetEditorSubsystem<UEditorActorSubsystem>())
-		{
-			return EditorActorSubsystem->DestroyActors(ActorsToDelete) ? ActorsToDelete.Num() : 0;
-		}
-
-		return 0;
-	}
-}
 
 #define LOCTEXT_NAMESPACE "ConVerseCategoryGroupHISMOperation"
 
@@ -99,12 +62,12 @@ void UConVerseCategoryGroupHISMOperation::OnExecution_Implementation(const FData
 		ActorsToProcess.Num()));
 
 	ConVerseHISM::FBuildOutput BuildOutput = ConVerseHISM::BuildManagedHISMs(
-		ActorsToProcess, NewActorLabelPrefix, bUseHISM, MinInstanceCount, bAutoDetectFromNanite, GroupingMode, StoreyBoundaryPatterns);
+		ActorsToProcess, NewActorLabelPrefix, bUseHISM, MinInstanceCount, bAutoDetectFromNanite, GroupingMode, StoreyBoundaryPatterns, false);
 
 	if (!BuildOutput.ObjectsToDelete.IsEmpty())
 	{
 		const int32 ObjectsToDeleteCount = BuildOutput.ObjectsToDelete.Num();
-		const int32 DeletedObjectCount = DeleteManagedCategoryActorOutputs(BuildOutput.ObjectsToDelete);
+		const int32 DeletedObjectCount = ConVerseHISM::DeleteManagedActorOutputs(BuildOutput.ObjectsToDelete);
 		BuildOutput.Result.FailedSourceActorDeletes = ObjectsToDeleteCount - DeletedObjectCount;
 		ConVerseHISM::FinalizeSummary(BuildOutput.Result);
 	}

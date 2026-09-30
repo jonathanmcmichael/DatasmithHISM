@@ -17,17 +17,17 @@ namespace ConVerseImportProcessing
 	bool ValidateMappings(const FConVerseImportProcessingSettings& Settings, FString& OutIdentity, FString& OutError);
 	EConVerseImportWorkResult AnalyzeScene(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
 		FConVerseOptimizedImportResult& Result, FConVerseImportProgress& Progress);
-	void ResolveMissingTextures(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
-		FConVerseOptimizedImportResult& Result);
+	EConVerseImportWorkResult ResolveMissingTextures(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
+		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress);
 	EConVerseImportWorkResult ValidateDependencies(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
 		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress);
 	bool VerifyLights(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
 		const TSet<const AActor*>& ExistingActors, FConVerseOptimizedImportResult& Result);
 	bool ProcessMeshes(UWorld& World, UDatasmithScene& Scene, const FString& AttemptFolder,
 		const FConVerseOptimizedImportOptions& Options, FConVerseOptimizedImportResult& Result, FString& OutError);
-	bool ApplyMaterials(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
+	EConVerseImportWorkResult ApplyMaterials(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
 		const FString& AttemptFolder, const FConVerseImportProcessingSettings& Settings,
-		FConVerseOptimizedImportResult& Result, FString& OutError);
+		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress);
 	FString ObjectState(UObject& Object);
 	void CaptureState(UWorld& World, UDatasmithScene& Scene, const FString& AttemptFolder,
 		const TSet<const AActor*>& ExistingActors, FConVerseOptimizedImportResult& Result);

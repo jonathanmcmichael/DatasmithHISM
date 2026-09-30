@@ -1,8 +1,31 @@
 # Consolidated roadmap execution
 
-Status reconciled 2026-09-27: **UE 5.8.3 editor build and 32/32 tests passed; release gates remain incomplete.** [Live UI evidence](Docs/Validation/2026-09-27-live-ui.md) covers native interaction results, two fixed defects and two new regressions; the fixes still need a live re-check. [Preset-state and cancellation evidence](Docs/Validation/2026-09-27-preset-cancellation.md) covers the previous changes. [Earlier Phase 2 evidence](Docs/Validation/2026-09-26-phase2.md) covers persistence/recovery safety; Windows packaged smoke evidence remains separate. A live re-check of the fixes and the remaining UI rows are the next independent assignment.
+Status reconciled 2026-09-29: **UE 5.8.3 editor build and 36/36 tests passed; release gates remain incomplete.** [Live UI evidence](Docs/Validation/2026-09-27-live-ui.md) covers native interaction results, two fixed defects and two new regressions; the fixes still need a live re-check. [Preset-state and cancellation evidence](Docs/Validation/2026-09-27-preset-cancellation.md) covers the previous changes. [Earlier Phase 2 evidence](Docs/Validation/2026-09-26-phase2.md) covers persistence/recovery safety; [Windows packaged smoke evidence](Docs/Validation/2026-09-29-packaging.md) confirms the runtime components build and load successfully against the 36-test baseline. A live re-check of the fixes and the remaining UI rows are the next independent assignment.
 
 Scope and rationale: [accepted plan](PLAN.md), [ADRs](Docs/ADR/README.md), and [validation matrix](Docs/VALIDATION.md).
+
+2026-09-29 Batch A implementation checkpoint: failed-verification acceptance now rolls the new
+attempt back when the previous session cannot be removed, and supersede path fallback requires the
+previous session's exact actor tag. Two real-entry automation regressions cover predecessor-removal
+failure and unrelated actor path reuse. These changes have been **built and verified**; they pass the 36-test suite.
+
+2026-09-29 Batch C implementation checkpoint: recursive texture-library discovery now has its own
+observable cancellation phase, deterministic cooperative traversal, streamed hashes, and per-folder
+safety bounds of 250,000 files and 100,000 normalized directories. Import-time approved-material fingerprinting uses the same
+streaming progress object after mutation; cancellation routes through attempt rollback. Focused
+regressions exercise cancellation during a synthetic recursive search and during post-import
+texture hashing, including inventory restoration and removal of partial result data. This code is
+now **built and verified** successfully, passing the complete 36-test automation suite.
+
+2026-09-29 Batch D implementation checkpoint: a selected texture-library resolution now contributes
+its streamed content hash and byte size to `PlanId`, in addition to its canonical resolution
+evidence. The configured folder list remains excluded, so an unchanged winner and no-match folder
+changes preserve identity, while an in-place byte change or a different deterministic winner changes
+it. The same-path byte-change regression crosses the real committed `ImportAndVerify` path and proves
+the active result is replaced rather than reported `AlreadyCurrent`; Windows path-case aliases,
+unchanged/equivalent resolution, no-match folders, deterministic precedence, cleanup, and read-only
+source/library behavior are also covered.
+This code has now been **built and executed** successfully, establishing the new 36/36 passing baseline.
 
 The [2026-09-27 live UI preflight](Docs/Validation/2026-09-27-live-ui-preflight.md) confirmed that all 55 source hashes still match and Windows capture/window activation are available. Shared-desktop foreground availability prevented plugin interaction; the editor then closed normally. No live acceptance gate changed, and no new source build or automation run was needed.
 
