@@ -151,7 +151,7 @@ int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
 		if (*Policy == TEXT("All")) Options.Processing.NanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
 		else if (*Policy == TEXT("ISM")) Options.Processing.NanitePolicy = EConVerseNanitePolicy::ConvertedISMOnly;
 		else if (*Policy == TEXT("Preserve")) Options.Processing.NanitePolicy = EConVerseNanitePolicy::PreserveImported;
-		else { UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Nanite must be All, ISM, or Preserve.")); return 1; }
+		else { UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Nanite must be All, ISM (covers converted ISM and HISM group output), or Preserve.")); return 1; }
 	}
 	if (const FString* Threshold = Arguments.Find(TEXT("ManyLightThreshold"))) Options.Processing.ManyLightThreshold = FCString::Atoi(**Threshold);
 	if (const FString* Names = Arguments.Find(TEXT("KeepOrdinary"))) Names->ParseIntoArray(Options.Processing.KeepOrdinaryMeshElements, TEXT(","), true);

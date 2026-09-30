@@ -2,6 +2,8 @@
 
 Status reconciled 2026-09-29: **UE 5.8.3 editor build and 36/36 tests passed; release gates remain incomplete.** [Live UI evidence](Docs/Validation/2026-09-27-live-ui.md) covers native interaction results, two fixed defects and two new regressions; the fixes still need a live re-check. [Preset-state and cancellation evidence](Docs/Validation/2026-09-27-preset-cancellation.md) covers the previous changes. [Earlier Phase 2 evidence](Docs/Validation/2026-09-26-phase2.md) covers persistence/recovery safety; [Windows packaged smoke evidence](Docs/Validation/2026-09-29-packaging.md) confirms the runtime components build and load successfully against the 36-test baseline. A live re-check of the fixes and the remaining UI rows are the next independent assignment.
 
+Separate 2026-09-28 verification snapshot (not validation of the combined tree): **UE 5.8.3 editor build and 38/38 tests passed** for the verification fixes. [Evidence](Docs/Validation/2026-09-28-verification.md) covers Amendments 9-11 and clarifications to Amendments 2 and 6, with five regression tests that each failed before their fix. The combined remote-plus-stashed tree remains unbuilt and unverified; the live re-check is pending.
+
 Scope and rationale: [accepted plan](PLAN.md), [ADRs](Docs/ADR/README.md), and [validation matrix](Docs/VALIDATION.md).
 
 2026-09-29 Batch A implementation checkpoint: failed-verification acceptance now rolls the new
@@ -42,6 +44,9 @@ Read [workflow and commandlet usage](Docs/IMPORT_WORKFLOW.md), [current source h
 
 ## Verified findings
 
+- 2026-09-28 live ARCH imports: the 10 failing lights all reference IES file `ARCH_Assets/generic`, which is 0 bytes; preflight treated it as present. Empty dependency files are now missing (Amendment 9).
+- The same imports' `actual=5506 accounted=5505` mismatch was the editor-only `UCameraProxyMeshComponent` that `UCameraComponent::OnRegister` adds to the imported `ACineCameraActor` outside commandlets; the mesh accounting itself was exact (10,389 = 904 + 221 + 4,380 + 4,884). Visualization components without Datasmith identity are now excluded (Amendment 11).
+- Nanite "converted meshes only" enabled nothing in HISM mode because converted meshes were collected by exact ISM class. It now covers HISM groups, with a PlanId salt for that combination only (Amendment 10).
 - The 16K6 joist used by Revit elements 610662 and 610663 has 88 vertices / 160 triangles in the original `.udsmesh`. Web diagonals are already absent. All six imported LOD0 geometry exports match the payload exactly. The importer cannot reconstruct missing source geometry reliably.
 - Structural preflight reports eight missing texture references (seven filenames); HVAC reports one missing bump texture. Both full-source imports stop before creating output.
 - The HVAC file contains 1,033 point lights, all explicitly Unitless. The isolated light retains intensity 100 and its IES configuration. Original Revit reference values are still needed for physical calibration.

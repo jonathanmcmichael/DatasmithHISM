@@ -1,0 +1,222 @@
+[
+  {
+    "sha256": "427FD858F7A3D101147A0C58002BD1CB49D83649F1E159BB0412105FC0026181",
+    "path": "DatasmithHISM\\DatasmithHISM.Build.cs"
+  },
+  {
+    "sha256": "B35A1D21879F4FF368076E5FA0FE651E0256B1699DC8DB6AA3324D9077313097",
+    "path": "DatasmithHISM\\Private\\ConVerseBatchHISMLibrary.cpp"
+  },
+  {
+    "sha256": "B43BC555D63854A71CEA1A5ECBDCE283A4C69788BAF261C8D7EC62C71FAC30CB",
+    "path": "DatasmithHISM\\Private\\ConVerseDatasmithImportPanel.cpp"
+  },
+  {
+    "sha256": "9C6C3464BAD0F7D77630094D72D54188F2A526BF7EA0C62474F19A3598CF7723",
+    "path": "DatasmithHISM\\Private\\ConVerseDatasmithImportPanel.h"
+  },
+  {
+    "sha256": "83E3F1261636047772DCA3878D2E4A887AA496B0C4910085561BD710949EA85D",
+    "path": "DatasmithHISM\\Private\\ConVerseDatasmithImportService.cpp"
+  },
+  {
+    "sha256": "479ECEB7FC241374F102CB07132D81241E3AA156825FF10C67A2D8D86BBD20F9",
+    "path": "DatasmithHISM\\Private\\ConVerseDatasmithImportService.h"
+  },
+  {
+    "sha256": "D03A28A638A8E847273F5775C7793C957AC4CD5DB8DD284E6B92B1AC78B31F22",
+    "path": "DatasmithHISM\\Private\\ConVerseDatasmithToolsPanel.cpp"
+  },
+  {
+    "sha256": "10958C9C4D385AF8F8B418857B52156ECDB73FAF3377C00787A63C9B4AFE7620",
+    "path": "DatasmithHISM\\Private\\ConVerseDatasmithToolsPanel.h"
+  },
+  {
+    "sha256": "206C183C141170A36C30131CD136397F0B5774E590B339280DFDEF26602292AB",
+    "path": "DatasmithHISM\\Private\\ConVerseHISMLibrary.cpp"
+  },
+  {
+    "sha256": "778EE7DDC6417FECAF26EE0183CC2C87C64AAEA768465ADFDB6486218966AC54",
+    "path": "DatasmithHISM\\Private\\ConVerseHISMUtils.cpp"
+  },
+  {
+    "sha256": "E985BE697A8DE7293B6DC181A0BEE806E358E647F3309210D97126DAA744575C",
+    "path": "DatasmithHISM\\Private\\ConVerseHISMUtils.h"
+  },
+  {
+    "sha256": "B7DA3F9CDD1CA30E6F20FCEA2DD28E3CD066A854F9BE060E6AE8EDC4D285B6DB",
+    "path": "DatasmithHISM\\Private\\ConVerseImportPersistence.cpp"
+  },
+  {
+    "sha256": "C333A892BEA091434AC5063907AD2E70AE07B585D2CCF89EE2774C9E16B34092",
+    "path": "DatasmithHISM\\Private\\ConVerseImportProcessing.cpp"
+  },
+  {
+    "sha256": "76A77986E63B201D0F1463CE936B5A8915AB210ED6E264225B83ED66ED3D02DC",
+    "path": "DatasmithHISM\\Private\\ConVerseImportProcessing.h"
+  },
+  {
+    "sha256": "579D2F336ACF463367F7408B5A0E3075E8CC604DAB95CF29F0F0F61A17614E9D",
+    "path": "DatasmithHISM\\Private\\ConVerseImportProgress.h"
+  },
+  {
+    "sha256": "A931501499047FBDFB7CF62C3E50CFBF5D3FDB657D3EAE886C53E8BD8AFEF828",
+    "path": "DatasmithHISM\\Private\\ConVerseMaterialReview.cpp"
+  },
+  {
+    "sha256": "9FD585ACC8026EC4B6B1C9C5BEA852408334F8427AA675911450744F16B18FEB",
+    "path": "DatasmithHISM\\Private\\ConVerseMaterialReview.h"
+  },
+  {
+    "sha256": "BF44535B1CD4F6E5DC95C57CC0DAA82A78DF3B83D2C3EB250D2A0F418EEF1AC3",
+    "path": "DatasmithHISM\\Private\\ConVerseOptimizedImportCommandlet.cpp"
+  },
+  {
+    "sha256": "ED574A1AE04337329585D6575A1B236EB6B8C6731480784EA85C51A9105F0DD4",
+    "path": "DatasmithHISM\\Private\\ConVerseOptimizedImportCommandlet.h"
+  },
+  {
+    "sha256": "499E0EAA988A24B935BFB23FF9466B46BA79C4A76DD63EA1E3F3BF6F29699E77",
+    "path": "DatasmithHISM\\Private\\ConVerseOptimizedImportManifest.cpp"
+  },
+  {
+    "sha256": "D4DE409820DD7B27F5FC4CFECC26B8499402D53A5A24B9CD298B5EBDAB846192",
+    "path": "DatasmithHISM\\Private\\ConVerseOptimizedReimportHandler.cpp"
+  },
+  {
+    "sha256": "11CB27D098D2AB465865E89E9BE0FD5AD3145FC5BA7112BD951A58289D3707DB",
+    "path": "DatasmithHISM\\Private\\ConVerseOptimizedReimportHandler.h"
+  },
+  {
+    "sha256": "A3FDB02D31664AD5204874A4EEE37D4075898B63BBBFB69DF0563B5D119C6235",
+    "path": "DatasmithHISM\\Private\\ConVersePowdercoatMaterialLibrary.cpp"
+  },
+  {
+    "sha256": "74C0B42E8A25B5F6017BAE8DB8F64788CF067250CEFD1D142D9AEE6084A3E5FD",
+    "path": "DatasmithHISM\\Private\\ConVerseStaticMeshConsolidationLibrary.cpp"
+  },
+  {
+    "sha256": "26ECE8018F12D388A1D9FBBFCD4D7D49D15A70E3B74484E92A0E2542D0BBB994",
+    "path": "DatasmithHISM\\Private\\ConVerseStaticMeshConsolidationUtils.cpp"
+  },
+  {
+    "sha256": "5A33C4D43D7CFAC8D8F0E56262749AFA93451D384BF3F827D6AFC83757FF13BE",
+    "path": "DatasmithHISM\\Private\\ConVerseStaticMeshConsolidationUtils.h"
+  },
+  {
+    "sha256": "19D538865AC7909D0725E2056A790361255FAD1562398EDA90448D93A796345C",
+    "path": "DatasmithHISM\\Private\\ConVerseStaticMeshConsolidationWidget.cpp"
+  },
+  {
+    "sha256": "895033C8C4D69432BF62049E70B760A007DEC246913D7674501CC42508905BAD",
+    "path": "DatasmithHISM\\Private\\Dataprep\\ConVerseAnalyzeHISMOperation.cpp"
+  },
+  {
+    "sha256": "C43736F1EF039E070116A6A6AA84155EF39B280BC68D1A905C3CF4D0BBD7EF6D",
+    "path": "DatasmithHISM\\Private\\Dataprep\\ConVerseCategoryGroupHISMOperation.cpp"
+  },
+  {
+    "sha256": "3052A34019750B0D15CB04CF5B94603A363A9851F4D86DBFF4F6CF00C240CA64",
+    "path": "DatasmithHISM\\Private\\Dataprep\\ConVerseConsolidateSimilarMeshesOperation.cpp"
+  },
+  {
+    "sha256": "67F2AEA6904BBBFFE3A751EDC4AC098435F69CBE69E610E500F3E1048798CD4B",
+    "path": "DatasmithHISM\\Private\\Dataprep\\ConVerseCreateHISMOperation.cpp"
+  },
+  {
+    "sha256": "5A5CE0DA5AB8D21D13196E49DD04EA55E82D8A51DBBB92837CBFF844EFD676AB",
+    "path": "DatasmithHISM\\Private\\DatasmithHISM.cpp"
+  },
+  {
+    "sha256": "2ADFCF866B3F9082B38B960B80E3F2A3F7724F43606F5873D6CDD6EA786D5EE6",
+    "path": "DatasmithHISM\\Private\\DatasmithHISMCommands.cpp"
+  },
+  {
+    "sha256": "8FF4E71557474E8750904D2A57EA065D8D14297B7D3256E6B9B52D03C3851DC8",
+    "path": "DatasmithHISM\\Private\\DatasmithHISMStyle.cpp"
+  },
+  {
+    "sha256": "D79621445EE835D65B7F11CDD61358E0CF251332ED03239610FB61FC22F21AE7",
+    "path": "DatasmithHISM\\Private\\Tests\\ConVerseHISMLegacyAutomation.cpp"
+  },
+  {
+    "sha256": "69EE967937D50AD9048B6CB0735FB3937E7AB9BE35085F9A4F71E504E93AA4DB",
+    "path": "DatasmithHISM\\Private\\Tests\\ConVerseOptimizedImportAutomation.cpp"
+  },
+  {
+    "sha256": "701C08ACA3863E1AE87CB9494EE710815AD4BCA19591F489033C3BA9512366EC",
+    "path": "DatasmithHISM\\Private\\Tests\\ConVersePersistenceAutomation.cpp"
+  },
+  {
+    "sha256": "D1B3CBBBC1A6F93E8B273E3C9CFE610C8E9D7D58E45CA5CBE1AC8EBB19D9919B",
+    "path": "DatasmithHISM\\Public\\ConVerseBatchHISMLibrary.h"
+  },
+  {
+    "sha256": "2A692FB11EAA89229A8149AF2FDE666389BCF8A6725B8EDBF8ABFE46B4C13A9B",
+    "path": "DatasmithHISM\\Public\\ConVerseHISMLibrary.h"
+  },
+  {
+    "sha256": "4E934CBE9EB1789B566062826E17AA8987A7E2AEAE3FBB1BFECC44567A51B8EB",
+    "path": "DatasmithHISM\\Public\\ConVerseImportRecipe.h"
+  },
+  {
+    "sha256": "7ED31C98A7F8E4E869EA6FE894C9A0143CBFA1DFECA9D7EB4F644AD71B4930E6",
+    "path": "DatasmithHISM\\Public\\ConVerseOptimizedImportManifest.h"
+  },
+  {
+    "sha256": "73FAEC44292A4912E8D59A37BBBC256685034A9032CDB80EA5A8B589FE9C56DB",
+    "path": "DatasmithHISM\\Public\\ConVersePowdercoatMaterialLibrary.h"
+  },
+  {
+    "sha256": "A0C61C9604B82D77DC58D9B274CAECB75785A16C8C1935A808D28280C90B62DC",
+    "path": "DatasmithHISM\\Public\\ConVerseStaticMeshConsolidationLibrary.h"
+  },
+  {
+    "sha256": "C6C71E704360B97F89320741E4613C1277BC5BA197ABE43EB7EE2B859188597E",
+    "path": "DatasmithHISM\\Public\\ConVerseStaticMeshConsolidationWidget.h"
+  },
+  {
+    "sha256": "3C76B14F22E016406913669A003F0ABAB725A9F1A23DD38EB3995E94DCA18879",
+    "path": "DatasmithHISM\\Public\\Dataprep\\ConVerseAnalyzeHISMOperation.h"
+  },
+  {
+    "sha256": "51873F66E2BB5A915AA9F1459871C45DBB5FDF99D177EBB164A1248EC273D2D0",
+    "path": "DatasmithHISM\\Public\\Dataprep\\ConVerseCategoryGroupHISMOperation.h"
+  },
+  {
+    "sha256": "7363674F0F68D28E66BC6EF64AE214DF0D8FFC87C41D4C08924660AE7DB67099",
+    "path": "DatasmithHISM\\Public\\Dataprep\\ConVerseConsolidateSimilarMeshesOperation.h"
+  },
+  {
+    "sha256": "FF3AE241A96EDA7BE1358E466F9FFE77AA76D226A366A326A4EEC077BF99ECCB",
+    "path": "DatasmithHISM\\Public\\Dataprep\\ConVerseCreateHISMOperation.h"
+  },
+  {
+    "sha256": "FDBAA827EBC8EE612B77F381104253DE089772493475554CA1C381106A048268",
+    "path": "DatasmithHISM\\Public\\DatasmithHISM.h"
+  },
+  {
+    "sha256": "12720555E4763F3DCE3319AA7FFD75EA000D695F065C5367B0931C9518531A06",
+    "path": "DatasmithHISM\\Public\\DatasmithHISMCommands.h"
+  },
+  {
+    "sha256": "4609FC79FD7A884E7FF302B86B714E293F8037764A185FD3CD5A7E2F4148C99C",
+    "path": "DatasmithHISM\\Public\\DatasmithHISMStyle.h"
+  },
+  {
+    "sha256": "FAC89BB0717427B62D67BB14F2869D304B329258FBB3D75B9A1138E13C863C9B",
+    "path": "DatasmithHISMRuntime\\DatasmithHISMRuntime.Build.cs"
+  },
+  {
+    "sha256": "BB0B42D52AF8B208D7813DB093B969362652E054ACAFEB551BC521FE3448DF6C",
+    "path": "DatasmithHISMRuntime\\Private\\ConVerseRuntimeValidation.cpp"
+  },
+  {
+    "sha256": "8C44A9D339FB49D02685691E274E4EB106C712B0C43F7FB93B98C27C4336CB21",
+    "path": "DatasmithHISMRuntime\\Private\\ConVerseSourceMetadata.cpp"
+  },
+  {
+    "sha256": "F3B9F7081EEFB02B6FA3C5DC3B2992F1C4DA924C0C731CBBF6B60CC39ECFA7F1",
+    "path": "DatasmithHISMRuntime\\Public\\ConVerseSourceMetadata.h"
+  }
+]

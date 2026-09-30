@@ -127,6 +127,7 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 	ReportText = LOCTEXT(
 		"InitialReport",
 		"Analysis and verification results will appear here. Analyze reads and plans the source scene without creating assets or actors.");
+	SaveOutcomeText = FText::GetEmpty();
 	StatusDetail = LOCTEXT("IdleStatus", "Select a Datasmith-supported source file to begin.");
 
 	ProcessingRecipe.Reset(NewObject<UConVerseImportRecipe>(GetTransientPackage()));
@@ -590,7 +591,11 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 		]
 	];
 	const auto Interrupted = FConVerseDatasmithImportService::FindInterruptedAttempts();
-	if (!Interrupted.IsEmpty()) ReportText = FText::FromString(FString::Join(Interrupted, TEXT("\n")));
+	if (!Interrupted.IsEmpty())
+	{
+		ReportText = FText::FromString(FString::Join(Interrupted, TEXT("\n")));
+		SaveOutcomeText = FText::GetEmpty();
+	}
 
 	// Restored inputs drive Analyze/Import, so the status must describe them rather than an empty panel.
 	MarkInputsChanged();
@@ -722,15 +727,17 @@ FReply SConVerseDatasmithImportPanel::HandleImportAndVerify()
 	}
 	if (Result.Status == EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision)
 	{
+		// Show the full summary rather than only the group fraction: bVerificationSucceeded is the AND
+		// of the group, source-accounting, and light checks, so a group-only readout could look like a
+		// near-total pass while a different check actually failed. Result.Summary already names every
+		// failing check category.
 		const FText Prompt = FText::Format(
 			LOCTEXT("AcceptFailedVerificationPrompt",
-				"Verification failed for this import.\n\n{0} of {1} groups verified.\n{2}\n\n"
+				"Verification failed for this import.\n\n{0}\n\n"
 				"Keeping this result means the imported geometry was NOT confirmed to match the source. "
 				"It will be committed but marked degraded, and optimized reimport will be refused "
 				"against it until you remove it manually.\n\n"
 				"Keep the result anyway?"),
-			FText::AsNumber(Result.VerifiedGroupCount),
-			FText::AsNumber(Result.PlannedGroupCount),
 			FText::FromString(Result.Summary));
 
 		const EAppReturnType::Type Choice = FMessageDialog::Open(
@@ -752,6 +759,7 @@ FReply SConVerseDatasmithImportPanel::HandleImportAndVerify()
 SConVerseDatasmithImportPanel::~SConVerseDatasmithImportPanel()
 {
 	CloseMaterialReview();
+	ClearFocusedInstanceSelection();
 }
 
 void SConVerseDatasmithImportPanel::CloseMaterialReview()
@@ -784,12 +792,14 @@ void SConVerseDatasmithImportPanel::ApplyInputOptions(const FConVerseOptimizedIm
 	if (bSourceChanged || NewDestination != DestinationPath)
 	{
 		CloseMaterialReview();
+		ClearFocusedInstanceSelection();
 		InspectionRows.Reset();
 		Appearances.Reset();
 		LastManifestPath.Reset();
 		if (InspectionList) InspectionList->ClearSelection();
 		RefreshInspection();
 		ReportText = LOCTEXT("ResultCleared", "Source or destination changed. Run Analyze to inspect the current source.");
+		SaveOutcomeText = FText::GetEmpty();
 	}
 	if (bSourceChanged)
 	{
@@ -936,7 +946,10 @@ FSlateColor SConVerseDatasmithImportPanel::GetStatusColor() const
 
 FText SConVerseDatasmithImportPanel::GetReportText() const
 {
-	return ReportText;
+	// SaveOutcomeText is only non-empty right after HandleSaveResult, so this is the only place the
+	// two are combined; the box would otherwise keep showing the pre-save report text unchanged.
+	if (SaveOutcomeText.IsEmpty()) return ReportText;
+	return FText::Format(LOCTEXT("ReportWithSaveOutcome", "{0}\n\n{1}"), SaveOutcomeText, ReportText);
 }
 
 FText SConVerseDatasmithImportPanel::GetImportButtonText() const
@@ -1183,6 +1196,7 @@ FText SConVerseDatasmithImportPanel::GetTessellationSummaryText() const
 void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResult& Result, bool bWasImport)
 {
 	CloseMaterialReview();
+	ClearFocusedInstanceSelection();
 	FString SessionError;
 	FConVerseDatasmithImportService::SavePreset(FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Presets/Session.json"), MakeOptions(), SessionError);
 	if (Result.ManifestAssetPath.IsValid()) LastManifestPath = Result.ManifestAssetPath;
@@ -1190,6 +1204,7 @@ void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResu
 	Appearances = Result.Appearances;
 	RefreshInspection();
 	ReportText = FText::FromString(Result.Report);
+	SaveOutcomeText = FText::GetEmpty();
 	RefreshActiveImportProbe();
 
 	// Only a run that actually loaded the source can tell us whether the translator takes
@@ -1335,6 +1350,7 @@ FReply SConVerseDatasmithImportPanel::HandleSaveResult()
 	bool bVerified = false;
 	const bool bSaved = FConVerseDatasmithImportService::SaveImportedResult(LastManifestPath, Message, &bVerified);
 	StatusDetail = FText::FromString(Message);
+	SaveOutcomeText = FText::FromString(Message);
 	PanelStatus = !bSaved ? EPanelStatus::Failed : (bVerified ? EPanelStatus::Verified : EPanelStatus::ImportedWithFailures);
 	return FReply::Handled();
 }
@@ -1397,8 +1413,21 @@ TSharedRef<ITableRow> SConVerseDatasmithImportPanel::MakeInspectionRow(TSharedPt
 	];
 }
 
+void SConVerseDatasmithImportPanel::ClearFocusedInstanceSelection()
+{
+	if (UInstancedStaticMeshComponent* Prior = LastFocusedInstanceComponent.Get())
+	{
+		Prior->ClearInstanceSelection();
+	}
+	LastFocusedInstanceComponent.Reset();
+}
+
 FReply SConVerseDatasmithImportPanel::FocusInspection()
 {
+	// Clear the previous focus's per-instance bit before selecting a new one: SelectInstance bits
+	// live on the component, not the editor selection set, so GEditor->SelectNone below does not
+	// touch them and an earlier focus would otherwise stay highlighted on its own component.
+	ClearFocusedInstanceSelection();
 	const auto Selected = InspectionList->GetSelectedItems();
 	if (Selected.Num() == 1)
 	{
@@ -1412,6 +1441,7 @@ FReply SConVerseDatasmithImportPanel::FocusInspection()
 				if (Instances->GetInstanceTransform(Selected[0]->InstanceIndex, Transform, true))
 				{
 					Instances->SelectInstance(true, Selected[0]->InstanceIndex);
+					LastFocusedInstanceComponent = Instances;
 					GEditor->MoveViewportCamerasToBox(Instances->GetStaticMesh()->GetBoundingBox().TransformBy(Transform), false);
 				}
 			}

@@ -14,6 +14,7 @@
 #include "AutomatedAssetImportData.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/LightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DatasmithImportFactory.h"
 #include "DatasmithImportOptions.h"
@@ -281,11 +282,12 @@ namespace ConVerseDatasmithImport
 
 	static bool HashFile(const FString& FilePath, FString& OutHash, int64& OutSize, FString& OutError,
 		FScopedSlowTask* Progress = nullptr, const TFunction<bool()>* Cancel = nullptr,
-		FConVerseImportProgress* Work = nullptr, EConVerseImportWorkPhase Phase = EConVerseImportWorkPhase::SourceHash)
+		FConVerseImportProgress* Work = nullptr, EConVerseImportWorkPhase Phase = EConVerseImportWorkPhase::SourceHash,
+		const FConVerseImportOverallByteContext* Overall = nullptr)
 	{
 		if (Work)
 		{
-			const auto Outcome = Work->HashFile(FilePath, OutHash, OutSize, Phase);
+			const auto Outcome = Work->HashFile(FilePath, OutHash, OutSize, Phase, Overall);
 			if (Outcome != EConVerseImportWorkResult::Completed)
 				OutError = Outcome == EConVerseImportWorkResult::Cancelled ? TEXT("Fingerprinting cancelled.") : TEXT("The source file could not be read completely for fingerprinting.");
 			return Outcome == EConVerseImportWorkResult::Completed;
@@ -391,18 +393,33 @@ namespace ConVerseDatasmithImport
 		// Stable ordering is what makes the aggregate reproducible.
 		RelativePaths.Sort();
 
+		// A stat-only pass (no reads) so the hashing loop below can report each file's position and
+		// byte offset within the whole sidecar, not just that file's own size. Without this, a small
+		// file's "bytes 0 / N" progress line is indistinguishable from overall sidecar progress.
+		int64 SidecarTotalBytes = 0;
+		for (const FString& Relative : RelativePaths)
+			SidecarTotalBytes += FMath::Max(int64(0), IFileManager::Get().FileSize(*FPaths::Combine(DirectoryPath, Relative)));
+
 		FString Aggregate;
 		FScopedSlowTask Files(float(FMath::Max(1, RelativePaths.Num())), FText::FromString(TEXT("Checking supporting files")), Progress != nullptr);
-		for (const FString& Relative : RelativePaths)
+		int64 BytesBeforeCurrentItem = 0;
+		for (int32 Index = 0; Index < RelativePaths.Num(); ++Index)
 		{
+			const FString& Relative = RelativePaths[Index];
 			if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) { OutError = TEXT("Supporting-file check cancelled."); return false; }
 			Files.EnterProgressFrame(1.0f, FText::FromString(Relative));
 			const FString AbsolutePath = FPaths::Combine(DirectoryPath, Relative);
 
+			FConVerseImportOverallByteContext Overall;
+			Overall.ItemIndex = Index + 1;
+			Overall.ItemCount = RelativePaths.Num();
+			Overall.BytesBeforeCurrentItem = BytesBeforeCurrentItem;
+			Overall.TotalBytes = SidecarTotalBytes;
+
 			FString FileHash;
 			int64 FileSize = 0;
 			FString FileError;
-			if (!HashFile(AbsolutePath, FileHash, FileSize, FileError, Progress, Cancel, Work, EConVerseImportWorkPhase::SidecarHash))
+			if (!HashFile(AbsolutePath, FileHash, FileSize, FileError, Progress, Cancel, Work, EConVerseImportWorkPhase::SidecarHash, &Overall))
 			{
 				// Surface the offending file:
 				// silently skipping it would leave a changed asset invisible to the comparison.
@@ -419,6 +436,7 @@ namespace ConVerseDatasmithImport
 
 			OutFingerprint.TotalSize += FileSize;
 			++OutFingerprint.FileCount;
+			BytesBeforeCurrentItem += FileSize;
 		}
 
 		OutFingerprint.Hash = HashUtf8(Aggregate);
@@ -801,6 +819,18 @@ namespace ConVerseDatasmithImport
 		for (const FString& Resolution : Plan.TextureResolutionIdentities)
 		{
 			AppendField(Input, TEXT("TextureResolution"), Resolution);
+		}
+		// Amendment 10: fixed a defect where ConvertedISMOnly checked the output component's exact
+		// class, so HISM groups (UHierarchicalInstancedStaticMeshComponent) never received Nanite even
+		// though the policy covers converted ISM and HISM group output alike. The fix changes generated
+		// output only for this exact combination. Folding a salt into PlanId here - and ONLY here -
+		// means an existing manifest built under the old (Nanite-off) behavior is not silently reported
+		// AlreadyCurrent with stale output; it must be explicitly rebuilt through the normal guarded
+		// replacement path. Every other Mode/NanitePolicy combination's PlanId is unchanged.
+		if (Plan.Options.InstanceType == EConVerseOptimizedInstanceType::HISM
+			&& Plan.Options.Processing.NanitePolicy == EConVerseNanitePolicy::ConvertedISMOnly)
+		{
+			AppendField(Input, TEXT("ConvertedNaniteCoversHISM"), TEXT("1"));
 		}
 		for (const FGroupValue& Group : Plan.Groups)
 		{
@@ -1623,12 +1653,16 @@ namespace ConVerseDatasmithImport
 	}
 
 	static bool VerifySourceAccounting(UWorld& World, UDatasmithScene& ImportedScene, const FPlan& Plan,
-		const FMutationInventory& Inventory, const FString& SessionId, FConVerseOptimizedImportResult& Result)
+		const FMutationInventory& Inventory, const FString& SessionId, FConVerseOptimizedImportResult& Result,
+		FString& OutFailureDetail)
 	{
+		OutFailureDetail.Reset();
+		TArray<FString> FailureParts;
 		TMap<FString, TArray<UStaticMeshComponent*>> ByElement;
 		TSet<UStaticMeshComponent*> OrdinaryComponents;
 		TMap<FString, TArray<UInstancedStaticMeshComponent*>> Groups;
 		GatherSessionComponents(World, SessionId, Groups);
+		int32 ExcludedVisualizationCount = 0;
 		for (TActorIterator<AActor> It(&World); It; ++It)
 		{
 			if (Inventory.ExistingActors.Contains(*It)) continue;
@@ -1636,9 +1670,19 @@ namespace ConVerseDatasmithImport
 			for (UStaticMeshComponent* Component : Components)
 			{
 				if (Cast<UInstancedStaticMeshComponent>(Component)) continue;
-				OrdinaryComponents.Add(Component);
 				const FString Id = UDatasmithAssetUserData::GetDatasmithUserDataValueForKey(Component,
 					FName(UDatasmithAssetUserData::UniqueIdMetaDataKey));
+				// Amendment 11: an editor-only visualization component (for example the proxy mesh
+				// UCameraComponent::OnRegister creates for a ACineCameraActor outside commandlet mode) is
+				// never source content, so it must not count as unaccounted ordinary geometry. Excluding
+				// it requires no Datasmith identity at all - fail closed: anything that carries a
+				// UniqueId, meaning it looks like it came from the source, is still counted.
+				if (Component->IsVisualizationComponent() && Id.IsEmpty())
+				{
+					++ExcludedVisualizationCount;
+					continue;
+				}
+				OrdinaryComponents.Add(Component);
 				if (!Id.IsEmpty()) ByElement.FindOrAdd(Id).AddUnique(Component);
 			}
 			if (auto* SceneActor = Cast<ADatasmithSceneActor>(*It))
@@ -1652,6 +1696,8 @@ namespace ConVerseDatasmithImport
 				}
 			}
 		}
+		if (ExcludedVisualizationCount > 0)
+			Result.Diagnostics.Add(FString::Printf(TEXT("Excluded %d editor visualization mesh components from source accounting"), ExcludedVisualizationCount));
 		TSet<FString> Converted;
 		TMap<FString, TPair<FSoftObjectPath, int32>> InstanceOutputs;
 		const FString Document = HashUtf8(Plan.SourceFilePath);
@@ -1689,7 +1735,11 @@ namespace ConVerseDatasmithImport
 					Row.ComponentPath = Output->Key;
 					Row.InstanceIndex = Output->Value;
 				}
-				if (ByElement.Contains(Candidate.SourceElementName)) { bPassed = false; Row.Outcome = TEXT("FAIL: duplicate ordinary geometry for converted source"); }
+				if (ByElement.Contains(Candidate.SourceElementName))
+				{
+					bPassed = false; Row.Outcome = TEXT("FAIL: duplicate ordinary geometry for converted source");
+					FailureParts.AddUnique(TEXT("duplicate ordinary geometry for converted source"));
+				}
 				continue;
 			}
 			const auto* Outputs = ByElement.Find(Candidate.SourceElementName);
@@ -1700,6 +1750,7 @@ namespace ConVerseDatasmithImport
 			{
 				Row.Outcome = TEXT("FAIL: ordinary source has missing, duplicate, or unresolved output. ") + Error;
 				bPassed = false;
+				FailureParts.AddUnique(TEXT("ordinary source missing, duplicate, or unresolved output"));
 				continue;
 			}
 			UStaticMeshComponent* Component = (*Outputs)[0];
@@ -1712,17 +1763,55 @@ namespace ConVerseDatasmithImport
 			Accounted.Add(Component);
 			Row.Outcome = bMatches ? TEXT("Ordinary: verified") : TEXT("FAIL: ordinary mesh, placement, visibility, or materials differ");
 			if (bMatches) ++Result.VerifiedOrdinaryMeshes;
-			else bPassed = false;
+			else { bPassed = false; FailureParts.AddUnique(TEXT("ordinary mesh, placement, visibility, or materials differ")); }
 			AttachRuntimeSource(*Component, Candidate, Document, INDEX_NONE);
 		}
 		if (Accounted.Num() != OrdinaryComponents.Num())
 		{
 			bPassed = false;
 			Result.Diagnostics.Add(FString::Printf(TEXT("Unaccounted ordinary mesh components: actual=%d accounted=%d"), OrdinaryComponents.Num(), Accounted.Num()));
+			FailureParts.Add(FString::Printf(TEXT("ordinary mesh components actual=%d accounted=%d"), OrdinaryComponents.Num(), Accounted.Num()));
+			for (UStaticMeshComponent* Component : OrdinaryComponents)
+			{
+				if (!IsValid(Component) || Accounted.Contains(Component)) continue;
+				AActor* Owner = Component->GetOwner();
+				const FString DatasmithId = UDatasmithAssetUserData::GetDatasmithUserDataValueForKey(Component,
+					FName(UDatasmithAssetUserData::UniqueIdMetaDataKey));
+				Result.Diagnostics.Add(FString::Printf(
+					TEXT("Unaccounted component: %s | class=%s | owner=%s | owner class=%s | mesh=%s | visualization=%d | editor-only=%d | datasmith id=%s"),
+					*Component->GetPathName(), *Component->GetClass()->GetName(),
+					Owner ? *Owner->GetPathName() : TEXT("<none>"), Owner ? *Owner->GetClass()->GetName() : TEXT("<none>"),
+					Component->GetStaticMesh() ? *Component->GetStaticMesh()->GetPathName() : TEXT("<none>"),
+					Component->IsVisualizationComponent() ? 1 : 0, Component->IsEditorOnly() ? 1 : 0,
+					DatasmithId.IsEmpty() ? TEXT("<none>") : *DatasmithId));
+			}
 		}
 		for (const auto& Row : Result.InspectionRows)
 			if (Row.Outcome.StartsWith(TEXT("FAIL"))) Result.Diagnostics.Add(Row.SourceElement + TEXT(": ") + Row.Outcome);
+		OutFailureDetail = FString::Join(FailureParts, TEXT("; "));
 		return bPassed;
+	}
+
+	/**
+	 * Names every failing check category, not just the group fraction. bVerificationSucceeded is the
+	 * AND of three independent checks (groups, source accounting, lights), so a summary that only
+	 * reports the group count can read as fully passing while lights or accounting actually failed.
+	 * Only categories that actually failed are listed; a category with zero failures is omitted.
+	 */
+	static FString BuildFailedVerificationCategorySummary(const FConVerseOptimizedImportResult& Result,
+		int32 FailedLightCount, int32 TotalLightCount, bool bAccountingPassed, const FString& AccountingFailureDetail)
+	{
+		TArray<FString> Categories;
+		const int32 FailedGroupCount = Result.PlannedGroupCount - Result.VerifiedGroupCount;
+		if (FailedGroupCount > 0)
+			Categories.Add(FString::Printf(TEXT("%d of %d groups"), FailedGroupCount, Result.PlannedGroupCount));
+		if (FailedLightCount > 0)
+			Categories.Add(FString::Printf(TEXT("%d of %d lights"), FailedLightCount, TotalLightCount));
+		if (!bAccountingPassed)
+			Categories.Add(AccountingFailureDetail.IsEmpty()
+				? FString(TEXT("source accounting"))
+				: FString::Printf(TEXT("source accounting (%s)"), *AccountingFailureDetail));
+		return FString::Join(Categories, TEXT("; "));
 	}
 
 	static bool VerifySession(
@@ -2901,6 +2990,10 @@ namespace ConVerseDatasmithImport
 		TWeakObjectPtr<UConVerseOptimizedImportManifest> PreviousManifest;
 		FString FailureDetails;
 		bool bFailPreviousSessionRemovalForTesting = false;
+		// The per-category breakdown ("N of M lights; source accounting (...)") computed when the
+		// attempt was parked. Reused verbatim by AcceptFailedVerification so the accepted summary names
+		// the same failing checks as the parked one, rather than only the group fraction.
+		FString CategorySummary;
 	};
 
 	static TMap<FString, TSharedPtr<FPendingFailedVerification>>& PendingFailedVerifications()
@@ -3013,7 +3106,14 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.SidecarFileCount = Sidecar.FileCount;
 	Result.bSidecarExists = Sidecar.bExists;
 
-	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeTranslate", "Loading/translating source (translator progress may be unavailable)..."));
+	EnterStage(SlowTask, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeTranslate",
+		"Translating source; the editor may be unresponsive. Cancel takes effect when translation returns."));
+	// The translator call below is synchronous and can freeze Slate for a while, and EnterProgressFrame's
+	// UI update is throttled (FFeedbackContext::RequestUpdateUI, at most 5/sec, process-wide), so the
+	// stage label above often never paints before the freeze. ForceRefresh bypasses that throttle with
+	// two unthrottled UI updates, the same seam the engine uses for exactly this. Harmless headless: it
+	// only requests a repaint of a UI that, in an unattended/-NullRHI run, was never created.
+	SlowTask.ForceRefresh();
 	if (Cancelled()) return Result;
 	if (!Work.Update(EConVerseImportWorkPhase::Translation, 0, 1)) { Cancelled(); return Result; }
 	TSharedPtr<IDatasmithScene> Scene;
@@ -3209,7 +3309,12 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	if (Cancelled()) return Result;
 
 	EnterStage(SlowTask, 1.0f,
-		NSLOCTEXT("ConVerseHISM", "OptimizedImportLoading", "Loading the Datasmith source..."));
+		NSLOCTEXT("ConVerseHISM", "OptimizedImportLoading",
+			"Translating source; the editor may be unresponsive. Cancel takes effect when translation returns."));
+	// See the matching comment in Analyze: the translator call below is synchronous, its stage label is
+	// subject to FFeedbackContext::RequestUpdateUI's throttle, and ForceRefresh bypasses that throttle so
+	// the warning has a chance to paint before the freeze. Harmless headless/-NullRHI: no dialog exists.
+	SlowTask.ForceRefresh();
 	if (!Work.Update(EConVerseImportWorkPhase::Translation, 0, 1)) { Cancelled(); return Result; }
 	TSharedPtr<IDatasmithScene> Scene;
 	TSharedPtr<FExternalSource> Source = LoadFreshSource(
@@ -3601,13 +3706,38 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 			}
 		}
 	}
+	else if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::CorruptLightBeforeVerification)
+	{
+		// Test-only seam, shared by the light-verification and failed-verification-summary tests.
+		// Deliberately damages one real imported light component so VerifyLights fails on its own
+		// terms. Prefers nulling an IES texture found anywhere in the session; only falls back to
+		// detuning intensity when the session has no IES light to corrupt.
+		ULightComponent* IESLight = nullptr;
+		ULightComponent* AnyLight = nullptr;
+		for (TActorIterator<AActor> It(World); It && !IESLight; ++It)
+		{
+			if (Inventory.ExistingActors.Contains(*It)) continue;
+			TInlineComponentArray<ULightComponent*> Lights(*It);
+			for (ULightComponent* LightComponent : Lights)
+			{
+				if (!AnyLight) AnyLight = LightComponent;
+				if (LightComponent->IESTexture) { IESLight = LightComponent; break; }
+			}
+		}
+		if (IESLight) IESLight->IESTexture = nullptr;
+		else if (AnyLight) AnyLight->Intensity += 100000.0f;
+	}
 
 	EnterStage(SlowTask, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportVerify", "Verifying the imported session..."));
 	Result.bVerificationSucceeded = VerifySession(
 		*World, *ImportedScene, Plan, Result.SessionId, Snapshots, Result);
-	Result.bVerificationSucceeded &= VerifySourceAccounting(*World, *ImportedScene, Plan, Inventory, Result.SessionId, Result);
-	Result.bVerificationSucceeded &= ConVerseImportProcessing::VerifyLights(*World, *ImportedScene, Scene.ToSharedRef(), Inventory.ExistingActors, Result);
+	FString AccountingFailureDetail;
+	const bool bAccountingPassed = VerifySourceAccounting(*World, *ImportedScene, Plan, Inventory, Result.SessionId, Result, AccountingFailureDetail);
+	Result.bVerificationSucceeded &= bAccountingPassed;
+	int32 FailedLightCount = 0, TotalLightCount = 0;
+	Result.bVerificationSucceeded &= ConVerseImportProcessing::VerifyLights(*World, *ImportedScene, Scene.ToSharedRef(),
+		Inventory.ExistingActors, Normalized, Result, FailedLightCount, TotalLightCount);
 	if (!Result.bVerificationSucceeded)
 	{
 		FString FailedGroupSummary;
@@ -3618,6 +3748,11 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 				FailedGroupSummary += FString::Printf(TEXT("\n  %s: %s"), *Verification.GroupId, *Verification.Details);
 			}
 		}
+		// Names every failing check category (groups/lights/source accounting), not just the group
+		// fraction: bVerificationSucceeded is the AND of all three, so a summary limited to groups can
+		// read as passing while lights or accounting actually failed.
+		const FString CategorySummary = BuildFailedVerificationCategorySummary(
+			Result, FailedLightCount, TotalLightCount, bAccountingPassed, AccountingFailureDetail);
 
 		if (Normalized.bDeferRollbackOnVerificationFailure)
 		{
@@ -3633,12 +3768,13 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 			Pending->FailureDetails = FailedGroupSummary;
 			Pending->bFailPreviousSessionRemovalForTesting =
 				Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::CorruptBeforeVerificationAndFailPreviousSessionRemoval;
+			Pending->CategorySummary = CategorySummary;
 
 			Result.Status = EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision;
 			Result.Summary = FString::Printf(
-				TEXT("Import completed, but %d of %d groups failed verification. ")
+				TEXT("Import completed, but verification failed: %s. %d of %d groups verified. ")
 				TEXT("Nothing has been committed or rolled back yet; accept or discard this result.%s"),
-				Result.PlannedGroupCount - Result.VerifiedGroupCount, Result.PlannedGroupCount,
+				*CategorySummary, Result.VerifiedGroupCount, Result.PlannedGroupCount,
 				*FailedGroupSummary);
 			Pending->Result = Result;
 			PendingFailedVerifications().Add(Result.SessionId, Pending);
@@ -3651,7 +3787,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		Result.Status = bRolledBack
 			? EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack
 			: EConVerseOptimizedImportStatus::RollbackFailed;
-		Result.Summary = TEXT("Import completed, but one or more required verification checks failed.") + RollbackDetails;
+		Result.Summary = FString::Printf(TEXT("Import completed, but verification failed: %s.%s"), *CategorySummary, *RollbackDetails);
 		FinishResult(&Plan, Result);
 		return Result;
 	}
@@ -3879,12 +4015,14 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::AcceptFailedVeri
 	}
 
 	// bVerificationSucceeded stays false. Accepting changes what happens to the output, never the
-	// record of whether it passed.
+	// record of whether it passed. The category text is the same one shown when the attempt was
+	// parked, so the accepted summary names every failing check category rather than only the
+	// group fraction.
 	Result.Status = EConVerseOptimizedImportStatus::AcceptedWithFailedVerification;
 	Result.Summary = FString::Printf(
-		TEXT("Accepted despite failed verification: %d of %d groups verified. ")
+		TEXT("Accepted despite failed verification: %s. %d of %d groups verified. ")
 		TEXT("This session is committed but degraded, and optimized reimport is refused against it.%s"),
-		Result.VerifiedGroupCount, Result.PlannedGroupCount, *Pending->FailureDetails);
+		*Pending->CategorySummary, Result.VerifiedGroupCount, Result.PlannedGroupCount, *Pending->FailureDetails);
 	FinishResult(&Pending->Plan, Result);
 	return Result;
 }

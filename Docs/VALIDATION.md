@@ -2,7 +2,7 @@
 
 Current baseline: **2026-09-29, UE 5.8.3 editor build passed, 36/36 automation tests passed** (texture search folders and missing-texture prompt, Amendment 8, Batch A/C/D checkpoints). Previously 33/33, exit 0 and zero controller errors. [Executed evidence](Validation/2026-09-27-live-ui.md) and [55 source hashes/results](Validation/2026-09-27-live-ui-evidence.json) cover live native UI results and the two resulting fixes. [Preset/cancellation evidence](Validation/2026-09-27-preset-cancellation.md) covers the previous changes. Earlier [persistence/recovery](Validation/2026-09-26-phase2.md) results retain their original dates. The recent [runtime packaging evidence](Validation/2026-09-29-packaging.md) proves the successful cook of the latest changes.
 
-The [earlier documentation closeout](Validation/2026-09-27-closeout.md) records its own 54-file snapshot. Live native UI remains the next independent assignment and is not established by the automated panel-state checks.
+The separately recorded [2026-09-28 verification snapshot](Validation/2026-09-28-verification.md) reports its own UE 5.8.3 build and 38/38 tests for the verification fixes. That result is not validation of the combined remote-plus-stashed tree; rebuild and rerun automation after conflict resolution. The [earlier documentation closeout](Validation/2026-09-27-closeout.md) records its own 54-file snapshot. Live native UI remains incomplete.
 
 ## Build and automation
 
@@ -20,7 +20,7 @@ Close Unreal Editor before either command. If Live Coding blocks the build, clos
   '-abslog=D:\Unreal\Sandbox\AdvancedHISM\Saved\Logs\Automation.txt'
 ```
 
-Capture each process exit code. Inspect `Test Completed`, `LogAutomationController: Error:`, and the final test-complete exit marker. The current baseline exits 0 with 30 successes and zero controller errors. Optional LinuxArm64/VisionOS validation messages did not block that run.
+Capture each process exit code. Inspect `Test Completed`, `LogAutomationController: Error:`, and the final test-complete exit marker. The separately recorded 2026-09-28 verification run exited 0 with 38 successes and zero controller errors; it does not validate the combined remote-plus-stashed tree. The 2026-09-29 remote baseline recorded 36/36, and the combined tree remains unverified. Optional LinuxArm64/VisionOS validation messages do not block runs.
 
 ## Fixture-driven imports
 

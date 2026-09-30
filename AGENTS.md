@@ -1,4 +1,124 @@
-# DatasmithHISM agent guidance
+# agent guidance
+
+tell the user when it's time to start a new thread. If the context window is close to full or token usage is getting high per entry
+
+ask if the user wants to use lower reasoning agents if the current model or effor level is determited to be excessive
+
+if the user says that this thread is a orchestrator thread, delegate tasks to other agents that use less tokens that are apropriate for the reasoning and task level.
+
+Do not use powershell scripts to do smoke tests
+
+## Endpoint security / EDR safety
+
+This repository is developed on a corporate-managed Windows endpoint. Endpoint security restrictions are a hard constraint.
+
+### Do not create or execute security-sensitive automation
+
+Unless the user explicitly requests it after being told what will run, agents must **not**:
+
+- Create, execute, or dynamically generate PowerShell scripts (`.ps1`) for testing, orchestration, smoke tests, process management, recovery testing, or build automation.
+- Use `powershell.exe`, `pwsh.exe`, `cmd.exe /c`, `Invoke-Expression`, `iex`, `EncodedCommand`, Base64-encoded commands, dynamically constructed shell commands, or command obfuscation.
+- Launch processes hidden, detached, minimized, or with suppressed windows.
+- Force-kill, suspend, inject into, inspect memory of, or manipulate unrelated processes.
+- Use `Stop-Process -Force`, `taskkill /F`, WMI/CIM process control, or equivalent process-management mechanisms.
+- Create or modify scheduled tasks, Windows services, startup items, Run/RunOnce registry keys, WMI persistence, login scripts, shell extensions, or other OS persistence mechanisms.
+- Modify Windows Defender, antivirus, firewall, SmartScreen, execution policy, AMSI, application control, certificates, security exclusions, or other endpoint-security settings.
+- Download and execute code, installers, binaries, scripts, or tools as part of validation.
+- Use offensive-security, red-team, credential-access, persistence, lateral-movement, evasion, or penetration-testing utilities, even for benign testing.
+- Attempt to bypass or work around a command blocked by antivirus, EDR, application control, permissions, or corporate policy.
+
+### Prefer application-native validation
+
+Use the narrowest application-native mechanism available.
+
+For Unreal Engine work, prefer in this order:
+
+1. Existing C++ automation tests.
+2. Unreal Automation Framework tests.
+3. Unreal commandlets invoked directly with documented arguments.
+4. Normal Unreal Editor build/test workflows.
+5. Manual validation instructions for the user.
+
+Do not introduce an external shell harness merely to automate a test that can be expressed inside Unreal.
+
+Tests involving restart, save/reopen, recovery, persistence, crash handling, or interrupted operations should be implemented inside the application/test framework where possible. Do not simulate interruption by externally force-terminating processes.
+
+### Shell-command rules
+
+When a shell command is genuinely necessary:
+
+- Prefer a direct executable invocation with literal arguments.
+- Keep commands short, transparent, and auditable.
+- Do not compose executable command strings dynamically.
+- Do not use hidden windows or background process tricks.
+- Do not use shell pipelines for process discovery or control.
+- Do not execute commands whose security implications are unclear.
+- Show the exact security-sensitive command to the user before running it when it performs process control, system configuration, package installation, or other machine-level changes.
+
+### Corporate security blocks are stop conditions
+
+If Windows Defender, EDR, antivirus, application control, PowerShell, or another corporate security mechanism blocks or flags an operation:
+
+**STOP immediately.**
+
+Do not retry with altered syntax.
+Do not rename the file.
+Do not encode or obfuscate the command.
+Do not switch shells to bypass the block.
+Do not disable security controls.
+Do not add exclusions.
+Do not attempt an equivalent workaround that performs the same blocked behavior.
+
+Instead:
+
+1. Preserve the error/detection information.
+2. Report the exact operation that triggered it.
+3. Explain what the operation was intended to accomplish.
+4. Replace it with an application-native or manual validation approach.
+5. Leave endpoint-security investigation to IT/security.
+
+### Process safety
+
+Agents must assume all running applications may contain unsaved user work.
+
+Do not terminate existing user processes.
+
+If a test requires exclusive access, detect the condition and stop with instructions for the user rather than terminating anything.
+
+A test-created child process should normally be allowed to exit naturally. External forced termination should not be added as an automated testing strategy.
+
+### Repository policy
+
+Do not commit automation whose primary purpose is:
+
+- external process interruption;
+- Windows persistence testing;
+- endpoint-security testing;
+- antivirus/EDR testing;
+- shell-based process supervision;
+- security-control detection or bypass.
+
+If such behavior becomes genuinely necessary for product requirements, document the requirement first and require explicit human review before implementation.
+
+### Terminology
+
+Project terms such as **persistence**, **recovery**, **interruption**, and **smoke test** refer to application behavior unless explicitly stated otherwise.
+
+Avoid filenames or tooling that could unnecessarily resemble security-testing utilities when a clearer application-specific name is available. For example, prefer names such as:
+
+`ConVerseSaveReopenAutomation`
+
+over generic names such as:
+
+`Invoke-PersistenceSmoke.ps1`
+
+### When uncertain
+
+When an approach could reasonably resemble malware, persistence tooling, process manipulation, security testing, or endpoint evasion:
+
+**Do not execute it. Use a safer application-native approach or ask the user first.**
+
+
 
 Updated 2026-09-27 after preset/cancellation implementation and automation. Read the project-level [AGENTS.md](../../AGENTS.md), [handoff](HANDOFF.md), [current next steps](NEXT_STEPS.md), and [execution ledger](ROADMAP_EXECUTION.md) before new work. This is a C++ UE **5.8.3** plugin, with editor and runtime modules; it is not a .NET application.
 

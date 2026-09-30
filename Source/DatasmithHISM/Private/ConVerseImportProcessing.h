@@ -22,7 +22,8 @@ namespace ConVerseImportProcessing
 	EConVerseImportWorkResult ValidateDependencies(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
 		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress);
 	bool VerifyLights(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
-		const TSet<const AActor*>& ExistingActors, FConVerseOptimizedImportResult& Result);
+		const TSet<const AActor*>& ExistingActors, const FConVerseOptimizedImportOptions& Options,
+		FConVerseOptimizedImportResult& Result, int32& OutFailedLightCount, int32& OutTotalLightCount);
 	bool ProcessMeshes(UWorld& World, UDatasmithScene& Scene, const FString& AttemptFolder,
 		const FConVerseOptimizedImportOptions& Options, FConVerseOptimizedImportResult& Result, FString& OutError);
 	EConVerseImportWorkResult ApplyMaterials(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,

@@ -8,13 +8,28 @@ Updated 2026-09-29 after **Batches A/C/D completion and runtime packaging smoke 
 > The runtime packaging and smoke test was also run against the new baseline (`ConVerse.ValidateImportedScene 3 RequireCollision RequireIES Exit`) in a cooked build and passed with zero errors, verifying runtime identities and metadata.
 
 > **Unverified live:** the two fixes from 2026-09-27 (false drift after naming an untitled level, and session restore hiding effective source) passed build and automation only. They have **not** been re-exercised in a live editor.
+### Separate 2026-09-28 verification snapshot (not validation of the combined tree)
+Updated 2026-09-28 after the **ARCH live-import verification fixes**. **UE 5.8.3 editor build passed; full suite 38/38, exit 0, zero controller errors. Nothing from 2026-09-27 or 2026-09-28 has been re-checked in a live editor; release acceptance is incomplete.** [2026-09-28 verification record](Docs/Validation/2026-09-28-verification.md) and [55 source hashes](Docs/Validation/2026-09-28-source-sha256.json) are current. Earlier evidence: [live UI results](Docs/Validation/2026-09-27-live-ui.md), [preset/cancellation](Docs/Validation/2026-09-27-preset-cancellation.md), [persistence/recovery](Docs/Validation/2026-09-26-phase2.md) and [documentation closeout](Docs/Validation/2026-09-27-closeout.md).
 
-**Native interaction works.** `Saved/Phase2Acceptance/20260927-LiveUIB/NativeUI.ps1` drives Slate with `SendInput` clicks and Unicode text, guarded to the launched editor's foreground process. `SendKeys` accelerators such as Ctrl+N do not register; use menus. The user must leave the desktop idle while it runs.
+### ARCH verification details
 
-**Fixed 2026-09-27 (automation-verified):**
+> **Built and automation-tested, not yet live, 2026-09-28.** Two live panel imports of the user's Revit 2025 export `C:/Users/jonathanmc/Desktop/ARCH.udatasmith` (HISM, minimum 3; reports `Saved/DatasmithHISM/ImportReports/e2e659384b8a0bbffc4b12b69bb233e2.json` and `f266185c4bbb368035316d8b1fc7cf66.json`) verified all 298 groups / 4,884 instances but failed verification elsewhere. Root causes and fixes:
+>
+> 1. **10 failing lights:** their IES file `ARCH_Assets/generic` is 0 bytes, which `FPaths::FileExists` accepted. Empty dependency files are now missing (Amendment 9); a headless `-AnalyzeOnly` of ARCH now stops with `generic_IES: …/ARCH_Assets/generic (empty file)`. Light failures name the differing field; an IES file explicitly accepted as missing yields a visible "IES profile missing (accepted)" warning instead of a failure.
+> 2. **`actual=5506 accounted=5505`:** ARCH's single `<Camera>` becomes an `ACineCameraActor` whose `UCameraComponent::OnRegister` adds a `UCameraProxyMeshComponent` in non-commandlet editors. Visualization components without a Datasmith id are excluded and any remaining unaccounted component is named (Amendment 11). Does not reproduce headless; the automation test does reproduce it.
+> 3. **"0 of 298 groups failed" summary:** failed-verification summaries and the panel dialog now name every failing category (Amendment 6 clause 8).
+> 4. **User decisions implemented:** Nanite "Converted ISM/HISM Groups Only" now covers HISM group output, with a PlanId salt only for HISM + that policy so such existing imports need an explicit rebuild (Amendment 10); the translator stage now force-paints "Translating source; the editor may be unresponsive. Cancel takes effect when translation returns." before the blocking call (Amendment 2).
+>
+> Five new tests, each shown failing before its fix: `ZeroByteDependenciesAreMissing`, `LightVerificationNamesField`, `CameraProxyMeshIsNotSourceContent`, `FailedVerificationSummaryNamesChecks`, `ConvertedGroupNaniteCoversHISM`. Logs: host `Saved/Phase2Acceptance/20260928-Verification/` (37/37) and `20260928-NaniteTranslator/` (38/38).
 
-1. **False drift after naming an untitled level.** The editor's Save As also saves the manifest; UE redirects its soft paths but not tracked-state text naming `/Temp/…`. `ConVerseImportProcessing::RebaseTemporaryWorld` now maps those references to the owning world under GUID and session-tag proof, in `CheckState` and on explicit save. Contract Amendment 7 and ADR 0006 carry the clarification. Test: `DatasmithHISM.Persistence.UnnamedMapFirstSaveStaysVerified`.
-2. **Session restore hid the effective source.** The panel's source box now shows the restored path and status reflects restored inputs. Test: `DatasmithHISM.OptimizedImport.PanelSessionRestoreShowsInputs`.
+**Next task: one batched live session, then the remaining checklist rows.** Live sessions take over mouse and keyboard; **only run one when the user explicitly frees the desktop.** Do not restart implementation or begin Phase 6.
+
+**Native interaction works.** `Saved/Phase2Acceptance/20260927-LiveUIB/NativeUI.ps1` drives Slate with `SendInput` clicks and Unicode text, guarded to the launched editor's foreground process. `SendKeys` accelerators such as Ctrl+N do not register; use menus.
+
+**Fixed 2026-09-27 (automation-verified, not yet re-checked live):**
+
+1. **False drift after naming an untitled level.** The editor's Save As also saves the manifest; UE redirects its soft paths but not tracked-state text naming `/Temp/…`. `ConVerseImportProcessing::RebaseTemporaryWorld` now maps those references to the owning world under GUID and session-tag proof, in `CheckState` and on explicit save. Contract Amendment 7 and ADR 0006. Test: `DatasmithHISM.Persistence.UnnamedMapFirstSaveStaysVerified`.
+2. **Session restore hid the effective source.** The source box now shows the restored path and status reflects restored inputs. Test: `DatasmithHISM.OptimizedImport.PanelSessionRestoreShowsInputs`.
 
 **Next tasks:** 
 1. **Live re-check:** Relaunch the editor with the new build. Open `/Game/ConVerseValidation/LiveUI_20260927B_Joist`: its saved joist manifest still has pre-fix `/Temp/` state and should now re-verify. Then import into a fresh untitled level, name it, save the result (expect green "Saved imported result and owning level."), and reopen the panel (expect the source shown). Continue with the rows still open in the [checklist](Docs/Validation/2026-09-26-phase2-ui.md). 
@@ -22,15 +37,19 @@ Updated 2026-09-29 after **Batches A/C/D completion and runtime packaging smoke 
 3. **Legacy tools validation:** Tests for dedupe confirmation, Explode undo, and BIM hierarchy.
 
 Do not restart implementation or begin Phase 6 until these are cleared.
+**Live re-check, in order:**
 
-| Order | Bounded task | Acceptance and evidence |
+| Order | Item | What to observe |
 |---|---|---|
-| 1 | Live re-check of both fixes | Observed as above, with captures |
-| 2 | Decide translator-boundary feedback | Slate freezes during the synchronous translator, so no "cancel requested" state can paint; the deferred cancel itself is honest. Accept the limitation in the contract or design pre-translation messaging |
-| 3 | Remaining checklist rows | Copied-fixture material/light rebuild previews; reviewed-target approval/revocation; native named-map copy refusal; representative large-source success (needs a complete export) |
-| 4 | Broaden native rename and recovery acceptance | Content Browser rename/move, other interruption checkpoints and full-volume behavior remain separate checks |
+| 1 | 2026-09-27 drift fix | Open `/Game/ConVerseValidation/LiveUI_20260927B_Joist` (saved with pre-fix `/Temp/` state); it should re-verify without drift. Import joist into a fresh untitled level, name it, save: expect green "Saved imported result and owning level." |
+| 2 | 2026-09-27 session restore fix | Close and reopen the panel: the restored source path is visible and status is Ready. |
+| 3 | Missing/empty dependency prompt (Amendments 8, 9) | Analyze ARCH: the Yes/No prompt lists `Window Keystone01.jpg` and `generic` (empty file). Declining stops; accepting proceeds. |
+| 4 | Accepted-missing IES and accounting on ARCH | Import ARCH (HISM, fresh map/destination) after accepting: the 10 `generic_IES` lights show "IES profile missing (accepted)", source accounting passes (no camera-proxy mismatch) and the result verifies. |
+| 5 | Pre-translation warning (Amendment 2) | Analyze the 90 MB HVAC export: the "Translating source; the editor may be unresponsive…" text is visible before the freeze. |
+| 6 | Failure summary wording | If any verification failure occurs, the dialog names the failing categories. Automated coverage exists; observe only if it arises naturally. |
+| 7 | Remaining checklist rows | Copied-fixture material/light rebuild previews; reviewed-target approval/revocation (needs a disposable reviewed target); native named-map copy refusal; Content Browser rename/move. Representative large-source success still needs a complete export. |
 
-Cosmetic items seen live and not fixed: the per-file "bytes 0 / N" progress label; stale report summary after save; `SelectInstance` bits never cleared between focuses; `…_ISM_0` component naming.
+Cosmetic items seen live on 2026-09-27 and not fixed: the per-file "bytes 0 / N" progress label; stale report summary after save; `SelectInstance` bits never cleared between focuses; `…_ISM_0` component naming.
 
 Use fresh map and destination names for destructive/failure tests. The current saved validation map is reference evidence, not a scratch target. Keep ownership/replacement/rollback decisions in the service. The next assignment is done when every live UI checklist row has a reproducible result and artifact, demonstrated defects have built/tested fixes, and unavailable interactions or missing inputs remain explicit. Broader source-data and release gates stay separate.
 
@@ -89,8 +108,8 @@ Do not repeat these requests if the user supplies the inputs in the next convers
 - Host project: `D:/Unreal/Sandbox/AdvancedHISM/AdvancedHISM.uproject`; UE 5.8.3.
 - Git repository: this plugin directory. The project root, its Docs, generated validation maps, logs and package archives are outside that Git root.
 - Existing uncommitted work was preserved. The implementation and documentation are working-tree changes; no publication is implied.
-- Current build: `Saved/Phase2Acceptance/20260927-LiveUIB/67-build-final.txt`, passed, exit 0. Earlier: `20260927-PresetCancellation/02-build.txt`, `20260926A/09-build.txt`.
-- Current automation: `Saved/Phase2Acceptance/20260927-LiveUIB/68-full-automation.txt`, 32/32 passed, exit 0, zero controller errors. Earlier: `20260927-PresetCancellation/03-full-automation.txt` (30/30), `20260926A/10-full-automation.txt` (27/27).
+- Current build: `Saved/Phase2Acceptance/20260928-NaniteTranslator/04-build-fixed.log`, passed, exit 0. Earlier: `20260928-Verification/06-build-after-fix-retry.txt`, `20260927-LiveUIB/67-build-final.txt`, `20260927-PresetCancellation/02-build.txt`, `20260926A/09-build.txt`.
+- Current automation: `Saved/Phase2Acceptance/20260928-NaniteTranslator/06-test-full-suite.log`, 38/38 passed, exit 0, zero controller errors. Earlier: `20260928-Verification/08-full-suite-after-fix.txt` (37/37), `20260927-Textures/02-full-automation.txt` (33/33), `20260927-LiveUIB/68-full-automation.txt` (32/32), `20260927-PresetCancellation/03-full-automation.txt` (30/30), `20260926A/10-full-automation.txt` (27/27).
 - Live UI: `Saved/Phase2Acceptance/20260927-LiveUIB/` holds `editor.log`, `interaction.jsonl` and the numbered captures referenced by the [live UI results](Docs/Validation/2026-09-27-live-ui.md).
 - Persistence: original named map reopens and re-verifies in a fresh process. Identity-changing named-map copies are refused with recovery instructions; initial unnamed save-as retains its previous behavior. Real read-only-asset and simulated map write-capacity failures report incomplete saves; saving drift never accepts a new baseline.
 - Recovery: a disposable process was terminated at a recorded pre-commit checkpoint. Restart reports 7 observed paths and preserves all 4 saved evidence files unchanged.

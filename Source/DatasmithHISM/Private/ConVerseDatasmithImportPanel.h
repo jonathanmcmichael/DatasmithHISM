@@ -9,6 +9,7 @@
 
 class SEditableTextBox;
 class SWindow;
+class UInstancedStaticMeshComponent;
 
 /**
  * Editor panel for analyzing and importing optimized Datasmith scenes.
@@ -31,6 +32,8 @@ private:
 	friend class FConVersePanelInputStateTest;
 	friend class FConVersePanelSessionRestoreTest;
 	friend class FConVersePanelMissingTexturesTest;
+	friend class FConVersePanelSaveUpdatesReportTest;
+	friend class FConVerseFocusClearsPriorSelectionTest;
 	void ApplyInputOptions(const FConVerseOptimizedImportOptions& Options);
 	/** Asks whether to proceed without the result's missing textures; on Yes, records them as accepted. */
 	bool ConfirmMissingTextures(const FConVerseOptimizedImportResult& Result);
@@ -116,6 +119,13 @@ private:
 	FString InspectionSearch;
 	TStrongObjectPtr<UConVerseImportRecipe> ProcessingRecipe;
 	TWeakPtr<SWindow> MaterialReviewWindow;
+	/**
+	 * The ISM/HISM component whose per-instance SelectInstance bit was last set by FocusInspection, if
+	 * any. SelectInstance bits are not cleared by GEditor->SelectNone, so an earlier focus otherwise
+	 * stays highlighted on its own component after a later focus moves to a different row.
+	 */
+	TWeakObjectPtr<UInstancedStaticMeshComponent> LastFocusedInstanceComponent;
+	void ClearFocusedInstanceSelection();
 	bool bApplyingInputs = false;
 	bool bForceRebuildNext = false;
 	FSoftObjectPath LastManifestPath;
@@ -143,4 +153,10 @@ private:
 	EPanelStatus PanelStatus = EPanelStatus::Idle;
 	FText StatusDetail;
 	FText ReportText;
+	/**
+	 * Outcome of the most recent explicit "Save imported result", shown ahead of ReportText so the
+	 * summary box does not keep displaying pre-save text. Cleared whenever ReportText is replaced by
+	 * a fresh operation result or invalidated, so it cannot outlive the report it was about.
+	 */
+	FText SaveOutcomeText;
 };

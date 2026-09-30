@@ -2,7 +2,9 @@
 
 #include "ConVerseOptimizedImportManifest.h"
 #include "ConVerseImportProcessing.h"
+#include "ConVerseImportProgress.h"
 #include "ConVerseDatasmithImportPanel.h"
+#include "FileHelpers.h"
 #include "Misc/FileHelper.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Input/SEditableTextBox.h"
@@ -28,6 +30,7 @@
 #include "EngineUtils.h"
 #include "HAL/FileManager.h"
 #include "Interfaces/Interface_AssetUserData.h"
+#include "Misc/App.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
@@ -52,6 +55,7 @@ namespace ConVerseOptimizedImportAutomation
 		FString PrimaryMaterialName;
 		FString SecondaryMaterialName;
 		FString TextureFile;
+		FString IESFile;
 	};
 
 	static FString HashFile(const FString& FilePath)
@@ -120,7 +124,8 @@ namespace ConVerseOptimizedImportAutomation
 		FString& OutError,
 		int32 ExtraInstances = 0,
 		const FString& ExistingRoot = FString(),
-		bool bSecondMaterialSlot = false, bool bLights = false, bool bCustomAppearance = false, bool bTexture = false)
+		bool bSecondMaterialSlot = false, bool bLights = false, bool bCustomAppearance = false, bool bTexture = false,
+		bool bIESLight = false, bool bCamera = false, bool bSecondMesh = false)
 	{
 		OutFixture.RootDirectory = ExistingRoot.IsEmpty()
 			? FPaths::ProjectSavedDir()
@@ -208,6 +213,45 @@ namespace ConVerseOptimizedImportAutomation
 			OutFixture.SecondaryMaterialName = SecondaryMaterial->GetName();
 		}
 
+		// A distinct mesh element (different geometry, own asset) with exactly one instance, used by
+		// FConVerseConvertedGroupNaniteCoversHISMTest to prove Nanite is not enabled on an ordinary,
+		// below-threshold mesh that never joins a group - a real negative control the shared
+		// SharedFixtureMesh instances cannot provide, since they all resolve to one imported asset.
+		TSharedPtr<IDatasmithMeshElement> OrdinaryMeshElement;
+		if (bSecondMesh)
+		{
+			FDatasmithMesh SecondMesh;
+			SecondMesh.SetName(TEXT("OrdinaryFixtureMesh"));
+			SecondMesh.SetVerticesCount(4);
+			SecondMesh.SetVertex(0, -20.0f, -20.0f, 0.0f);
+			SecondMesh.SetVertex(1,  20.0f, -20.0f, 0.0f);
+			SecondMesh.SetVertex(2,  20.0f,  20.0f, 0.0f);
+			SecondMesh.SetVertex(3, -20.0f,  20.0f, 0.0f);
+			SecondMesh.SetFacesCount(2);
+			SecondMesh.SetFace(0, 0, 1, 2, 0);
+			SecondMesh.SetFace(1, 0, 2, 3, 0);
+			for (int32 CornerIndex = 0; CornerIndex < 6; ++CornerIndex)
+			{
+				SecondMesh.SetNormal(CornerIndex, 0.0f, 0.0f, 1.0f);
+			}
+			SecondMesh.SetUVChannelsCount(1);
+			SecondMesh.SetUVCount(0, 4);
+			SecondMesh.SetUV(0, 0, 0.0, 0.0);
+			SecondMesh.SetUV(0, 1, 1.0, 0.0);
+			SecondMesh.SetUV(0, 2, 1.0, 1.0);
+			SecondMesh.SetUV(0, 3, 0.0, 1.0);
+			SecondMesh.SetFaceUV(0, 0, 0, 1, 2);
+			SecondMesh.SetFaceUV(1, 0, 0, 2, 3);
+			OrdinaryMeshElement = MeshExporter.ExportToUObject(
+				SceneExporter.GetAssetsOutputPath(), SecondMesh.GetName(), SecondMesh, nullptr, EDSExportLightmapUV::Never);
+			if (!OrdinaryMeshElement.IsValid())
+			{
+				OutError = FString::Printf(TEXT("Could not export ordinary fixture mesh: %s"), *MeshExporter.GetLastError());
+				return false;
+			}
+			OrdinaryMeshElement->SetMaterial(Material->GetName(), 0);
+		}
+
 		const TSharedRef<IDatasmithScene> Scene = FDatasmithSceneFactory::CreateScene(*SceneName);
 		Scene->SetHost(TEXT("DatasmithHISM Automation"));
 		Scene->SetVendor(TEXT("ConVerse"));
@@ -220,6 +264,10 @@ namespace ConVerseOptimizedImportAutomation
 			Scene->AddMaterial(SecondaryMaterial.ToSharedRef());
 		}
 		Scene->AddMesh(MeshElement);
+		if (OrdinaryMeshElement.IsValid())
+		{
+			Scene->AddMesh(OrdinaryMeshElement);
+		}
 		if (bTexture)
 		{
 			// A valid 1024-square, 24-bit BMP crosses three 1 MiB fingerprint checkpoints.
@@ -236,6 +284,26 @@ namespace ConVerseOptimizedImportAutomation
 			Scene->AddTexture(Texture);
 		}
 
+		// A real, minimal-but-valid IES photometric file, copied from the checked-in RevitLightExport
+		// fixture. This has to be genuinely importable so the untampered case has a real UTextureLightProfile
+		// on the light component; a fabricated/garbage .ies would fail FDatasmithTextureImporter's
+		// parser and leave IESTexture null even without any failure injection.
+		TSharedPtr<IDatasmithTextureElement> IESTextureElement;
+		if (bIESLight)
+		{
+			const FString SourceIESFile = FPaths::ConvertRelativePathToFull(
+				FPaths::ProjectPluginsDir() / TEXT("DatasmithHISM/Tests/Fixtures/RevitLightExport/RevitLightExport_Assets/BL1A19.IES"));
+			OutFixture.IESFile = FString(SceneExporter.GetAssetsOutputPath()) / TEXT("FixtureProfile.ies");
+			if (IFileManager::Get().Copy(*OutFixture.IESFile, *SourceIESFile) != COPY_OK)
+			{
+				OutError = TEXT("Could not copy the IES fixture file.");
+				return false;
+			}
+			IESTextureElement = FDatasmithSceneFactory::CreateTexture(TEXT("FixtureIESProfile"));
+			IESTextureElement->SetFile(*OutFixture.IESFile);
+			IESTextureElement->SetTextureMode(EDatasmithTextureMode::Ies);
+			Scene->AddTexture(IESTextureElement.ToSharedRef());
+		}
 
 		const TSharedRef<IDatasmithActorElement> Parent =
 			FDatasmithSceneFactory::CreateActor(TEXT("SharedParent"));
@@ -243,6 +311,17 @@ namespace ConVerseOptimizedImportAutomation
 		Parent->SetTranslation(FVector(100.0, 200.0, 25.0));
 		Parent->SetRotation(FQuat(FVector::UpVector, FMath::DegreesToRadians(12.0)));
 		Scene->AddActor(Parent);
+
+		if (bCamera)
+		{
+			// Imported as a ACineCameraActor. In a non-commandlet editor, UCameraComponent::OnRegister
+			// registers a UCameraProxyMeshComponent (a visualization-only UStaticMeshComponent) that
+			// carries no Datasmith identity - the regression this fixture exercises.
+			const TSharedRef<IDatasmithCameraActorElement> Camera = FDatasmithSceneFactory::CreateCameraActor(TEXT("FixtureCamera"));
+			Camera->SetLabel(TEXT("Fixture Camera"));
+			Camera->SetTranslation(FVector(0.0, 0.0, 200.0));
+			Scene->AddActor(Camera);
+		}
 
 		MakeMeshActor(
 			Scene, Parent, TEXT("Instance_A"), TEXT("Supported Instance A"),
@@ -271,6 +350,14 @@ namespace ConVerseOptimizedImportAutomation
 					FVector(1.0)));
 		}
 
+		if (OrdinaryMeshElement.IsValid())
+		{
+			MakeMeshActor(
+				Scene, Parent, TEXT("Instance_Ordinary"), TEXT("Ordinary Secondary Instance"),
+				OrdinaryMeshElement->GetName(), Material->GetName(), TEXT("9001"),
+				FTransform(FRotator::ZeroRotator, FVector(700.0, 400.0, 25.0), FVector(1.0)));
+		}
+
 		if (bLights)
 		{
 			for (int32 Index = 0; Index < 3; ++Index)
@@ -279,6 +366,13 @@ namespace ConVerseOptimizedImportAutomation
 				Light->SetIntensityUnits(Index == 0 ? EDatasmithLightUnits::Lumens : Index == 1 ? EDatasmithLightUnits::Candelas : EDatasmithLightUnits::Unitless);
 				Light->SetIntensity(1250 + Index * 100);
 				Light->SetEnabled(Index != 2);
+				if (Index == 0 && IESTextureElement.IsValid())
+				{
+					Light->SetUseIes(true);
+					Light->SetIesTexturePathName(IESTextureElement->GetName());
+					Light->SetUseIesBrightness(true);
+					Light->SetIesBrightnessScale(1.0);
+				}
 				Parent->AddChild(Light, EDatasmithActorAttachmentRule::KeepWorldTransform);
 			}
 		}
@@ -2184,6 +2278,132 @@ bool FConVerseMeshPolicyTest::RunTest(const FString&)
 	return true;
 }
 
+/**
+ * Amendment 10. EConVerseNanitePolicy::ConvertedISMOnly must enable Nanite on converted group output
+ * regardless of whether the requested component type is ISM or HISM. Before the fix, ProcessMeshes
+ * collected "converted" meshes with an exact-class check against UInstancedStaticMeshComponent, so a
+ * HISM group (UHierarchicalInstancedStaticMeshComponent, a subclass) was silently never enabled.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseConvertedGroupNaniteCoversHISMTest,
+	"DatasmithHISM.OptimizedImport.ConvertedGroupNaniteCoversHISM",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseConvertedGroupNaniteCoversHISMTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	// bSecondMesh adds a distinct, separately-imported "Instance_Ordinary" mesh with a single instance
+	// (below MinimumInstanceCount), so it can never join a group and serves as a real negative control:
+	// unlike the mirrored actor, it does not share an imported StaticMesh asset with the converted group.
+	if (!TestTrue(TEXT("Create source"), CreateFixture(
+		Fixture, Error, 0, FString(), false, false, false, false, false, false, true)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	const FString TestRunId = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+
+	// Imports the fixture under NanitePolicy::ConvertedISMOnly for one InstanceType, checks that the
+	// converted group's mesh received Nanite and the ordinary retained mesh did not, and returns the
+	// PlanId (empty on any failure) so the caller can compare PlanIds across modes.
+	auto RunPolicy = [this, &Fixture, &TestRunId](EConVerseOptimizedInstanceType InstanceType, const TCHAR* ModeName) -> FString
+	{
+		FConVerseOptimizedImportOptions Options;
+		Options.FilePath = Fixture.SceneFile;
+		Options.bAutomated = true;
+		Options.InstanceType = InstanceType;
+		Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+		Options.Processing.NanitePolicy = EConVerseNanitePolicy::ConvertedISMOnly;
+		Options.DestinationPath = FString::Printf(TEXT("/Game/__ConVerseAutomation/%s/%s"), *TestRunId, ModeName);
+
+		const auto Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+		if (!TestTrue(*FString::Printf(TEXT("%s import reaches Verified"), ModeName),
+			Result.Status == EConVerseOptimizedImportStatus::Verified))
+		{
+			return FString();
+		}
+
+		auto* Scene = Cast<UDatasmithScene>(Result.ImportAssetPath.ResolveObject());
+		auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Result.ManifestAssetPath.ResolveObject());
+		TestNotNull(*FString::Printf(TEXT("%s manifest exists"), ModeName), Manifest);
+		if (Manifest != nullptr)
+		{
+			TestEqual(*FString::Printf(TEXT("%s forms exactly one group"), ModeName), Manifest->Groups.Num(), 1);
+			if (Manifest->Groups.Num() == 1)
+			{
+				UStaticMesh* GroupedMesh = Cast<UStaticMesh>(Manifest->Groups[0].ImportedStaticMeshPath.ResolveObject());
+				if (TestNotNull(*FString::Printf(TEXT("%s converted group mesh resolves"), ModeName), GroupedMesh))
+				{
+					TestTrue(*FString::Printf(TEXT("%s converted group mesh has Nanite enabled"), ModeName),
+						GroupedMesh->GetNaniteSettings().bEnabled);
+				}
+			}
+
+			const FConVerseImportInspectionRow* OrdinaryRow = Manifest->ImportedElements.FindByPredicate(
+				[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("Instance_Ordinary"); });
+			if (TestNotNull(*FString::Printf(TEXT("%s ordinary source row exists"), ModeName), OrdinaryRow))
+			{
+				auto* OrdinaryComponent = Cast<UStaticMeshComponent>(OrdinaryRow->ComponentPath.ResolveObject());
+				UStaticMesh* OrdinaryMesh = OrdinaryComponent ? OrdinaryComponent->GetStaticMesh() : nullptr;
+				if (TestNotNull(*FString::Printf(TEXT("%s ordinary component resolves"), ModeName), OrdinaryComponent)
+					&& TestNotNull(*FString::Printf(TEXT("%s ordinary component has a mesh"), ModeName), OrdinaryMesh))
+				{
+					TestFalse(*FString::Printf(TEXT("%s ordinary retained mesh does not receive Nanite"), ModeName),
+						OrdinaryMesh->GetNaniteSettings().bEnabled);
+				}
+			}
+
+			// Proves the HISM+ConvertedISMOnly PlanId salt is deterministic for its own combination:
+			// re-running the identical options must still short-circuit to AlreadyCurrent, not be
+			// treated as a changed plan on every call.
+			const auto Repeat = FConVerseDatasmithImportService::ImportAndVerify(Options);
+			TestTrue(*FString::Printf(TEXT("%s repeated identical run is AlreadyCurrent"), ModeName),
+				Repeat.Status == EConVerseOptimizedImportStatus::AlreadyCurrent);
+		}
+
+		const FString PlanId = Result.PlanId;
+		CleanupCommittedImport(*GEditor->GetEditorWorldContext().World(), Manifest, Scene);
+		return PlanId;
+	};
+
+	const FString IsmPlanId = RunPolicy(EConVerseOptimizedInstanceType::ISM, TEXT("ISM"));
+	const FString HismPlanId = RunPolicy(EConVerseOptimizedInstanceType::HISM, TEXT("HISM"));
+	if (!IsmPlanId.IsEmpty() && !HismPlanId.IsEmpty())
+	{
+		TestNotEqual(TEXT("HISM+ConvertedISMOnly and ISM+ConvertedISMOnly PlanIds differ"), HismPlanId, IsmPlanId);
+	}
+
+	// ComputePlanId is a private, unexported implementation detail (static in
+	// ConVerseDatasmithImportService.cpp), so its exact hash input string cannot be inspected directly
+	// from a black-box test. As the closest available proxy that the new conditional salt did not
+	// disturb other combinations: NanitePolicy still changes PlanId for both ISM and HISM exactly as it
+	// did before this amendment, and ISM/HISM AllSupportedMeshes PlanIds still differ from each other.
+	FConVerseOptimizedImportOptions Baseline;
+	Baseline.FilePath = Fixture.SceneFile;
+	Baseline.bAutomated = true;
+	Baseline.MinimumInstanceCount = ExpectedOptimizedInstances;
+
+	Baseline.InstanceType = EConVerseOptimizedInstanceType::ISM;
+	Baseline.Processing.NanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
+	const FString IsmAllPlanId = FConVerseDatasmithImportService::Analyze(Baseline).PlanId;
+	Baseline.Processing.NanitePolicy = EConVerseNanitePolicy::ConvertedISMOnly;
+	const FString IsmConvertedPlanId = FConVerseDatasmithImportService::Analyze(Baseline).PlanId;
+	TestNotEqual(TEXT("ISM PlanId still changes with NanitePolicy, unaffected by the HISM-only salt"),
+		IsmConvertedPlanId, IsmAllPlanId);
+
+	Baseline.InstanceType = EConVerseOptimizedInstanceType::HISM;
+	Baseline.Processing.NanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
+	const FString HismAllPlanId = FConVerseDatasmithImportService::Analyze(Baseline).PlanId;
+	Baseline.Processing.NanitePolicy = EConVerseNanitePolicy::ConvertedISMOnly;
+	const FString HismConvertedPlanId = FConVerseDatasmithImportService::Analyze(Baseline).PlanId;
+	TestNotEqual(TEXT("HISM PlanId still changes with NanitePolicy"), HismConvertedPlanId, HismAllPlanId);
+	TestNotEqual(TEXT("ISM and HISM AllSupportedMeshes PlanIds differ (salt is not leaking into an unrelated policy)"),
+		HismAllPlanId, IsmAllPlanId);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseManualEditRebuildTest,
 	"DatasmithHISM.OptimizedImport.ManualEditsRequireExplicitRebuild",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -2392,6 +2612,43 @@ bool FConVerseMaterialStateTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseSidecarProgressLabelTest,
+	"DatasmithHISM.OptimizedImport.SidecarProgressLabelIsUnambiguous",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseSidecarProgressLabelTest::RunTest(const FString&)
+{
+	const FText Label = FText::FromString(TEXT("Reading supporting asset bytes"));
+
+	// Without overall context (e.g. single-file phases such as SourceHash), the label is unchanged:
+	// "<label>: <completed> / <total>", matching what a lone file's own progress means.
+	const FText NoOverall = FConVerseImportProgress::FormatWorkLabel(Label, 0, 3453);
+	TestEqual(TEXT("No-overall label matches the plain per-item format"), NoOverall.ToString(),
+		TEXT("Reading supporting asset bytes: 0 / 3,453"));
+
+	// The observed live defect: a small file deep in a large sidecar reads "bytes 0 / 3,453", which
+	// is indistinguishable from overall progress on a much bigger transfer (e.g. 180 MB). With overall
+	// context supplied, the label must name the file's position and the aggregate byte count, and must
+	// not collapse to the ambiguous form.
+	FConVerseImportOverallByteContext Overall;
+	Overall.ItemIndex = 7;
+	Overall.ItemCount = 42;
+	Overall.BytesBeforeCurrentItem = 91'000'000;
+	Overall.TotalBytes = 180'000'000;
+	const FText WithOverall = FConVerseImportProgress::FormatWorkLabel(Label, 0, 3453, &Overall);
+	const FString WithOverallText = WithOverall.ToString();
+	TestTrue(TEXT("Overall label names the file's position"), WithOverallText.Contains(TEXT("file 7 of 42")));
+	TestTrue(TEXT("Overall label names the aggregate bytes read so far"), WithOverallText.Contains(TEXT("91,000,000")));
+	TestTrue(TEXT("Overall label names the aggregate total bytes"), WithOverallText.Contains(TEXT("180,000,000")));
+	TestFalse(TEXT("Overall label does not reduce to the ambiguous per-file-only form"),
+		WithOverallText.Equals(TEXT("Reading supporting asset bytes: 0 / 3,453")));
+
+	// Mid-file: bytes read so far in the current file must add onto BytesBeforeCurrentItem, not replace it.
+	const FText MidFile = FConVerseImportProgress::FormatWorkLabel(Label, 1024, 3453, &Overall);
+	TestTrue(TEXT("Overall label folds in-progress file bytes into the aggregate"),
+		MidFile.ToString().Contains(TEXT("91,001,024")));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseAmbiguousOwnershipTest,
 	"DatasmithHISM.OptimizedImport.MultipleActiveOwnersAreRefused",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -2558,6 +2815,114 @@ bool FConVersePanelSessionRestoreTest::RunTest(const FString&)
 	const auto AfterAssets = SnapshotAssets();
 	TestTrue(TEXT("Opening the panel creates/deletes no assets"), BeforeAssets.Difference(AfterAssets).IsEmpty() && AfterAssets.Difference(BeforeAssets).IsEmpty());
 	TestEqual(TEXT("Source unchanged"), HashFile(Fixture.SceneFile), Fixture.SceneHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVersePanelSaveUpdatesReportTest,
+	"DatasmithHISM.OptimizedImport.PanelSaveResultUpdatesReportSummary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVersePanelSaveUpdatesReportTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	if (!TestTrue(TEXT("Disposable map tests require -unattended"), FApp::IsUnattended())) return false;
+	const FString Root = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	UWorld* World = UEditorLoadingAndSavingUtils::NewBlankMap(false);
+	if (!TestTrue(TEXT("Create named disposable map"), World && UEditorLoadingAndSavingUtils::SaveMap(World, Root / TEXT("Owner")))) return false;
+
+	// A checked-in, static source (the same fixture ConVersePersistenceAutomation.cpp uses), read only.
+	// The dynamically-exported CreateFixture() source is deliberately avoided here: combined with the
+	// fresh NewBlankMap above it made the Datasmith exporter's mesh-name uniquing collide across runs,
+	// an unrelated pre-existing interaction, not something introduced by this test's assertions.
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir() / TEXT("DatasmithHISM/Tests/Fixtures/Joist16K6/Joist16K6.udatasmith"));
+	Options.DestinationPath = Root / TEXT("Import");
+	Options.bAutomated = true;
+	Options.Processing.NanitePolicy = EConVerseNanitePolicy::PreserveImported;
+	const auto Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Result.ManifestAssetPath.ResolveObject());
+	auto* Scene = Cast<UDatasmithScene>(Result.ImportAssetPath.ResolveObject());
+	if (!TestTrue(TEXT("Fixture import verifies"), Result.Status == EConVerseOptimizedImportStatus::Verified)) return false;
+	ON_SCOPE_EXIT { CleanupCommittedImport(*GEditor->GetEditorWorldContext().World(), Manifest, Scene); };
+
+	const auto Panel = SNew(SConVerseDatasmithImportPanel);
+	Panel->SetResult(Result, true);
+	const FString ReportBeforeSave = Panel->GetReportText().ToString();
+	TestFalse(TEXT("Precondition: the pre-save report is not itself a save confirmation"),
+		ReportBeforeSave.Contains(TEXT("Saved imported result")));
+
+	Panel->HandleSaveResult();
+	const FString ReportAfterSave = Panel->GetReportText().ToString();
+
+	TestNotEqual(TEXT("Report summary text changes after Save imported result"), ReportAfterSave, ReportBeforeSave);
+	TestTrue(TEXT("Report summary reflects the save outcome"), ReportAfterSave.Contains(TEXT("Saved imported result")));
+	TestTrue(TEXT("Report summary still carries the prior report body"), ReportAfterSave.Contains(ReportBeforeSave));
+	TestTrue(TEXT("Status line also reflects the save outcome"), Panel->StatusDetail.ToString().Contains(TEXT("Saved imported result")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseFocusClearsPriorSelectionTest,
+	"DatasmithHISM.OptimizedImport.FocusClearsPriorInstanceSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseFocusClearsPriorSelectionTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	// The default fixture collapses two of its three mesh actors into one ISM group of two
+	// instances (ExpectedOptimizedInstances), which is exactly what is needed here: two inspection
+	// rows sharing one output component but different InstanceIndex values.
+	if (!TestTrue(TEXT("Create source"), CreateFixture(Fixture, Error))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.bAutomated = true;
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+	const auto Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Result.ManifestAssetPath.ResolveObject());
+	auto* Scene = Cast<UDatasmithScene>(Result.ImportAssetPath.ResolveObject());
+	if (!TestTrue(TEXT("Fixture import verifies"), Result.Status == EConVerseOptimizedImportStatus::Verified)) return false;
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+
+	TArray<FConVerseImportInspectionRow> InstanceRows;
+	for (const auto& Row : Result.InspectionRows)
+		if (Row.InstanceIndex != INDEX_NONE) InstanceRows.Add(Row);
+	if (!TestEqual(TEXT("Exactly one ISM group of two instances in the default fixture"), InstanceRows.Num(), ExpectedOptimizedInstances)) return false;
+	if (!TestEqual(TEXT("Both instance rows share one output component"), InstanceRows[0].ComponentPath, InstanceRows[1].ComponentPath)) return false;
+
+	const auto Panel = SNew(SConVerseDatasmithImportPanel);
+	Panel->SetResult(Result, true);
+	auto* Instances = Cast<UInstancedStaticMeshComponent>(InstanceRows[0].ComponentPath.ResolveObject());
+	if (!TestNotNull(TEXT("Output ISM/HISM component resolves"), Instances)) return false;
+
+	auto SelectRow = [&](const FConVerseImportInspectionRow& Row)
+	{
+		for (const auto& Filtered : Panel->FilteredRows)
+			if (Filtered->InstanceIndex == Row.InstanceIndex && Filtered->ComponentPath == Row.ComponentPath)
+			{
+				Panel->InspectionList->SetSelection(Filtered);
+				return;
+			}
+	};
+
+	SelectRow(InstanceRows[0]);
+	Panel->FocusInspection();
+	TestTrue(TEXT("Focusing A selects A"), Instances->IsInstanceSelected(InstanceRows[0].InstanceIndex));
+	TestFalse(TEXT("Focusing A does not select B"), Instances->IsInstanceSelected(InstanceRows[1].InstanceIndex));
+
+	SelectRow(InstanceRows[1]);
+	Panel->FocusInspection();
+	TestTrue(TEXT("Focusing B selects B"), Instances->IsInstanceSelected(InstanceRows[1].InstanceIndex));
+	TestFalse(TEXT("Focusing B clears A's leftover bit"), Instances->IsInstanceSelected(InstanceRows[0].InstanceIndex));
+
+	// Per-instance selection must stay invisible to tracked-state comparison: focusing must not make
+	// a verified result look drifted.
+	TArray<FString> Differences;
+	TestTrue(TEXT("Focus does not perturb tracked state"), ConVerseImportProcessing::CheckState(*Manifest, Differences) && Differences.IsEmpty());
+	const auto Reverified = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	TestTrue(TEXT("Re-verification after focusing reports AlreadyCurrent, not drift"),
+		Reverified.Status == EConVerseOptimizedImportStatus::AlreadyCurrent && Reverified.bVerificationSucceeded);
 	return true;
 }
 
@@ -2887,6 +3252,238 @@ bool FConVersePanelMissingTexturesTest::RunTest(const FString&)
 		TestTrue(TEXT("Changing source clears the acceptance"), Panel->AcceptedMissingTextures.IsEmpty());
 	}
 	IFileManager::Get().Move(*Fixture.TextureFile, *MovedTexture);
+	return true;
+}
+
+// Fix B: FPaths::FileExists is true for a 0-byte file, so a truncated export (observed for a Revit
+// IES sidecar) previously sailed through preflight undetected. A 0-byte dependency must be treated
+// as missing: textures get the same search-folder opportunity and explicit-acceptance path as a
+// genuinely absent file, while a 0-byte mesh file fails unconditionally, exactly like an absent one.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseZeroByteDependenciesAreMissingTest,
+	"DatasmithHISM.OptimizedImport.ZeroByteDependenciesAreMissing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseZeroByteDependenciesAreMissingTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("Create textured fixture"), CreateFixture(Fixture, Error, 0, FString(), false, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	Options.bAutomated = true;
+	Options.TextureSearchFolders.Reset(); // Hermetic: a real library file must not satisfy this fixture.
+
+	// (a) Truncate the texture to 0 bytes in place. The file still exists, so a plain FPaths::FileExists
+	// check would wrongly pass preflight; it must be reported missing (and distinguished as empty).
+	TArray<uint8> OriginalTextureBytes;
+	if (!TestTrue(TEXT("Read original texture bytes"), FFileHelper::LoadFileToArray(OriginalTextureBytes, *Fixture.TextureFile))) return false;
+	if (!TestTrue(TEXT("Truncate texture to 0 bytes"), FFileHelper::SaveArrayToFile(TArray<uint8>(), *Fixture.TextureFile))) return false;
+	TestEqual(TEXT("Texture file is present but empty"), IFileManager::Get().FileSize(*Fixture.TextureFile), int64(0));
+
+	const auto Truncated = FConVerseDatasmithImportService::Analyze(Options);
+	TestTrue(TEXT("A 0-byte texture stops Analyze"), Truncated.Status == EConVerseOptimizedImportStatus::SourceLoadFailed);
+	TestEqual(TEXT("0-byte texture is reported missing"), Truncated.MissingTextures.Num(), 1);
+	TestTrue(TEXT("Missing entry names the empty file"),
+		!Truncated.MissingTextures.IsEmpty() && Truncated.MissingTextures[0].Contains(TEXT("(empty file)")));
+	TestTrue(TEXT("No mesh file is reported missing"), Truncated.MissingMeshFiles.IsEmpty());
+
+	// (b) With the 0-byte file still in place, a same-named real file in a search folder resolves it,
+	// exactly as it would for a genuinely absent file.
+	{
+		const FString Library = Fixture.RootDirectory / TEXT("Library/Mats");
+		const FString LibraryCopy = Library / FPaths::GetCleanFilename(Fixture.TextureFile).ToUpper();
+		if (!TestTrue(TEXT("Write real library texture"), FFileHelper::SaveArrayToFile(OriginalTextureBytes, *LibraryCopy))) return false;
+		FConVerseOptimizedImportOptions Searched = Options;
+		Searched.TextureSearchFolders = { Fixture.RootDirectory / TEXT("Empty"), Fixture.RootDirectory / TEXT("Library") };
+		const auto Resolved = FConVerseDatasmithImportService::Analyze(Searched);
+		TestTrue(TEXT("0-byte texture resolves via search folder"), Resolved.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+		TestEqual(TEXT("Resolution is reported"), Resolved.ResolvedTextures.Num(), 1);
+		TestTrue(TEXT("Nothing is left missing"), Resolved.MissingTextures.IsEmpty());
+	}
+
+	if (!TestTrue(TEXT("Restore original texture bytes"), FFileHelper::SaveArrayToFile(OriginalTextureBytes, *Fixture.TextureFile))) return false;
+
+	// (c) A 0-byte mesh file fails unconditionally, even with missing textures allowed.
+	TArray<uint8> OriginalMeshBytes;
+	if (!TestTrue(TEXT("Read original mesh bytes"), FFileHelper::LoadFileToArray(OriginalMeshBytes, *Fixture.MeshFile))) return false;
+	if (!TestTrue(TEXT("Truncate mesh to 0 bytes"), FFileHelper::SaveArrayToFile(TArray<uint8>(), *Fixture.MeshFile))) return false;
+	FConVerseOptimizedImportOptions Headless = Options;
+	Headless.bAllowMissingTextures = true;
+	const auto MeshTruncated = FConVerseDatasmithImportService::Analyze(Headless);
+	TestTrue(TEXT("A 0-byte mesh fails even with missing textures allowed"), MeshTruncated.Status == EConVerseOptimizedImportStatus::SourceLoadFailed);
+	TestEqual(TEXT("0-byte mesh is reported missing"), MeshTruncated.MissingMeshFiles.Num(), 1);
+	TestTrue(TEXT("Missing mesh entry names the empty file"),
+		!MeshTruncated.MissingMeshFiles.IsEmpty() && MeshTruncated.MissingMeshFiles[0].Contains(TEXT("(empty file)")));
+	if (!TestTrue(TEXT("Restore original mesh bytes"), FFileHelper::SaveArrayToFile(OriginalMeshBytes, *Fixture.MeshFile))) return false;
+
+	return true;
+}
+
+// Fix A: VerifyLights used to collapse every field into one bool, so a failure only ever said
+// "settings differ", never which field. Per-field checks must name the differing field, and a light
+// whose IES source file was explicitly accepted as missing must downgrade to a visible warning
+// rather than failing verification (Amendment 9).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseLightVerificationNamesFieldTest,
+	"DatasmithHISM.OptimizedImport.LightVerificationNamesField",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseLightVerificationNamesFieldTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("Create light/IES fixture"), CreateFixture(Fixture, Error, 0, FString(), false, true, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+
+	// Baseline: a real IES profile imports and verifies as a plain, per-field pass.
+	{
+		FConVerseOptimizedImportOptions Options;
+		Options.FilePath = Fixture.SceneFile;
+		Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		Options.bAutomated = true;
+		const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Options);
+		auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
+		auto* Scene = Cast<UDatasmithScene>(Imported.ImportAssetPath.ResolveObject());
+		ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+		TestTrue(TEXT("Baseline import verifies"), Imported.Status == EConVerseOptimizedImportStatus::Verified);
+		const auto* LightRow = Imported.InspectionRows.FindByPredicate(
+			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
+		if (TestTrue(TEXT("IES light row exists"), LightRow != nullptr))
+			TestEqual(TEXT("Untampered IES light passes plainly"), LightRow->Outcome, FString(TEXT("Light: source values preserved")));
+	}
+
+	// Failure injection: null the real IESTexture just before verification. The outcome and a
+	// diagnostic must name the differing field, not report a collapsed pass/fail.
+	{
+		FConVerseOptimizedImportOptions Options;
+		Options.FilePath = Fixture.SceneFile;
+		Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		Options.bAutomated = true;
+		Options.FailureInjection = EConVerseOptimizedImportFailureInjection::CorruptLightBeforeVerification;
+		const auto Corrupted = FConVerseDatasmithImportService::ImportAndVerify(Options);
+		TestTrue(TEXT("Corrupted IES rolls back"), Corrupted.Status == EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack);
+		const auto* LightRow = Corrupted.InspectionRows.FindByPredicate(
+			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
+		if (TestTrue(TEXT("Corrupted IES light row exists"), LightRow != nullptr))
+		{
+			TestTrue(TEXT("Outcome still fails"), LightRow->Outcome.StartsWith(TEXT("FAIL")));
+			TestTrue(TEXT("Outcome names the differing field"), LightRow->Outcome.Contains(TEXT("IES texture")));
+		}
+		TestTrue(TEXT("A diagnostic also names the differing field"),
+			Corrupted.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("IES texture")); }));
+	}
+
+	// Accepted-missing-IES rule (Amendment 9): an IES source file explicitly accepted as missing
+	// downgrades to a visible warning instead of failing verification. Unaccepted, it still stops
+	// preflight (covered by ZeroByteDependenciesAreMissing).
+	{
+		TArray<uint8> OriginalIESBytes;
+		if (!TestTrue(TEXT("Read original IES bytes"), FFileHelper::LoadFileToArray(OriginalIESBytes, *Fixture.IESFile))) return false;
+		if (!TestTrue(TEXT("Truncate IES file to 0 bytes"), FFileHelper::SaveArrayToFile(TArray<uint8>(), *Fixture.IESFile))) return false;
+		ON_SCOPE_EXIT { FFileHelper::SaveArrayToFile(OriginalIESBytes, *Fixture.IESFile); };
+
+		FConVerseOptimizedImportOptions BaseOptions;
+		BaseOptions.FilePath = Fixture.SceneFile;
+		BaseOptions.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		BaseOptions.bAutomated = true;
+		const auto Refused = FConVerseDatasmithImportService::Analyze(BaseOptions);
+		TestTrue(TEXT("Unaccepted missing IES stops preflight"), Refused.Status == EConVerseOptimizedImportStatus::SourceLoadFailed);
+		TestTrue(TEXT("Missing IES entry is marked empty"),
+			Refused.MissingTextures.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("(empty file)")); }));
+
+		FConVerseOptimizedImportOptions Accepted = BaseOptions;
+		Accepted.AcceptedMissingTextures = Refused.MissingTextures;
+		const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Accepted);
+		auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
+		auto* Scene = Cast<UDatasmithScene>(Imported.ImportAssetPath.ResolveObject());
+		ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+		TestTrue(TEXT("Accepted missing IES still verifies"), Imported.Status == EConVerseOptimizedImportStatus::Verified);
+		const auto* LightRow = Imported.InspectionRows.FindByPredicate(
+			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
+		if (TestTrue(TEXT("Accepted IES light row exists"), LightRow != nullptr))
+			TestTrue(TEXT("Accepted missing IES becomes a visible warning"), LightRow->Outcome.Contains(TEXT("IES profile missing (accepted)")));
+	}
+
+	return true;
+}
+
+// Fix F: in a non-commandlet editor, UCameraComponent::OnRegister registers a UCameraProxyMeshComponent
+// (a visualization-only UStaticMeshComponent) for an imported camera. It carries no Datasmith identity
+// and must not be counted as unaccounted ordinary source geometry.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseCameraProxyMeshIsNotSourceContentTest,
+	"DatasmithHISM.OptimizedImport.CameraProxyMeshIsNotSourceContent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseCameraProxyMeshIsNotSourceContentTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	// The default fixture already leaves one ordinary (non-grouped) mesh actor in the world
+	// (the mirrored instance, skipped for UnsupportedNegativeScale), so a camera is the only addition
+	// needed to reproduce a proxy mesh alongside real ordinary source geometry.
+	if (!TestTrue(TEXT("Create fixture with a camera and ordinary geometry"),
+		CreateFixture(Fixture, Error, 0, FString(), false, false, false, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	Options.bAutomated = true;
+
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
+	auto* Scene = Cast<UDatasmithScene>(Imported.ImportAssetPath.ResolveObject());
+	ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+
+	TestTrue(TEXT("A camera proxy mesh does not break source accounting"), Imported.Status == EConVerseOptimizedImportStatus::Verified);
+	TestFalse(TEXT("No diagnostic reports unaccounted components"),
+		Imported.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("Unaccounted")); }));
+	return true;
+}
+
+// Fix C: bVerificationSucceeded is the AND of the group, source-accounting, and light checks, but the
+// summary used to report only the group fraction. A failure isolated to lights previously read as
+// "0 of N groups failed" - true but misleading - while the actual failing check went unnamed.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseFailedVerificationSummaryNamesChecksTest,
+	"DatasmithHISM.OptimizedImport.FailedVerificationSummaryNamesChecks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseFailedVerificationSummaryNamesChecksTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("Create light fixture"), CreateFixture(Fixture, Error, 0, FString(), false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	Options.bAutomated = true;
+	Options.FailureInjection = EConVerseOptimizedImportFailureInjection::CorruptLightBeforeVerification;
+	Options.bDeferRollbackOnVerificationFailure = true;
+
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	const auto Parked = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	TestTrue(TEXT("Verification fails and is parked"), Parked.Status == EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision);
+	TestEqual(TEXT("All groups verified despite the light failure"), Parked.VerifiedGroupCount, Parked.PlannedGroupCount);
+	TestTrue(TEXT("Parked summary names the failing lights category"), Parked.Summary.Contains(TEXT("lights")));
+	TestTrue(TEXT("Parked summary still reports the (fully passing) groups fraction"),
+		Parked.Summary.Contains(FString::Printf(TEXT("%d of %d groups verified"), Parked.VerifiedGroupCount, Parked.PlannedGroupCount)));
+
+	const auto Accepted = FConVerseDatasmithImportService::AcceptFailedVerification(Parked.SessionId);
+	auto* Scene = Cast<UDatasmithScene>(Accepted.ImportAssetPath.ResolveObject());
+	auto* Manifest = IsValid(Scene)
+		? Cast<UConVerseOptimizedImportManifest>(Scene->GetAssetUserDataOfClass(UConVerseOptimizedImportManifest::StaticClass()))
+		: nullptr;
+	ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+	TestTrue(TEXT("Accepted despite failed verification"), Accepted.Status == EConVerseOptimizedImportStatus::AcceptedWithFailedVerification);
+	TestTrue(TEXT("Accepted summary also names the failing lights category"), Accepted.Summary.Contains(TEXT("lights")));
+
 	return true;
 }
 

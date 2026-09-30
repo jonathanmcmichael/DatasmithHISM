@@ -11,7 +11,9 @@ UENUM(BlueprintType)
 enum class EConVerseNanitePolicy : uint8
 {
 	AllSupportedMeshes,
-	ConvertedISMOnly,
+	// Amendment 10: covers converted output built as either ISM or HISM groups; the enum name is
+	// unchanged to avoid a breaking rename, but the display name reflects actual coverage.
+	ConvertedISMOnly UMETA(DisplayName = "Converted ISM/HISM Groups Only"),
 	PreserveImported
 };
 

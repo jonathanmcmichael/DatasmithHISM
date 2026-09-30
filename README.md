@@ -2,7 +2,7 @@
 
 Tracked Datasmith import and ISM/HISM optimization for **Unreal Engine 5.8.3**. Import runs in the editor; imported scenes and source metadata can be cooked into Windows applications.
 
-**Status, 2026-09-27:** UE 5.8.3 editor build and **32/32 automation tests passed** after [live UI acceptance](Docs/Validation/2026-09-27-live-ui.md) found and fixed two defects. The fixes still need a live re-check. Earlier [preset-state and analysis-cancellation fixes](Docs/Validation/2026-09-27-preset-cancellation.md) retain their evidence. [Earlier Phase 2 evidence](Docs/Validation/2026-09-26-phase2.md) records named-copy refusal, partial saves and actual interruption/recovery. Earlier Windows cook and packaged checks remain separate. Release acceptance is incomplete; [the handoff](HANDOFF.md) identifies the live re-check and remaining UI rows as the next task.
+**Status, 2026-09-28:** UE 5.8.3 editor build and **38/38 automation tests passed** after [verification fixes (Amendments 9-11)](Docs/Validation/2026-09-28-verification.md). Each new test failed before its fix; nothing has been re-checked live. Earlier [live UI acceptance (32/32)](Docs/Validation/2026-09-27-live-ui.md) found two defects, fixed and tested but not re-verified live. [Preset and cancellation evidence](Docs/Validation/2026-09-27-preset-cancellation.md) and [Phase 2 persistence/recovery evidence](Docs/Validation/2026-09-26-phase2.md) retain their records. Windows cook and packaged checks remain separate. Release acceptance is incomplete; [the handoff](HANDOFF.md) lists the live re-check items and remaining UI rows as the next task.
 
 ## Start here
 
@@ -29,7 +29,7 @@ The primary importer does not merge separate mesh assets because their family na
 
 ## Import policies
 
-- **Nanite:** all supported imported meshes, converted ISM meshes only, or preserve imported settings. Exact source-mesh exceptions can retain ordinary actors or disable Nanite. Effective material checks precede compilation and verification.
+- **Nanite:** all supported imported meshes, converted ISM/HISM group meshes only (Amendment 10; originally "converted ISM meshes only", but HISM groups were always meant to be covered), or preserve imported settings. Exact source-mesh exceptions can retain ordinary actors or disable Nanite. Effective material checks precede compilation and verification.
 - **Lights:** warn at 100 enabled local lights by default. Report project MegaLights configuration and offer settings navigation without changing global rendering settings. Verify exported units/intensity/IES evidence; ambiguous Unitless data stays unresolved.
 - **Materials:** recognize appearances separately from approving Unreal replacements. Approval binds to exact appearance evidence and is reconsidered when it changes. External replacement materials are outside import rollback ownership.
 - **Rebuild:** detect tracked manual changes before replacement; require Replace with source or Cancel. Headless execution requires `-ReplaceManualEdits` to discard those changes.

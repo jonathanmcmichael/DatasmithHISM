@@ -1,6 +1,6 @@
 # Documentation index
 
-Updated 2026-09-27 after the editor build and 30-test suite passed. Import orchestration targets UE 5.8.3 Editor; runtime output targets packaged Windows applications. Start with [HANDOFF.md](../HANDOFF.md) for the pending live UI assignment.
+Updated 2026-09-28 after the editor build and 38-test suite passed. Import orchestration targets UE 5.8.3 Editor; runtime output targets packaged Windows applications. Start with [HANDOFF.md](../HANDOFF.md) for the pending live UI assignment.
 
 ## Using the plugin
 
@@ -27,9 +27,12 @@ Updated 2026-09-27 after the editor build and 30-test suite passed. Import orche
 | [Earlier machine-readable evidence](Validation/2026-09-26-evidence.json) | Original implementation snapshot; superseded for current source hashes and test count |
 | [Phase 2 follow-up evidence](Validation/2026-09-26-phase2.md) | Named-copy refusal, partial saves, manual drift, actual interruption/restart, 27 passing tests |
 | [Phase 2 source hashes/results](Validation/2026-09-26-phase2-evidence.json) | Earlier build/test and persistence evidence |
-| [Live UI evidence](Validation/2026-09-27-live-ui.md) | Current build, 32 tests, native interaction results and two fixes |
+| [Verification evidence, 2026-09-28](Validation/2026-09-28-verification.md) | Current build, 38 tests, Amendments 9-11, five new regression tests; nothing re-checked live |
+| [Current source hashes](Validation/2026-09-28-source-sha256.json) | 55 source files from current build |
+| [Live UI evidence](Validation/2026-09-27-live-ui.md) | Earlier build, 32 tests, native interaction results and two fixes |
+| [Live UI source hashes](Validation/2026-09-27-live-ui-evidence.json) | 55 source hashes from that build |
 | [Preset/cancellation evidence](Validation/2026-09-27-preset-cancellation.md) | Earlier build, 30 tests, preset/cancellation fixes |
-| [Current source hashes/results](Validation/2026-09-27-preset-cancellation-evidence.json) | All 55 source hashes and exact build/test outcomes |
+| [Preset/cancellation source hashes](Validation/2026-09-27-preset-cancellation-evidence.json) | Earlier 55-file snapshot |
 | [Pending live UI checklist](Validation/2026-09-26-phase2-ui.md) | Required progress/cancellation and inspection interactions with explicit pending status |
 | [Live UI preflight](Validation/2026-09-27-live-ui-preflight.md) | Unchanged source snapshot, Windows capture/activation, desktop availability dependency; no checklist pass |
 | [Conversation closeout, 2026-09-27](Validation/2026-09-27-closeout.md) | Final state, retained artifacts, next task and documentation-only verification |

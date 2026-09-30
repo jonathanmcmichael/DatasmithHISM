@@ -6,7 +6,7 @@ At the 2026-09-27 closeout, the later [Phase 2 evidence](Docs/Validation/2026-09
 
 | Area | Current behavior | Remaining acceptance |
 |---|---|---|
-| Nanite | All supported imported meshes by default; converted ISM only and preserve options; exact mesh exceptions; effective blend-mode checks; finish compilation and verify Nanite data | Broader material/platform compatibility, real compiler failure, rendered thin/mirrored geometry, LOD/culling |
+| Nanite | All supported imported meshes by default; converted ISM/HISM group only (Amendment 10) and preserve options; exact mesh exceptions; effective blend-mode checks; finish compilation and verify Nanite data | Broader material/platform compatibility, real compiler failure, rendered thin/mirrored geometry, LOD/culling |
 | Lights | Inventory enabled local lights and units/IES; threshold 100 advisory; observe MegaLights project setting; preserve and verify exported values | Revit numerical references, physical falloff/exposure, all supported light types, IES on/off |
 | Materials | Reviewed exact-fingerprint replacement of mesh defaults and component overrides before Nanite processing | Stock-library identity coverage, visual/physical scale checks, reviewed targets |
 | Geometry | Owned ordinary and instanced meshes are accounted for | Corrected joist payload and complete aligned models; missing diagonals cannot be reconstructed from absent source data |

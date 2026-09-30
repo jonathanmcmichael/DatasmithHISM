@@ -313,6 +313,20 @@ namespace ConVerseImportProcessing
 		return Progress.IsCancelled() ? EConVerseImportWorkResult::Cancelled : EConVerseImportWorkResult::Completed;
 	}
 
+	// A 0-byte dependency file is exactly as unusable as an absent one: FPaths::FileExists is true for
+	// an empty file, so a truncated/zero-length export (observed for a Revit IES sidecar) would
+	// otherwise sail through preflight and produce content with a silently missing dependency.
+	// IFileManager::FileSize returns -1 when the path does not exist at all, so both cases collapse here.
+	static bool IsDependencyFileUnusable(const FString& Path)
+	{
+		return IFileManager::Get().FileSize(*Path) <= 0;
+	}
+
+	// Appended to a missing-dependency entry when the file exists but is 0 bytes, so the report
+	// distinguishes "never there" from "present but empty" without changing the exact-string
+	// acceptance matching in ValidateDependencies: both entry shapes are still compared verbatim.
+	static const TCHAR* const EmptyDependencyFileSuffix = TEXT(" (empty file)");
+
 	// Exporters sometimes reference library textures (for example Autodesk's shared material images)
 	// without copying them beside the source. Only the in-memory element is repointed; nothing is copied.
 	EConVerseImportWorkResult ResolveMissingTextures(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
@@ -335,7 +349,8 @@ namespace ConVerseImportProcessing
 			FString Path(Texture->GetFile());
 			if (Path.IsEmpty() || Path.StartsWith(TEXT("/Game/")) || Path.StartsWith(TEXT("/Engine/"))) continue;
 			if (FPaths::IsRelative(Path)) Path = FPaths::ConvertRelativePathToFull(FPaths::GetPath(Options.FilePath), Path);
-			if (FPaths::FileExists(Path)) continue;
+			// A 0-byte file gets the same search-folder opportunity as a genuinely absent one.
+			if (!IsDependencyFileUnusable(Path)) continue;
 			if (!bIndexed)
 			{
 				// First folder wins, then sorted path order, so the choice is deterministic.
@@ -451,7 +466,10 @@ namespace ConVerseImportProcessing
 			FString Path(File);
 			if (Path.IsEmpty() || Path.StartsWith(TEXT("/Game/")) || Path.StartsWith(TEXT("/Engine/"))) return;
 			if (FPaths::IsRelative(Path)) Path = FPaths::ConvertRelativePathToFull(FPaths::GetPath(Options.FilePath), Path);
-			if (!FPaths::FileExists(Path)) Missing.Add(FString(Element) + TEXT(": ") + Path);
+			const int64 Size = IFileManager::Get().FileSize(*Path);
+			if (Size < 0) Missing.Add(FString(Element) + TEXT(": ") + Path);
+			// Present but 0 bytes: still unusable, but named distinctly from "absent" in the report.
+			else if (Size == 0) Missing.Add(FString(Element) + TEXT(": ") + Path + EmptyDependencyFileSuffix);
 		};
 		const int64 Total = int64(Scene->GetMeshesCount()) + Scene->GetTexturesCount();
 		int64 Completed = 0;
@@ -484,9 +502,31 @@ namespace ConVerseImportProcessing
 		return EConVerseImportWorkResult::Completed;
 	}
 
-	bool VerifyLights(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
-		const TSet<const AActor*>& ExistingActors, FConVerseOptimizedImportResult& Result)
+	// Resolves a light's GetIesTexturePathName() to the absolute source file it names, the same way
+	// FDatasmithImporterUtils::FindAsset resolves it at import time: as the name of a scene texture
+	// element. Returns an empty string when the name does not match any scene texture, which fails
+	// closed - an unresolved reference is never treated as accepted.
+	static FString ResolveIesTextureFilePath(const TSharedRef<IDatasmithScene>& Source, const FString& IesTexturePathName, const FString& SourceFilePath)
 	{
+		if (IesTexturePathName.IsEmpty()) return FString();
+		for (int32 Index = 0; Index < Source->GetTexturesCount(); ++Index)
+		{
+			const auto& Texture = Source->GetTexture(Index);
+			if (!Texture.IsValid() || FString(Texture->GetName()) != IesTexturePathName) continue;
+			FString Path(Texture->GetFile());
+			if (Path.IsEmpty()) return FString();
+			if (FPaths::IsRelative(Path)) Path = FPaths::ConvertRelativePathToFull(FPaths::GetPath(SourceFilePath), Path);
+			return Path;
+		}
+		return FString();
+	}
+
+	bool VerifyLights(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
+		const TSet<const AActor*>& ExistingActors, const FConVerseOptimizedImportOptions& Options,
+		FConVerseOptimizedImportResult& Result, int32& OutFailedLightCount, int32& OutTotalLightCount)
+	{
+		OutFailedLightCount = 0;
+		OutTotalLightCount = 0;
 		if (const auto* ImportData = Cast<UDatasmithSceneImportData>(ImportedScene.AssetImportData))
 		{
 			if (!ImportData->BaseOptions.bIncludeLight)
@@ -495,6 +535,23 @@ namespace ConVerseImportProcessing
 				return true;
 			}
 		}
+
+		// Amendment 9: a light whose IES texture source file was explicitly accepted as missing (panel
+		// Yes / AcceptedMissingTextures / -AllowMissingTextures) does not fail verification over that
+		// one field. Entries are exact "<Element>: <Path>[ (empty file)]" strings, matching how
+		// ValidateDependencies records and how acceptance is compared, so the path is recovered by
+		// stripping both known suffixes/prefixes rather than re-deriving missing-ness here.
+		TSet<FString> AcceptedMissingTexturePaths;
+		for (const FString& Entry : Result.MissingTextures)
+		{
+			if (!Options.bAllowMissingTextures && !Options.AcceptedMissingTextures.Contains(Entry)) continue;
+			const int32 SeparatorIndex = Entry.Find(TEXT(": "));
+			if (SeparatorIndex == INDEX_NONE) continue;
+			FString Path = Entry.Mid(SeparatorIndex + 2);
+			Path.RemoveFromEnd(EmptyDependencyFileSuffix);
+			AcceptedMissingTexturePaths.Add(Path);
+		}
+
 		TMap<FString, ULightComponent*> ByElement;
 		for (TActorIterator<AActor> It(&World); It; ++It)
 		{
@@ -517,31 +574,70 @@ namespace ConVerseImportProcessing
 			if (!Actor.IsValid()) return;
 			if (Actor->IsA(EDatasmithElementType::PointLight) || Actor->IsA(EDatasmithElementType::DirectionalLight))
 			{
+				++OutTotalLightCount;
 				const auto Light = StaticCastSharedPtr<IDatasmithLightActorElement>(Actor);
 				ULightComponent* const* Found = ByElement.Find(Actor->GetName());
 				ULightComponent* Component = Found ? *Found : nullptr;
-				bool bMatch = Component && FMath::IsFinite(Light->GetIntensity()) && Light->GetIntensity() >= 0.0
-					&& FMath::IsNearlyEqual(double(Component->Intensity), Light->GetIntensity(), FMath::Max(0.001, FMath::Abs(Light->GetIntensity()) * 0.00001))
-					&& Component->GetVisibleFlag() == Light->IsEnabled();
-				if (Actor->IsA(EDatasmithElementType::PointLight))
+
+				TArray<FString> Fragments;
+				bool bIESMissingAccepted = false;
+				if (!Component)
 				{
-					const auto Local = StaticCastSharedPtr<IDatasmithPointLightElement>(Actor);
-					ELightUnits Expected = ELightUnits::Unitless;
-					switch (Local->GetIntensityUnits())
-					{
-					case EDatasmithLightUnits::Lumens: Expected = ELightUnits::Lumens; break;
-					case EDatasmithLightUnits::Candelas: Expected = ELightUnits::Candelas; break;
-					case EDatasmithLightUnits::EV: Expected = ELightUnits::EV; break;
-					default: break;
-					}
-					bMatch &= Component && Component->GetLightUnits() == Expected;
+					Fragments.Add(TEXT("component missing"));
 				}
-				if (Light->GetUseIes())
-					bMatch &= Component && Component->IESTexture && Component->bUseIESBrightness == Light->GetUseIesBrightness()
-						&& FMath::IsNearlyEqual(double(Component->IESBrightnessScale), Light->GetIesBrightnessScale(), 0.0001);
+				else
+				{
+					const double ExpectedIntensity = Light->GetIntensity();
+					const bool bIntensityOk = FMath::IsFinite(ExpectedIntensity) && ExpectedIntensity >= 0.0
+						&& FMath::IsNearlyEqual(double(Component->Intensity), ExpectedIntensity, FMath::Max(0.001, FMath::Abs(ExpectedIntensity) * 0.00001));
+					if (!bIntensityOk)
+						Fragments.Add(FString::Printf(TEXT("intensity expected=%.9g actual=%.9g"), ExpectedIntensity, double(Component->Intensity)));
+
+					const bool bExpectedVisible = Light->IsEnabled();
+					if (Component->GetVisibleFlag() != bExpectedVisible)
+						Fragments.Add(FString::Printf(TEXT("visibility expected=%d actual=%d"), bExpectedVisible ? 1 : 0, Component->GetVisibleFlag() ? 1 : 0));
+
+					if (Actor->IsA(EDatasmithElementType::PointLight))
+					{
+						const auto Local = StaticCastSharedPtr<IDatasmithPointLightElement>(Actor);
+						ELightUnits Expected = ELightUnits::Unitless;
+						switch (Local->GetIntensityUnits())
+						{
+						case EDatasmithLightUnits::Lumens: Expected = ELightUnits::Lumens; break;
+						case EDatasmithLightUnits::Candelas: Expected = ELightUnits::Candelas; break;
+						case EDatasmithLightUnits::EV: Expected = ELightUnits::EV; break;
+						default: break;
+						}
+						if (Component->GetLightUnits() != Expected)
+							Fragments.Add(FString::Printf(TEXT("units expected=%d actual=%d"), int32(Expected), int32(Component->GetLightUnits())));
+					}
+
+					if (Light->GetUseIes())
+					{
+						if (!Component->IESTexture)
+						{
+							const FString IesPath = ResolveIesTextureFilePath(Source, Light->GetIesTexturePathName(), Result.SourceFilePath);
+							if (!IesPath.IsEmpty() && AcceptedMissingTexturePaths.Contains(IesPath))
+								bIESMissingAccepted = true;
+							else
+								Fragments.Add(TEXT("IES texture expected=present actual=missing"));
+						}
+						if (Component->bUseIESBrightness != Light->GetUseIesBrightness())
+							Fragments.Add(FString::Printf(TEXT("bUseIESBrightness expected=%d actual=%d"), Light->GetUseIesBrightness() ? 1 : 0, Component->bUseIESBrightness ? 1 : 0));
+						if (!FMath::IsNearlyEqual(double(Component->IESBrightnessScale), Light->GetIesBrightnessScale(), 0.0001))
+							Fragments.Add(FString::Printf(TEXT("IES brightness scale expected=%.9g actual=%.9g"), Light->GetIesBrightnessScale(), double(Component->IESBrightnessScale)));
+					}
+				}
+
+				const bool bMatch = Fragments.IsEmpty();
 				auto& Inspection = Result.InspectionRows.AddDefaulted_GetRef();
 				Inspection.SourceElement = Actor->GetName(); Inspection.Label = Actor->GetLabel();
-				Inspection.Outcome = bMatch ? TEXT("Light: source values preserved") : TEXT("FAIL: light settings differ from source");
+				if (!bMatch)
+					Inspection.Outcome = TEXT("FAIL: light settings differ from source: ") + FString::Join(Fragments, TEXT("; "));
+				else if (bIESMissingAccepted)
+					Inspection.Outcome = TEXT("Light: source values preserved; IES profile missing (accepted)");
+				else
+					Inspection.Outcome = TEXT("Light: source values preserved");
 				Inspection.ComponentPath = FSoftObjectPath(Component);
 				if (Component)
 				{
@@ -569,8 +665,13 @@ namespace ConVerseImportProcessing
 							if (Meta->GetProperty(Property).IsValid()) Record.Metadata.Add(Meta->GetProperty(Property)->GetName(), Meta->GetProperty(Property)->GetValue());
 					}
 				}
-				Result.Diagnostics.Add(FString::Printf(TEXT("%s light %s | source intensity=%.9g | source IES=%d | applied=%s"),
-					bMatch ? TEXT("PASS") : TEXT("FAIL"), Actor->GetName(), Light->GetIntensity(), Light->GetUseIes(), *GetPathNameSafe(Component)));
+				const FString FragmentSuffix = bMatch ? FString() : (TEXT(" | ") + FString::Join(Fragments, TEXT("; ")));
+				Result.Diagnostics.Add(FString::Printf(TEXT("%s light %s | source intensity=%.9g | source IES=%d | applied=%s%s"),
+					bMatch ? TEXT("PASS") : TEXT("FAIL"), Actor->GetName(), Light->GetIntensity(), Light->GetUseIes(), *GetPathNameSafe(Component),
+					*FragmentSuffix));
+				if (bIESMissingAccepted)
+					Result.Diagnostics.Add(FString::Printf(TEXT("WARN light %s | IES profile missing (accepted by user)"), Actor->GetName()));
+				if (!bMatch) ++OutFailedLightCount;
 				bPassed &= bMatch;
 			}
 			for (int32 Index = 0; Index < Actor->GetChildrenCount(); ++Index) Visit(Actor->GetChild(Index));
@@ -662,7 +763,10 @@ namespace ConVerseImportProcessing
 			TInlineComponentArray<UStaticMeshComponent*> Components(*It);
 			for (UStaticMeshComponent* Component : Components)
 			{
-				if (Component->GetClass() == UInstancedStaticMeshComponent::StaticClass()) Converted.Add(Component->GetStaticMesh());
+				// Amendment 10: EConVerseNanitePolicy::ConvertedISMOnly must cover HISM groups too, since
+				// UHierarchicalInstancedStaticMeshComponent is a subclass of UInstancedStaticMeshComponent.
+				// An exact-class check here silently excluded every HISM group from Nanite.
+				if (Component->IsA<UInstancedStaticMeshComponent>()) Converted.Add(Component->GetStaticMesh());
 				for (int32 Slot = 0; Slot < Component->GetNumMaterials(); ++Slot)
 				{
 					UMaterialInterface* Material = Component->GetMaterial(Slot);

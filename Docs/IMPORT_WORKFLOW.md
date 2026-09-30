@@ -6,7 +6,7 @@ This development version targets UE 5.8.3. Import, recovery, and material review
 
 1. Keep the export beside its complete `_Assets` folder. Sources remain read-only.
 2. Choose the source, destination, ISM/HISM mode, minimum group size, and translator tessellation settings.
-3. Expand **Mesh, lighting, and material settings**. Nanite defaults to all supported imported mesh assets, including ordinary meshes and zero-group imports. Choose converted ISM only or preserve imported settings when needed.
+3. Expand **Mesh, lighting, and material settings**. Nanite defaults to all supported imported mesh assets, including ordinary meshes and zero-group imports. Choose **Converted ISM/HISM Groups Only** (Amendment 10) or preserve imported settings when needed.
 4. Run **Analyze**. The progress dialog opens before hashing and translation. It shows controllable item progress and named stages, including actor/light analysis, materials, texture fingerprinting and dependency checks; translators that cannot interrupt safely honor cancellation after returning. Missing dependencies block import. No assets or actors are created by Analyze.
 5. Inspect source IDs, grouping results, ordinary meshes, material appearances, light diagnostics, and any rebuild preview. Search includes source/Revit identity. After import, selection can focus an individual instance or light and open mesh assets.
 6. Run **Import and Verify**. Approved materials apply before Nanite checks. Mesh compilation finishes before verification. Every planned source mesh must resolve to an instance or ordinary mesh; missing/duplicate output fails verification.

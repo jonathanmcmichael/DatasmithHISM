@@ -1,8 +1,8 @@
 # Remaining release work
 
-Updated 2026-09-27 after [live UI acceptance](Docs/Validation/2026-09-27-live-ui.md): native interaction found two defects, both fixed with regression tests; UE 5.8.3 editor build and 32/32 tests passed. The fixes still need a live re-check, and several checklist rows remain partial or blocked on inputs. [Earlier Phase 2 evidence](Docs/Validation/2026-09-26-phase2.md) covers named-copy refusal, partial saves, manual drift and one actual interrupted-process checkpoint. Earlier Windows packaged smoke evidence remains separate. The [execution ledger](ROADMAP_EXECUTION.md) distinguishes implementation from incomplete gates.
+Updated 2026-09-28 after [verification fixes (Amendments 9-11)](Docs/Validation/2026-09-28-verification.md): UE 5.8.3 editor build and **38/38 automation tests passed**. Each new test failed before its fix; nothing has been re-checked live. Earlier [live UI acceptance (32/32)](Docs/Validation/2026-09-27-live-ui.md) found two defects with fixes and tests (not re-verified live). [Phase 2 persistence/recovery evidence](Docs/Validation/2026-09-26-phase2.md) covers named-copy refusal, partial saves, manual drift and one actual interrupted-process checkpoint. Windows packaged smoke evidence remains separate. The [execution ledger](ROADMAP_EXECUTION.md) distinguishes implementation from incomplete gates.
 
-**Next agent:** start with [HANDOFF.md](HANDOFF.md#next-agent-assignment) (live re-check of the fixes) and the remaining rows of the [live UI checklist](Docs/Validation/2026-09-26-phase2-ui.md). The bounded persistence/recovery assignment has passing safety evidence. Source corrections below remain the first dependency for full geometry acceptance; they do not prevent small-source UI acceptance.
+**Next agent:** start with [HANDOFF.md](HANDOFF.md#next-agent-assignment) (ordered live re-check checklist for the user). The user must free the desktop for interactive sessions. Source corrections below remain the first dependency for full geometry acceptance; they do not prevent small-source UI acceptance.
 
 | Order | Work and owner | Dependency | Done when |
 |---|---|---|---|

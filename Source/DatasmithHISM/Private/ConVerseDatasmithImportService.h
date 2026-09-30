@@ -130,7 +130,12 @@ enum class EConVerseOptimizedImportFailureInjection : uint8
 	CorruptBeforeVerification,
 	// Corrupt real output, park it for an explicit decision, then fail before removing any actor
 	// from the previous session. Exercises acceptance rollback without damaging the predecessor.
-	CorruptBeforeVerificationAndFailPreviousSessionRemoval
+	CorruptBeforeVerificationAndFailPreviousSessionRemoval,
+	// Null one committed light's IESTexture (or, if the session has no IES light, detune its
+	// intensity) just before verification runs. Nothing is faked: VerifyLights compares against the
+	// source element and fails on its own terms. Shared by the per-field light diagnostic test and
+	// the failed-verification-summary test, which both need a genuine, isolated light failure.
+	CorruptLightBeforeVerification
 };
 
 /** Transient work notifications. These do not participate in output identity or persistence. */
