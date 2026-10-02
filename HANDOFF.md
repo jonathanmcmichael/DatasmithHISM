@@ -4,13 +4,13 @@
 
 This section is the single source of current status. Other documents link here instead of restating test counts.
 
-| | As of 2026-10-01 |
+| | As of 2026-10-02 |
 |---|---|
 | Build | UE 5.8.3 `AdvancedHISMEditor Win64 Development` passed on the current working tree, editor closed. |
 | Automation | Latest full suite: **53/53, zero failures, exit 0** (host `Saved/Logs/IesWarnSuite.txt`; previous 53/53 run `CwmSuite.txt`; earlier: 52/52 `AnalysisSuite.txt`, 51/51 `PanelNaniteSuite.txt`, 50/50 `ApplyNaniteSuiteFinal2.txt`, 49/49 `NaniteBudgetSuite.txt`, 48/48 `BenchSuiteFinal.txt`, 47/47 `TraceFeatureFinalSuite.txt`). The two interruption/probe fixtures in `ConVersePersistenceAutomation.cpp` remain separately invoked. Focused trace test: 1/1, exit 0 (host `Saved/Logs/TraceCaptureLatentRetry.txt`); focused Batch B test: 1/1, exit 0 (host `Saved/Logs/DataprepDeletionFocused.txt`). |
-| Source control | Uncommitted changes on top of `c8ac53c`, including progress instrumentation, Amendments 13-14, and opt-in one-shot import trace capture. |
-| Win64 plugin export | `C:/Unreal/Packages/DatasmithHISM-2026-10-01-Win64/` predates the progress log, Nanite records and Nanite advisory. |
-| Live UI | Nothing since 2026-09-27 has been re-checked live. See the ordered list below. |
+| Source control | Committed on branch `apply-nanite-step` (not merged, not pushed): `3071681` documentation reorganization, then `50f0dba` Nanite apply/analysis, benchmark harness, IES warnings, plus the earlier progress logging, Amendments 13-14 and trace capture. Working tree clean at that point. |
+| Win64 plugin export | `C:/Unreal/Packages/DatasmithHISM-2026-10-01-Win64/` is stale: it predates the progress log, Nanite records, the Apply/Analyze Nanite step, and the IES warning rule. |
+| Live UI | Nothing since 2026-09-27 has been re-checked live, and the 2026-10-02 panel rows (Apply Nanite, Analyze Nanite) have never been seen in an editor. See the ordered list below. |
 | Release acceptance | Incomplete. Gates and remaining work are in the [roadmap](ROADMAP.md). |
 
 Evidence: [current-tree machine-readable results and source hashes](Docs/Validation/2026-10-01-current-tree-evidence.json), [import profiling and Nanite advisory](Docs/Validation/2026-10-01-import-profiling.md), [packaging](Docs/Validation/2026-09-29-packaging.md), [verification fixes](Docs/Validation/2026-09-28-verification.md), [live UI](Docs/Validation/2026-09-27-live-ui.md), [preset/cancellation](Docs/Validation/2026-09-27-preset-cancellation.md), [persistence/recovery](Docs/Validation/2026-09-26-phase2.md). Each record keeps the test count of its own run.
@@ -37,7 +37,7 @@ Evidence: [current-tree machine-readable results and source hashes](Docs/Validat
 
 ## Next agent assignment
 
-**Next task: one batched live session, then the remaining checklist rows.** Live sessions take over mouse and keyboard; **only run one when the user explicitly frees the desktop.** Do not restart implementation or begin Phase 6.
+**Next task, in this order:** (1) one batched live session, then the remaining checklist rows (the user will run some of this manually; live sessions take over mouse and keyboard, so only run one when the user explicitly frees the desktop); (2) workstream 3, material matching, which is not started: rank materials by surface area and instance count from a real import such as the CWM source, then curate the top 20 to 30 against Unreal targets the user chooses; (3) optional small items: the headless exit-1 for an unavailable IES profile (strip such textures before import, as a separate tested change), the Nanite budget proof on a source with tens of thousands of unique meshes, and recording benchmark baselines from the CWM runs. Runtime Nanite value and the analysis thresholds need a rendered, fixed-camera measurement. Live sessions take over mouse and keyboard; **only run one when the user explicitly frees the desktop.** Do not restart implementation or begin Phase 6.
 
 **Native interaction works.** `Saved/Phase2Acceptance/20260927-LiveUIB/NativeUI.ps1` drives Slate with `SendInput` clicks and Unicode text, guarded to the launched editor's foreground process. `SendKeys` accelerators such as Ctrl+N do not register; use menus.
 
