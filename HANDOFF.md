@@ -1,44 +1,48 @@
 # DatasmithHISM handoff
 
-Updated 2026-09-29 after **Batches A/C/D completion and runtime packaging smoke test**. **UE 5.8.3 editor build and 36/36 automation tests passed; release acceptance is incomplete.** [Runtime packaging evidence](Docs/Validation/2026-09-29-packaging.md) confirms successful Win64 cooking and diagnostic validation of the latest changes. [Live UI results](Docs/Validation/2026-09-27-live-ui.md) and [all 55 source hashes/results](Docs/Validation/2026-09-27-live-ui-evidence.json) are current. The earlier [preset/cancellation evidence](Docs/Validation/2026-09-27-preset-cancellation.md), [persistence/recovery evidence](Docs/Validation/2026-09-26-phase2.md) and [documentation closeout](Docs/Validation/2026-09-27-closeout.md) retain their dates.
+## Current status
+
+This section is the single source of current status. Other documents link here instead of restating test counts.
+
+| | As of 2026-10-01 |
+|---|---|
+| Build | UE 5.8.3 `AdvancedHISMEditor Win64 Development` passed on the current working tree, editor closed. |
+| Automation | Latest full suite: **53/53, zero failures, exit 0** (host `Saved/Logs/IesWarnSuite.txt`; previous 53/53 run `CwmSuite.txt`; earlier: 52/52 `AnalysisSuite.txt`, 51/51 `PanelNaniteSuite.txt`, 50/50 `ApplyNaniteSuiteFinal2.txt`, 49/49 `NaniteBudgetSuite.txt`, 48/48 `BenchSuiteFinal.txt`, 47/47 `TraceFeatureFinalSuite.txt`). The two interruption/probe fixtures in `ConVersePersistenceAutomation.cpp` remain separately invoked. Focused trace test: 1/1, exit 0 (host `Saved/Logs/TraceCaptureLatentRetry.txt`); focused Batch B test: 1/1, exit 0 (host `Saved/Logs/DataprepDeletionFocused.txt`). |
+| Source control | Uncommitted changes on top of `c8ac53c`, including progress instrumentation, Amendments 13-14, and opt-in one-shot import trace capture. |
+| Win64 plugin export | `C:/Unreal/Packages/DatasmithHISM-2026-10-01-Win64/` predates the progress log, Nanite records and Nanite advisory. |
+| Live UI | Nothing since 2026-09-27 has been re-checked live. See the ordered list below. |
+| Release acceptance | Incomplete. Gates and remaining work are in the [roadmap](ROADMAP.md). |
+
+Evidence: [current-tree machine-readable results and source hashes](Docs/Validation/2026-10-01-current-tree-evidence.json), [import profiling and Nanite advisory](Docs/Validation/2026-10-01-import-profiling.md), [packaging](Docs/Validation/2026-09-29-packaging.md), [verification fixes](Docs/Validation/2026-09-28-verification.md), [live UI](Docs/Validation/2026-09-27-live-ui.md), [preset/cancellation](Docs/Validation/2026-09-27-preset-cancellation.md), [persistence/recovery](Docs/Validation/2026-09-26-phase2.md). Each record keeps the test count of its own run.
+
+## Recent changes
+
+- **2026-10-02 first real large-source runs and unavailable IES profiles as warnings (Amendment 18):** the CWM Revit export (2,970 meshes, 7,101 mesh actors, 371 lights) first rolled back because 67 lights referenced an extensionless IES file (`Generic`) that Datasmith cannot import and the dependency check passed. **Per the user, a missing IES profile is now only a warning.** An IES-mode texture that is absent, empty or has no `.ies` extension goes to a new `UnavailableIesProfiles` list: it never blocks, is not in the missing-texture prompt, needs no acceptance, and its lights verify with "IES profile unavailable (warning)". Ordinary image textures keep their accept prompt. `ExtensionlessIesIsReportedUpFront` (extensionless and absent profiles, real Datasmith importer) now covers it. **Verified:** build exit 0; full suite **53/53, zero failures, exit 0** (host `Saved/Logs/IesWarnSuite.txt`); the new routing was confirmed to fail both IES tests when IES profiles were sent back to the blocking list. **CWM rerun (host `Saved/Logs/CWM_20261002f.txt`):** `-AnalyzeOnly` without `-AllowMissingTextures` blocks only on the 7 image textures; with them accepted and no IES acceptance, the import verifies (379/379 groups, 2,561/2,561 instances), 67 lights carry "IES profile unavailable (warning)", none fail, the analysis recommends the same 98 meshes, and the whole headless run takes 19 s. The editor process still exits 1 (engine error line for the unusable profile). The commandlet gained `-AnalyzeNanite`, `-NaniteAnalysisFile=<csv>`, `-NaniteCoverage`, `-NaniteMinTriangles` and `-ApplyNanite=Recommended`. Build exit 0; full suite **53/53, zero failures, exit 0** (host `Saved/Logs/CwmSuite.txt`). Evidence and numbers: [CWM source record](Docs/Validation/2026-10-02-cwm-source.md). Headlines: the import verifies in about 19-31 s; Nanite on all 2,920 eligible meshes takes 5.4 s and on the 98 recommended takes 0.94 s; 98 meshes carry 89.7% of the scene's placed triangles. **Open:** the runtime value of skipping Nanite on the ~2,300 tiny meshes is unmeasured; the analysis thresholds are still untuned; the engine process exits 1 for a successful run that accepted an unimportable IES (Datasmith logs an Error), which breaks the headless "exit 0 on full success" rule; nothing was saved or rendered.
+
+- **2026-10-02 Nanite analysis and selection (Amendment 17):** new read-only `AnalyzeNanite` ranks a committed import's meshes by placed triangles and recommends the fewest covering a chosen share (default 95%, minimum 1,000 triangles; both heuristics, not measured). The Apply step gained `OnlyMeshElements` (listed meshes on, everything else off, converges on repeat). Panel: **Analyze Nanite** button with Cover % and Min triangles entries, and a **Recommended meshes** scope; an empty recommendation is refused rather than treated as "all". New test `DatasmithHISM.OptimizedImport.NaniteAnalysis` plus extended `PanelApplyNanite`; each failed with its logic disabled (coverage cut-off, selection, empty-recommendation guard) and passed after the revert. Build exit 0; full suite **52/52, zero failures, exit 0** (host `Saved/Logs/AnalysisSuite.txt`). **Not done:** no large synthetic source was built, so the analysis is verified only on a two-mesh fixture with known counts and the thresholds are untuned; the new panel row is unseen live (extend live check 6b).
+
+- **2026-10-02 panel Apply Nanite control:** new **Nanite (separate step)** row under the existing buttons: scope (all supported meshes / converted ISM/HISM groups only), max-meshes budget (default 16,384, 0 = unlimited) and an **Apply Nanite** button that acts on the last import, uses the inspection list's Disable-Nanite exceptions, shows a cancellable progress dialog when attended (`FConVerseNaniteApplyOptions::bAutomated` skips it), shows refusals and their reasons in the report, and leaves the import's status alone. The settings are panel-local and not saved in presets, and changing them does not invalidate the import. New test `DatasmithHISM.OptimizedImport.PanelApplyNanite` drives the real click handler; it failed with the exception list ignored and with the status overwritten, then passed after the revert. Build exit 0; full suite **51/51, zero failures, exit 0** (host `Saved/Logs/PanelNaniteSuite.txt`). **Not looked at live:** layout, wrapping at narrow widths, the progress dialog and its Cancel button are unverified in a real editor; add them to the live re-check list below. Still open: analysis of which meshes need Nanite.
+
+- **2026-10-02 Nanite moved to a separate Apply step (Amendment 16):** imports now default to `PreserveImported`, so Datasmith builds each mesh once. New `FConVerseDatasmithImportService::ApplyNanite` (in `ConVerseNaniteApply.cpp`) enables Nanite on a committed import: fail-closed on drift/degraded/wrong level, reuses the Amendment 15 budget and ranking, restores every touched mesh on failure or cancel, recaptures the mesh tracked state, and records `NaniteApplySettingsJson` / `NaniteApplyEnabledMeshes` on the manifest. Commandlet: `-ApplyNanite=All|ISM`, with `ApplyNanite*` metrics. New test `DatasmithHISM.OptimizedImport.ApplyNaniteStep` passed and failed against a build with the drift refusal and the restore disabled. `NanitePolicyAndZeroGroupImport` now sets its inline policy explicitly (it relied on the old default). Build exit 0; full suite **50/50, zero failures, exit 0** (host `Saved/Logs/ApplyNaniteSuiteFinal2.txt`). **Not done: no panel control (service and commandlet only), nothing run on a large source, no live editor check, and total time is not reduced** (the benefit is failure isolation and a usable scene sooner). An existing import made under the old default is a different plan and rebuilds on its next optimized reimport. Next: the panel's Apply Nanite control, then a way to analyze which meshes need Nanite.
+
+- **2026-10-01 Nanite mesh budget (Amendment 15, roadmap workstream 2, first step):** new `MaxNaniteMeshes` setting (default 16,384, 0 = unlimited, commandlet `-NaniteBudget=`). Over budget, the most-placed meshes keep Nanite and the rest are set to Nanite-off. It enters PlanId only when it binds, so existing under-budget imports keep their PlanId. New test `DatasmithHISM.OptimizedImport.NaniteMeshBudget` passed and failed against a build with the cap disabled. Build exit 0; full suite **49/49, zero failures, exit 0** (host `Saved/Logs/NaniteBudgetSuite.txt`). **Not exercised on a large source** (generated two-mesh fixture only), the panel UI was not looked at, and no live editor check was done. The double mesh build and the no-instancing-opportunity policy are still open.
+
+- **2026-10-01 benchmark harness (roadmap workstream 1, started):** the commandlet gained `-MetricsFile` and `-Budget` ([usage](Docs/VALIDATION.md#benchmark-metrics-and-budgets)). The editor target built (exit 0). Covered by the new automation test `DatasmithHISM.OptimizedImport.BenchmarkMetricsAndBudgets`. It passed, and it failed (exit 1 on the exceeded-budget case) against a temporary build with the comparison disabled, then passed again after the revert. `-Budget` without `-MetricsFile` is now rejected before any import work. Full suite after the change: **48/48, zero failures, exit 0** (host `Saved/Logs/BenchSuiteFinal.txt`; build log `BenchBuildFinal.txt`). No baselines or budgets for the three real exports exist yet; that needs the ARCH, HVAC and a large unique-mesh source run on this machine. Rendered metrics are not implemented.
+
+- **2026-10-01 Nanite advisory (Amendment 14):** Analyze and Import report `ProjectedNaniteMeshes` and warn above 16,384. Advisory only; no PlanId change.
+- **2026-10-01 per-mesh Nanite records (Amendment 13):** flushed started/returned progress-log records around `PostEditChange()` and the `ConVerse_NanitePostEditChange` Insights scope. These identify the last callback entered, not crash causality.
+- **2026-10-01 progress and trace capture:** per-operation stage records under host `Saved/DatasmithHISM/ImportProgress`, Insights bookmarks, `ConVerse_DatasmithImport` scope, and a default-off **Profile next import** option. It captures one full `.utrace` for Import/Rebuild, stops automatically, and reports the path without changing plan identity or presets. Build and 47/47 automation passed; details in the [trace evidence](Docs/Validation/2026-10-01-trace-capture.md).
+- **2026-10-01 Batch B closeout:** Dataprep deletion reporting and deletion-obstruction coverage passed the focused real-wrapper automation; see the [legacy tools evidence](Docs/LEGACY_TOOLS.md) and [roadmap](ROADMAP.md).
+- **2026-09-29:** Batches A/C/D and the runtime packaging smoke test.
 
 ## Next agent assignment
-
-> **Import timing instrumentation and rollback speedup, 2026-09-30 (built, 45/45 automation, not committed):** reports now list wall time per progress stage (`StageSeconds`; the stage open at report time is marked "open when reported") and `Meshes rebuilt for a Nanite change`. Headless ARCH run (`-InstanceType=HISM -MinInstances=3 -Nanite=All -AllowMissingTextures`, no `-Save`) took 165.0 s and ended `ImportedWithFailuresRolledBack` (67 of 371 unitless lights). Stages: hash 1.5, translate 4.4, plan 0.6, Datasmith import 11.1, convert + Nanite 10.4 (2,921 post-import Nanite rebuilds), verify ~0.6. Log timestamps attribute **~136 s to rollback's single `ObjectTools::ForceDeleteObjects` over 3,298 attempt packages**; this is the dominant cost of any failed or cancelled import. Datasmith 5.8 `FinalizeAssets` calls `BatchBuild` with no pre-build hook, so Nanite cannot be set before the first build via a supported seam. Profiled with `-trace=cpu` and a headless Insights export (`-ExecOnAnalysisCompleteCmd=@=<file>`; quoted inline commands lose their argument under PowerShell): 6,596 `GatherObjectReferencersForDeletion` calls = 110.7 s. **Fixed by [Amendment 12](IMPORT_PANEL_VALIDATION.md) (batch reference check + `DeleteObjectsUnchecked`, fail-closed fallback to `ForceDeleteObjects`).** Built; **45/45 automation, zero controller errors**, including new `RollbackExternalReferencerUsesCheckedDelete` (verified to fail with the check disabled). Same ARCH run afterwards: 43.5 s total, verify + rollback 7.1 s (was 137.1 s), 5,885 created objects removed, 0 remaining, batch path. Hashing measured 15.0 s in that run versus 0.8-1.5 s in three earlier runs with unchanged code; treat as I/O variance until re-measured. Not yet exercised in a live editor rollback (panel cancel or failed-verification discard).
-
-> **Built and automation-tested, not yet live, 2026-09-29:** Batches A, C, and D are now fully built and verified, bringing the test suite to **36/36 passing** (zero errors). These updates added recursive texture-library cancellation, exact path matching for missing textures, deterministic precedence hashing, and supersede rollback/identity changes. 
-> The runtime packaging and smoke test was also run against the new baseline (`ConVerse.ValidateImportedScene 3 RequireCollision RequireIES Exit`) in a cooked build and passed with zero errors, verifying runtime identities and metadata.
-
-> **Unverified live:** the two fixes from 2026-09-27 (false drift after naming an untitled level, and session restore hiding effective source) passed build and automation only. They have **not** been re-exercised in a live editor.
-### Separate 2026-09-28 verification snapshot (not validation of the combined tree)
-Updated 2026-09-28 after the **ARCH live-import verification fixes**. **UE 5.8.3 editor build passed; full suite 38/38, exit 0, zero controller errors. Nothing from 2026-09-27 or 2026-09-28 has been re-checked in a live editor; release acceptance is incomplete.** [2026-09-28 verification record](Docs/Validation/2026-09-28-verification.md) and [55 source hashes](Docs/Validation/2026-09-28-source-sha256.json) are current. Earlier evidence: [live UI results](Docs/Validation/2026-09-27-live-ui.md), [preset/cancellation](Docs/Validation/2026-09-27-preset-cancellation.md), [persistence/recovery](Docs/Validation/2026-09-26-phase2.md) and [documentation closeout](Docs/Validation/2026-09-27-closeout.md).
-
-### ARCH verification details
-
-> **Built and automation-tested, not yet live, 2026-09-28.** Two live panel imports of the user's Revit 2025 export `C:/Users/jonathanmc/Desktop/ARCH.udatasmith` (HISM, minimum 3; reports `Saved/DatasmithHISM/ImportReports/e2e659384b8a0bbffc4b12b69bb233e2.json` and `f266185c4bbb368035316d8b1fc7cf66.json`) verified all 298 groups / 4,884 instances but failed verification elsewhere. Root causes and fixes:
->
-> 1. **10 failing lights:** their IES file `ARCH_Assets/generic` is 0 bytes, which `FPaths::FileExists` accepted. Empty dependency files are now missing (Amendment 9); a headless `-AnalyzeOnly` of ARCH now stops with `generic_IES: …/ARCH_Assets/generic (empty file)`. Light failures name the differing field; an IES file explicitly accepted as missing yields a visible "IES profile missing (accepted)" warning instead of a failure.
-> 2. **`actual=5506 accounted=5505`:** ARCH's single `<Camera>` becomes an `ACineCameraActor` whose `UCameraComponent::OnRegister` adds a `UCameraProxyMeshComponent` in non-commandlet editors. Visualization components without a Datasmith id are excluded and any remaining unaccounted component is named (Amendment 11). Does not reproduce headless; the automation test does reproduce it.
-> 3. **"0 of 298 groups failed" summary:** failed-verification summaries and the panel dialog now name every failing category (Amendment 6 clause 8).
-> 4. **User decisions implemented:** Nanite "Converted ISM/HISM Groups Only" now covers HISM group output, with a PlanId salt only for HISM + that policy so such existing imports need an explicit rebuild (Amendment 10); the translator stage now force-paints "Translating source; the editor may be unresponsive. Cancel takes effect when translation returns." before the blocking call (Amendment 2).
->
-> Five new tests, each shown failing before its fix: `ZeroByteDependenciesAreMissing`, `LightVerificationNamesField`, `CameraProxyMeshIsNotSourceContent`, `FailedVerificationSummaryNamesChecks`, `ConvertedGroupNaniteCoversHISM`. Logs: host `Saved/Phase2Acceptance/20260928-Verification/` (37/37) and `20260928-NaniteTranslator/` (38/38).
 
 **Next task: one batched live session, then the remaining checklist rows.** Live sessions take over mouse and keyboard; **only run one when the user explicitly frees the desktop.** Do not restart implementation or begin Phase 6.
 
 **Native interaction works.** `Saved/Phase2Acceptance/20260927-LiveUIB/NativeUI.ps1` drives Slate with `SendInput` clicks and Unicode text, guarded to the launched editor's foreground process. `SendKeys` accelerators such as Ctrl+N do not register; use menus.
 
-**Fixed 2026-09-27 (automation-verified, not yet re-checked live):**
+The 2026-09-27 drift and session-restore fixes, and the 2026-09-28 ARCH fixes ([verification record](Docs/Validation/2026-09-28-verification.md)), have automation coverage only.
 
-1. **False drift after naming an untitled level.** The editor's Save As also saves the manifest; UE redirects its soft paths but not tracked-state text naming `/Temp/…`. `ConVerseImportProcessing::RebaseTemporaryWorld` now maps those references to the owning world under GUID and session-tag proof, in `CheckState` and on explicit save. Contract Amendment 7 and ADR 0006. Test: `DatasmithHISM.Persistence.UnnamedMapFirstSaveStaysVerified`.
-2. **Session restore hid the effective source.** The source box now shows the restored path and status reflects restored inputs. Test: `DatasmithHISM.OptimizedImport.PanelSessionRestoreShowsInputs`.
-
-**Next tasks:** 
-1. **Live re-check:** Relaunch the editor with the new build. Open `/Game/ConVerseValidation/LiveUI_20260927B_Joist`: its saved joist manifest still has pre-fix `/Temp/` state and should now re-verify. Then import into a fresh untitled level, name it, save the result (expect green "Saved imported result and owning level."), and reopen the panel (expect the source shown). Continue with the rows still open in the [checklist](Docs/Validation/2026-09-26-phase2-ui.md). 
-2. **Broaden Faults & Persistence:** Or write automated tests to cover Content Browser rename/move scenarios.
-3. **Legacy tools validation:** Tests for dedupe confirmation, Explode undo, and BIM hierarchy.
-
-Do not restart implementation or begin Phase 6 until these are cleared.
 **Live re-check, in order:**
 
 | Order | Item | What to observe |
@@ -46,40 +50,21 @@ Do not restart implementation or begin Phase 6 until these are cleared.
 | 1 | 2026-09-27 drift fix | Open `/Game/ConVerseValidation/LiveUI_20260927B_Joist` (saved with pre-fix `/Temp/` state); it should re-verify without drift. Import joist into a fresh untitled level, name it, save: expect green "Saved imported result and owning level." |
 | 2 | 2026-09-27 session restore fix | Close and reopen the panel: the restored source path is visible and status is Ready. |
 | 3 | Missing/empty dependency prompt (Amendments 8, 9) | Analyze ARCH: the Yes/No prompt lists `Window Keystone01.jpg` and `generic` (empty file). Declining stops; accepting proceeds. |
-| 4 | Accepted-missing IES and accounting on ARCH | Import ARCH (HISM, fresh map/destination) after accepting: the 10 `generic_IES` lights show "IES profile missing (accepted)", source accounting passes (no camera-proxy mismatch) and the result verifies. |
 | 5 | Pre-translation warning (Amendment 2) | Analyze the 90 MB HVAC export: the "Translating source; the editor may be unresponsive…" text is visible before the freeze. |
 | 6 | Failure summary wording | If any verification failure occurs, the dialog names the failing categories. Automated coverage exists; observe only if it arises naturally. |
+| 6b | Apply Nanite control (2026-10-02) | Import a source with the default settings (meshes build once, Nanite off), set a scope and budget, click Apply Nanite: the cancellable dialog shows, the status line and report say what changed, the row fits the panel at normal and narrow widths, Cancel restores the meshes, Save imported result keeps the result. Also edit a mesh by hand and confirm the refusal text. Then Analyze Nanite: the ranked list and its marks are readable, the Cover % and Min triangles entries fit, and the Recommended meshes scope applies exactly the marked meshes. |
 | 7 | Remaining checklist rows | Copied-fixture material/light rebuild previews; reviewed-target approval/revocation (needs a disposable reviewed target); native named-map copy refusal; Content Browser rename/move. Representative large-source success still needs a complete export. |
 
 Cosmetic items seen live on 2026-09-27 and not fixed: the per-file "bytes 0 / N" progress label; stale report summary after save; `SelectInstance` bits never cleared between focuses; `…_ISM_0` component naming.
 
-Use fresh map and destination names for destructive/failure tests. The current saved validation map is reference evidence, not a scratch target. Keep ownership/replacement/rollback decisions in the service. The next assignment is done when every live UI checklist row has a reproducible result and artifact, demonstrated defects have built/tested fixes, and unavailable interactions or missing inputs remain explicit. Broader source-data and release gates stay separate.
-
-**Completed persistence/recovery assignment:** a named-map copy defect and missing recovery-path diagnostics have built/tested fixes. Actual read-only-asset failure, bounded simulated write-capacity failure, save-with-drift, native-copy refusal, and actual interruption/restart have passing evidence. Live interaction was left pending because no native desktop interaction tool was available. This closes only those proven scenarios, not all Phase 2 or release gates.
-
-## Preset/cancellation fixes completed, 2026-09-27
-
-- Shared panel input application fixes stale inspection, material-review and save targets after preset/file-picker/destination changes; invalidated review windows are disabled and closed.
-- Shared pre-mutation cancellation covers material/light/dependency work and chunked texture hashes. Cancellation discards incomplete result data; import sidecar cancellation is no longer misreported as load failure.
-- Three new regressions pass: panel state, 17 phase/entry-point cancellation cases, and hash/identity/dependency preservation. The complete suite passes 30/30.
-- Checkpoint: host `Saved/Phase2Acceptance/20260927-PresetCancellation/before-work.zip`. Successful build/test logs are `02-build.txt` and `03-full-automation.txt` in that directory. Source hash evidence is linked above.
-- These are automated editor/service results, not visible Slate interaction evidence. Continue with the expanded live checklist.
-
-## Earlier persistence/recovery changes
-
-- `ConVerseOptimizedImportCommandlet.cpp`: refuses already-saved map Save As before import/copy because native duplication changes actor identity. Ownership migration of those copies is not implemented.
-- `ConVerseImportPersistence.cpp`: explains failed ownership rebinding and lists recorded recovery paths without loading or deleting uncertain objects.
-- [Persistence automation](Source/DatasmithHISM/Private/Tests/ConVersePersistenceAutomation.cpp): three new regression tests plus two explicitly invoked interruption/probe fixtures outside the normal suite.
-- [Interruption runner](Tests/Invoke-InterruptedRecovery.ps1): launches and terminates only its own disposable process, then verifies restart diagnostics and unchanged files.
-
-Existing implementation changes were preserved. The working tree remains uncommitted; no commit, push or release was made. All current C++ edits passed the recorded 2026-09-27 build and suite.
+Use fresh map and destination names for destructive/failure tests. The current saved validation map is reference evidence, not a scratch target. Keep ownership/replacement/rollback decisions in the service. The next assignment is done when every live UI checklist row has a reproducible result and artifact, demonstrated defects have built/tested fixes, and unavailable interactions or missing inputs remain explicit. Broader source-data and release gates stay separate; see the [roadmap](ROADMAP.md).
 
 ## Ready-to-use workspace and validation paths
 
 | Resource | Location |
 |---|---|
-| Working directory / Git root | `D:/Unreal/Sandbox/AdvancedHISM/Plugins/DatasmithHISM` |
-| Host project | `D:/Unreal/Sandbox/AdvancedHISM/AdvancedHISM.uproject` |
+| Working directory / Git root | `C:/Unreal/Projects/AdvancedHISM/Plugins/DatasmithHISM` |
+| Host project | `C:/Unreal/Projects/AdvancedHISM/AdvancedHISM.uproject` |
 | Engine | `C:/Program Files/Epic Games/UE_5.8` |
 | Joist source fixture | `Tests/Fixtures/Joist16K6/Joist16K6.udatasmith` with its adjacent sidecar |
 | Light/IES source fixture | `Tests/Fixtures/RevitLightExport/RevitLightExport.udatasmith` with its adjacent sidecar |
@@ -107,11 +92,8 @@ Do not repeat these requests if the user supplies the inputs in the next convers
 
 ## Workspace and evidence
 
-- Host project: `D:/Unreal/Sandbox/AdvancedHISM/AdvancedHISM.uproject`; UE 5.8.3.
-- Git repository: this plugin directory. The project root, its Docs, generated validation maps, logs and package archives are outside that Git root.
-- Existing uncommitted work was preserved. The implementation and documentation are working-tree changes; no publication is implied.
-- Current build: `Saved/Phase2Acceptance/20260928-NaniteTranslator/04-build-fixed.log`, passed, exit 0. Earlier: `20260928-Verification/06-build-after-fix-retry.txt`, `20260927-LiveUIB/67-build-final.txt`, `20260927-PresetCancellation/02-build.txt`, `20260926A/09-build.txt`.
-- Current automation: `Saved/Phase2Acceptance/20260928-NaniteTranslator/06-test-full-suite.log`, 38/38 passed, exit 0, zero controller errors. Earlier: `20260928-Verification/08-full-suite-after-fix.txt` (37/37), `20260927-Textures/02-full-automation.txt` (33/33), `20260927-LiveUIB/68-full-automation.txt` (32/32), `20260927-PresetCancellation/03-full-automation.txt` (30/30), `20260926A/10-full-automation.txt` (27/27).
+- Git repository: this plugin directory. The host project root, generated validation maps, logs and package archives are outside it.
+- Latest automation log: host `Saved/Logs/NaniteProjectionSuite.txt`. Earlier build/test logs are under host `Saved/Phase2Acceptance/<date>/`, named in each dated validation record.
 - Live UI: `Saved/Phase2Acceptance/20260927-LiveUIB/` holds `editor.log`, `interaction.jsonl` and the numbered captures referenced by the [live UI results](Docs/Validation/2026-09-27-live-ui.md).
 - Persistence: original named map reopens and re-verifies in a fresh process. Identity-changing named-map copies are refused with recovery instructions; initial unnamed save-as retains its previous behavior. Real read-only-asset and simulated map write-capacity failures report incomplete saves; saving drift never accepts a new baseline.
 - Recovery: a disposable process was terminated at a recorded pre-commit checkpoint. Restart reports 7 observed paths and preserves all 4 saved evidence files unchanged.
@@ -120,22 +102,6 @@ Do not repeat these requests if the user supplies the inputs in the next convers
 
 All `Saved` paths refer to the host project. See the [earlier persistence evidence](Docs/Validation/2026-09-26-phase2.md) and [source hashes/results](Docs/Validation/2026-09-26-phase2-evidence.json). The [earlier evidence](Docs/Validation/2026-09-26.md) remains authoritative for the package run. Runtime code was unchanged; this persistence update was not recooked.
 
-## Implemented behavior
-
-Analyze progress/cancellation, ordinary/instanced source accounting, tracked manual-edit replacement guards, explicit rebuild, dependency checks, save/checkpoint diagnostics, independent Nanite policies, exact mesh exceptions, source-light checks and MegaLights advice, named/session presets, reviewed material tables/mappings, searchable inspection, runtime source lookup, and group/material/light rebuild previews are present.
-
-Mesh processing, material review and persistence are focused helpers. Ownership, commit, replacement and rollback remain centralized. New manifests use schema 2, tracked-state version 1 and source-inventory version 1. Material state comparison ignores only generated expression GUIDs; actual parameter edits remain tracked. Stock reimport remains blocked at factory priority plus 100.
-
-Legacy component offsets and incompatible-setting grouping now have fixes and automation. Legacy conversion still has no tracked manifest or rollback. Preserve this distinction in UI/docs.
-
-## Data findings and next gate
-
-The exported 16K6 payload for Revit elements 610662/610663 has 88 vertices and 160 triangles without diagonals. All six ordinary/ISM/HISM/Nanite comparisons preserve it. Obtain a corrected export; do not manufacture geometry. Full structural/HVAC preflight also reports missing textures.
-
-All 1,033 HVAC lights declare Unitless. One exported light/IES fixture preserves intensity and IES state, but physical Revit calibration is unresolved. The 245 observed material appearances are not verified Autodesk stock identities or a replacement library.
-
-Follow [NEXT_STEPS.md](NEXT_STEPS.md) for source correction, full alignment, calibrated lights, catalog curation, live Slate, broader rename/crash/full-volume checks, rendered and performance work. Phase 6 remains deferred. Do not label Phases 1-5 or the release complete.
-
 ## Read before editing
 
-[Contract](IMPORT_PANEL_VALIDATION.md), [plan](PLAN.md), [execution ledger](ROADMAP_EXECUTION.md), [ADRs](Docs/ADR/README.md), [architecture](Docs/ARCHITECTURE.md), and [validation commands](Docs/VALIDATION.md). Historical journal entries may contain superseded status claims; re-test suspected blockers against current evidence.
+[Contract](IMPORT_PANEL_VALIDATION.md), [roadmap](ROADMAP.md), [ADRs](Docs/ADR/README.md), [architecture](Docs/ARCHITECTURE.md), and [validation commands](Docs/VALIDATION.md). Historical [journal](Docs/History/JOURNAL.md) entries may contain superseded status claims; re-test suspected blockers against current evidence.

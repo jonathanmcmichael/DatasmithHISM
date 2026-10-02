@@ -42,6 +42,7 @@ public class DatasmithHISM : ModuleRules
 				"Slate",
 				"SlateCore",
 				"StaticMeshDescription",
+				"TraceLog",
 				"ToolMenus",
 				"UMG",
 				"UnrealEd"

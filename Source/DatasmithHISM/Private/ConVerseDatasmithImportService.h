@@ -187,7 +187,11 @@ struct FConVerseOptimizedImportOptions
 	TArray<FString> TextureSearchFolders = ConVerseDefaultTextureSearchFolders();
 	// Cooperative cancellation seam, also used by unattended regression tests.
 	TFunction<bool()> CancelRequested;
+	// Apply Nanite step only (Amendment 16). When non-empty, only these exact mesh element names may receive
+	// Nanite; every other owned mesh is set to Nanite-off. Not part of the persisted settings or PlanId.
+	TArray<FString> NaniteOnlyMeshElements;
 	TFunction<void(EConVerseImportWorkPhase, int64, int64)> ProgressObserver;
+	FString TraceFilePath;
 	// Test-only seam. See EConVerseOptimizedImportFailureInjection. Never set outside automation.
 	EConVerseOptimizedImportFailureInjection FailureInjection = EConVerseOptimizedImportFailureInjection::None;
 
@@ -282,6 +286,11 @@ struct FConVerseOptimizedImportResult
 	/** Referenced texture/mesh files absent from disk, as "<element>: <path>". */
 	TArray<FString> MissingTextures;
 	TArray<FString> MissingMeshFiles;
+	/**
+	 * IES profiles whose file is absent, empty or not importable, as "<element>: <path>[ suffix]". A warning,
+	 * never a blocker and never needing acceptance (Amendment 18): the light imports without the profile.
+	 */
+	TArray<FString> UnavailableIesProfiles;
 	/** Textures found in TextureSearchFolders, as "<element>: <referenced path> -> <resolved path>". */
 	TArray<FString> ResolvedTextures;
 	/** Canonical resolution evidence used by PlanId; includes resolved content size and hash. */
@@ -298,6 +307,10 @@ struct FConVerseOptimizedImportResult
 	int32 IESLights = 0;
 	int32 NaniteEnabledMeshes = 0;
 	int32 NaniteSkippedMeshes = 0;
+	// Meshes the policy would have enabled but the MaxNaniteMeshes budget left ordinary.
+	int32 NaniteBudgetSkippedMeshes = 0;
+	// Upper bound before material compatibility checks; INDEX_NONE when the policy preserves imported settings.
+	int32 ProjectedNaniteMeshes = INDEX_NONE;
 	int32 VerifiedOrdinaryMeshes = 0;
 	FString ProcessingSettingsJson;
 	FString MaterialMappingIdentity;
@@ -309,6 +322,10 @@ struct FConVerseOptimizedImportResult
 	// Wall time per progress stage, in entry order. The stage still open when a report is built is
 	// reported as elapsed-so-far, so failed and cancelled attempts still show where time went.
 	TArray<TPair<FString, double>> StageSeconds;
+	TArray<TPair<FString, double>> StepSeconds;
+	FString ProgressLogPath;
+	FString TraceFilePath;
+	bool bProgressLogFailed = false;
 	FString OpenStage;
 	double OpenStageStartedAtSeconds = 0.0;
 	// Meshes whose Nanite flag was flipped after import, each forcing a rebuild of an already-built mesh.
@@ -344,13 +361,114 @@ struct FConVerseOptimizedImportResult
 	bool bVerificationSucceeded = false;
 };
 
+/**
+ * Amendment 16: Nanite is applied to an already committed import by an explicit, separate step, not
+ * during the import. Meshes are built once by Datasmith without Nanite and rebuilt here only if
+ * enabled, so a failure or cancel here leaves a valid, verified import.
+ */
+struct FConVerseNaniteApplyOptions
+{
+	FSoftObjectPath ManifestPath;
+	// AllSupportedMeshes or ConvertedISMOnly. PreserveImported has nothing to apply and is rejected.
+	EConVerseNanitePolicy Policy = EConVerseNanitePolicy::AllSupportedMeshes;
+	// 0 = unlimited. The most-placed meshes keep Nanite when the policy exceeds it (Amendment 15).
+	int32 MaxNaniteMeshes = 16384;
+	// Exact Datasmith mesh element names to leave without Nanite.
+	TArray<FString> DisableNaniteMeshElements;
+	// When non-empty, only these exact mesh element names receive Nanite and every other owned mesh is set
+	// to Nanite-off (for example the recommended list from AnalyzeNanite). The budget still applies.
+	TArray<FString> OnlyMeshElements;
+	TFunction<bool()> CancelRequested;
+	// True for headless and automated callers: no progress dialog is raised. Otherwise a cancellable one is.
+	bool bAutomated = false;
+};
+
+/** One owned mesh in a Nanite analysis. */
+struct FConVerseNaniteAnalysisRow
+{
+	// Exact Datasmith mesh element name, the same key the exception and selection lists use.
+	FString MeshElement;
+	int32 Triangles = 0;
+	// One per ordinary component, one per instance of an instanced component.
+	int32 Placements = 0;
+	// Triangles x placements: the geometry load this mesh puts in the scene.
+	int64 PlacedTriangles = 0;
+	bool bNaniteEnabled = false;
+	// False when an exception or an incompatible effective material keeps Nanite off; Note says which.
+	bool bEligible = true;
+	bool bRecommended = false;
+	// Share of the candidates' placed triangles covered by this row and every row above it.
+	double CumulativeShare = 0.0;
+	FString Note;
+};
+
+/**
+ * Read-only: ranks a committed import's meshes by placed-triangle load and recommends the smallest set
+ * that covers CoverageTarget of the load among eligible meshes with at least MinTriangles triangles.
+ * The thresholds are heuristics, not measured Nanite break-even points.
+ */
+struct FConVerseNaniteAnalysisOptions
+{
+	FSoftObjectPath ManifestPath;
+	double CoverageTarget = 0.95;
+	int32 MinTriangles = 1000;
+	TArray<FString> DisableNaniteMeshElements;
+};
+
+struct FConVerseNaniteAnalysisResult
+{
+	bool bSucceeded = false;
+	FString Summary;
+	// Sorted by PlacedTriangles descending, then element name.
+	TArray<FConVerseNaniteAnalysisRow> Rows;
+	TArray<FString> RecommendedElements;
+	int32 EligibleMeshes = 0;
+	int32 CandidateMeshes = 0;
+	int64 TotalPlacedTriangles = 0;
+	int64 CandidatePlacedTriangles = 0;
+	int64 RecommendedPlacedTriangles = 0;
+};
+
+struct FConVerseNaniteApplyResult
+{
+	bool bSucceeded = false;
+	bool bCancelled = false;
+	FString Summary;
+	TArray<FString> Diagnostics;
+	int32 NaniteEnabledMeshes = 0;
+	// Left ordinary by the budget / by an incompatible effective material.
+	int32 NaniteBudgetSkippedMeshes = 0;
+	int32 NaniteSkippedMeshes = 0;
+	// Meshes whose Nanite setting changed, each forcing one rebuild.
+	int32 NaniteRebuiltMeshes = 0;
+	double DurationSeconds = 0.0;
+	double MeshBuildSeconds = 0.0;
+};
+
 DECLARE_LOG_CATEGORY_EXTERN(LogConVerseOptimizedImport, Log, All);
 
 class FConVerseDatasmithImportService
 {
 public:
+	// Advisory only. Each Nanite mesh needs at least one streaming root page; UE 5.8.3's pool caps at 49152 shared with loaded content.
+	static constexpr int32 NaniteMeshWarningThreshold = 16384;
+
 	static FConVerseOptimizedImportResult Analyze(const FConVerseOptimizedImportOptions& Options);
 	static FConVerseOptimizedImportResult ImportAndVerify(const FConVerseOptimizedImportOptions& Options);
+
+	/**
+	 * Enables Nanite on the meshes of a committed, verified, unmodified import and updates its tracked
+	 * baseline. Fails closed: refuses on a missing/inactive/degraded manifest, an unloaded owning
+	 * world, or any tracked drift, and restores every mesh it touched when it fails or is cancelled.
+	 * Does not save; SaveImportedResult persists the new state.
+	 */
+	static FConVerseNaniteApplyResult ApplyNanite(const FConVerseNaniteApplyOptions& Options);
+
+	/**
+	 * Ranks the meshes of a committed import by placed-triangle load and recommends which need Nanite.
+	 * Read-only: changes no mesh and, unlike ApplyNanite, does not require the import to be unmodified.
+	 */
+	static FConVerseNaniteAnalysisResult AnalyzeNanite(const FConVerseNaniteAnalysisOptions& Options);
 
 	/**
 	 * True when an active optimized-import manifest already owns the normalized source and destination,

@@ -23,6 +23,7 @@
 #include "Misc/ScopeExit.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Misc/SecureHash.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "StaticMeshCompiler.h"
 #include "UObject/UnrealType.h"
 
@@ -38,6 +39,23 @@ namespace ConVerseImportProcessing
 	{
 		FString Json;
 		FJsonObjectConverter::UStructToJsonObjectString(Settings, Json);
+		return Json;
+	}
+
+	FString IdentitySettingsJson(const FConVerseImportProcessingSettings& Settings)
+	{
+		// Amendment 15: MaxNaniteMeshes is added to plan identity separately, and only when it binds, so
+		// the field's mere existence must not change the hash of every existing import. Removing its whole
+		// line leaves every other byte of the pre-existing settings JSON untouched.
+		FString Json = SettingsJson(Settings);
+		const int32 Key = Json.Find(TEXT("\"maxNaniteMeshes\""), ESearchCase::CaseSensitive);
+		if (Key != INDEX_NONE)
+		{
+			const int32 LineStart = Json.Left(Key).Find(TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromEnd) + 1;
+			int32 LineEnd = Json.Find(TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Key);
+			LineEnd = LineEnd == INDEX_NONE ? Json.Len() : LineEnd + 1;
+			Json.RemoveAt(LineStart, LineEnd - LineStart);
+		}
 		return Json;
 	}
 
@@ -327,6 +345,12 @@ namespace ConVerseImportProcessing
 	// acceptance matching in ValidateDependencies: both entry shapes are still compared verbatim.
 	static const TCHAR* const EmptyDependencyFileSuffix = TEXT(" (empty file)");
 
+	// Amendment 18: Datasmith creates an IES profile by handing the texture factory the file's extension
+	// (FDatasmithTextureImporter::CreateIESTexture), and the factory only builds a light profile from
+	// "ies". An IES file with no such extension is present and non-empty yet imports to nothing, which
+	// is how a Revit export's extensionless "Generic" profile silently left 67 lights without one.
+	static const TCHAR* const UnimportableIesSuffix = TEXT(" (IES file without a .ies extension)");
+
 	// Exporters sometimes reference library textures (for example Autodesk's shared material images)
 	// without copying them beside the source. Only the in-memory element is repointed; nothing is copied.
 	EConVerseImportWorkResult ResolveMissingTextures(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
@@ -460,8 +484,9 @@ namespace ConVerseImportProcessing
 		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress)
 	{
 		Result.MissingTextures.Reset();
+		Result.UnavailableIesProfiles.Reset();
 		Result.MissingMeshFiles.Reset();
-		auto Check = [&](const TCHAR* File, const TCHAR* Element, TArray<FString>& Missing)
+		auto Check = [&](const TCHAR* File, const TCHAR* Element, TArray<FString>& Missing, bool bIesProfile = false)
 		{
 			FString Path(File);
 			if (Path.IsEmpty() || Path.StartsWith(TEXT("/Game/")) || Path.StartsWith(TEXT("/Engine/"))) return;
@@ -470,6 +495,9 @@ namespace ConVerseImportProcessing
 			if (Size < 0) Missing.Add(FString(Element) + TEXT(": ") + Path);
 			// Present but 0 bytes: still unusable, but named distinctly from "absent" in the report.
 			else if (Size == 0) Missing.Add(FString(Element) + TEXT(": ") + Path + EmptyDependencyFileSuffix);
+			// Present and non-empty, but Datasmith cannot turn it into an IES profile.
+			else if (bIesProfile && !FPaths::GetExtension(Path).Equals(TEXT("ies"), ESearchCase::IgnoreCase))
+				Missing.Add(FString(Element) + TEXT(": ") + Path + UnimportableIesSuffix);
 		};
 		const int64 Total = int64(Scene->GetMeshesCount()) + Scene->GetTexturesCount();
 		int64 Completed = 0;
@@ -481,9 +509,17 @@ namespace ConVerseImportProcessing
 		}
 		for (int32 Index = 0; Index < Scene->GetTexturesCount(); ++Index)
 		{
-			if (Scene->GetTexture(Index).IsValid()) Check(Scene->GetTexture(Index)->GetFile(), Scene->GetTexture(Index)->GetName(), Result.MissingTextures);
+			if (Scene->GetTexture(Index).IsValid())
+			{
+				// Amendment 18: an IES profile that is absent, empty or unimportable is a warning, not a blocker.
+				const bool bIes = Scene->GetTexture(Index)->GetTextureMode() == EDatasmithTextureMode::Ies;
+				Check(Scene->GetTexture(Index)->GetFile(), Scene->GetTexture(Index)->GetName(),
+					bIes ? Result.UnavailableIesProfiles : Result.MissingTextures, bIes);
+			}
 			if (!Progress.Update(EConVerseImportWorkPhase::Dependencies, ++Completed, Total)) return EConVerseImportWorkResult::Cancelled;
 		}
+		for (const FString& Profile : Result.UnavailableIesProfiles)
+			Result.Diagnostics.Add(TEXT("WARN IES profile unavailable, the light imports without it: ") + Profile);
 		// Missing geometry always fails. A missing texture proceeds only when the user explicitly accepted
 		// that exact file, so the decision never silently extends to textures they were not shown.
 		TArray<FString> Unaccepted;
@@ -536,19 +572,19 @@ namespace ConVerseImportProcessing
 			}
 		}
 
-		// Amendment 9: a light whose IES texture source file was explicitly accepted as missing (panel
-		// Yes / AcceptedMissingTextures / -AllowMissingTextures) does not fail verification over that
-		// one field. Entries are exact "<Element>: <Path>[ (empty file)]" strings, matching how
-		// ValidateDependencies records and how acceptance is compared, so the path is recovered by
-		// stripping both known suffixes/prefixes rather than re-deriving missing-ness here.
+		// Amendments 9 and 18: a light whose IES profile file is absent, empty or not importable does not
+		// fail verification over that one field; it is reported as a warning. No acceptance is needed.
+		// Entries are exact "<Element>: <Path>[ suffix]" strings as ValidateDependencies records them, so
+		// the path is recovered by stripping the known prefix and suffixes rather than re-deriving
+		// unavailability here.
 		TSet<FString> AcceptedMissingTexturePaths;
-		for (const FString& Entry : Result.MissingTextures)
+		for (const FString& Entry : Result.UnavailableIesProfiles)
 		{
-			if (!Options.bAllowMissingTextures && !Options.AcceptedMissingTextures.Contains(Entry)) continue;
 			const int32 SeparatorIndex = Entry.Find(TEXT(": "));
 			if (SeparatorIndex == INDEX_NONE) continue;
 			FString Path = Entry.Mid(SeparatorIndex + 2);
 			Path.RemoveFromEnd(EmptyDependencyFileSuffix);
+			Path.RemoveFromEnd(UnimportableIesSuffix);
 			AcceptedMissingTexturePaths.Add(Path);
 		}
 
@@ -635,7 +671,7 @@ namespace ConVerseImportProcessing
 				if (!bMatch)
 					Inspection.Outcome = TEXT("FAIL: light settings differ from source: ") + FString::Join(Fragments, TEXT("; "));
 				else if (bIESMissingAccepted)
-					Inspection.Outcome = TEXT("Light: source values preserved; IES profile missing (accepted)");
+					Inspection.Outcome = TEXT("Light: source values preserved; IES profile unavailable (warning)");
 				else
 					Inspection.Outcome = TEXT("Light: source values preserved");
 				Inspection.ComponentPath = FSoftObjectPath(Component);
@@ -670,7 +706,7 @@ namespace ConVerseImportProcessing
 					bMatch ? TEXT("PASS") : TEXT("FAIL"), Actor->GetName(), Light->GetIntensity(), Light->GetUseIes(), *GetPathNameSafe(Component),
 					*FragmentSuffix));
 				if (bIESMissingAccepted)
-					Result.Diagnostics.Add(FString::Printf(TEXT("WARN light %s | IES profile missing (accepted by user)"), Actor->GetName()));
+					Result.Diagnostics.Add(FString::Printf(TEXT("WARN light %s | IES profile unavailable (warning)"), Actor->GetName()));
 				if (!bMatch) ++OutFailedLightCount;
 				bPassed &= bMatch;
 			}
@@ -751,76 +787,165 @@ namespace ConVerseImportProcessing
 	}
 
 	bool ProcessMeshes(UWorld& World, UDatasmithScene& Scene, const FString& AttemptFolder,
-		const FConVerseOptimizedImportOptions& Options, FConVerseOptimizedImportResult& Result, FString& OutError)
+		const FConVerseOptimizedImportOptions& Options, FConVerseOptimizedImportResult& Result, FString& OutError,
+		const TFunction<void(const FString&, bool)>& WriteProgress)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_MeshPolicyAndCompilation);
 		const double ProcessingStarted = FPlatformTime::Seconds();
 		ON_SCOPE_EXIT { Result.MeshProcessingSeconds += FPlatformTime::Seconds() - ProcessingStarted; };
 		UE_LOG(LogConVerseOptimizedImport, Display, TEXT("Processing imported meshes and waiting for compilation."));
 		TSet<UStaticMesh*> Converted;
 		TSet<UStaticMesh*> Incompatible;
-		for (TActorIterator<AActor> It(&World); It; ++It)
+		// Placements per mesh: one per ordinary component, one per instance of an instanced component.
+		TMap<UStaticMesh*, int32> Uses;
 		{
-			TInlineComponentArray<UStaticMeshComponent*> Components(*It);
-			for (UStaticMeshComponent* Component : Components)
+			TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_MeshPolicyWorldScan);
+			UE_LOG(LogConVerseOptimizedImport, Display, TEXT("Import step started: Mesh policy world scan"));
+			const double ScanStarted = FPlatformTime::Seconds();
+			ON_SCOPE_EXIT { Result.StepSeconds.Emplace(TEXT("Mesh policy world scan"), FPlatformTime::Seconds() - ScanStarted); };
+			for (TActorIterator<AActor> It(&World); It; ++It)
 			{
-				// Amendment 10: EConVerseNanitePolicy::ConvertedISMOnly must cover HISM groups too, since
-				// UHierarchicalInstancedStaticMeshComponent is a subclass of UInstancedStaticMeshComponent.
-				// An exact-class check here silently excluded every HISM group from Nanite.
-				if (Component->IsA<UInstancedStaticMeshComponent>()) Converted.Add(Component->GetStaticMesh());
-				for (int32 Slot = 0; Slot < Component->GetNumMaterials(); ++Slot)
+				TInlineComponentArray<UStaticMeshComponent*> Components(*It);
+				for (UStaticMeshComponent* Component : Components)
 				{
-					UMaterialInterface* Material = Component->GetMaterial(Slot);
-					if (Material && (Material->GetBlendMode() != BLEND_Opaque && Material->GetBlendMode() != BLEND_Masked))
-						Incompatible.Add(Component->GetStaticMesh());
+					// Amendment 10: EConVerseNanitePolicy::ConvertedISMOnly must cover HISM groups too, since
+					// UHierarchicalInstancedStaticMeshComponent is a subclass of UInstancedStaticMeshComponent.
+					// An exact-class check here silently excluded every HISM group from Nanite.
+					if (Component->IsA<UInstancedStaticMeshComponent>()) Converted.Add(Component->GetStaticMesh());
+					if (UStaticMesh* UsedMesh = Component->GetStaticMesh())
+					{
+						const UInstancedStaticMeshComponent* Instanced = Cast<UInstancedStaticMeshComponent>(Component);
+						Uses.FindOrAdd(UsedMesh) += Instanced ? FMath::Max(1, Instanced->GetInstanceCount()) : 1;
+					}
+					for (int32 Slot = 0; Slot < Component->GetNumMaterials(); ++Slot)
+					{
+						UMaterialInterface* Material = Component->GetMaterial(Slot);
+						if (Material && (Material->GetBlendMode() != BLEND_Opaque && Material->GetBlendMode() != BLEND_Masked))
+							Incompatible.Add(Component->GetStaticMesh());
+					}
 				}
 			}
 		}
 		TSet<UStaticMesh*> Disabled;
 		for (const auto& Pair : Scene.StaticMeshes)
 			if (Options.Processing.DisableNaniteMeshElements.Contains(Pair.Key.ToString())) Disabled.Add(Pair.Value.LoadSynchronous());
+		// Amendment 15: UE 5.8.3's Nanite root-page pool is fixed and exhausting it is fatal, so the policy
+		// may enable at most MaxNaniteMeshes meshes. Eligibility mirrors the per-mesh decision below; the
+		// most-used meshes keep Nanite, ties break by element name so the choice is reproducible.
+		TSet<UStaticMesh*> OverBudget;
+		const int32 Budget = Options.Processing.MaxNaniteMeshes;
+		const TSet<FString> OnlyElements(Options.NaniteOnlyMeshElements);
+		if (Budget > 0 && Options.Processing.NanitePolicy != EConVerseNanitePolicy::PreserveImported)
+		{
+			struct FRanked { UStaticMesh* Mesh; FString Element; int32 Uses; };
+			TArray<FRanked> Eligible;
+			TSet<UStaticMesh*> Considered;
+			for (const auto& Pair : Scene.StaticMeshes)
+			{
+				UStaticMesh* Mesh = Pair.Value.LoadSynchronous();
+				if (!Mesh || Considered.Contains(Mesh)) continue;
+				Considered.Add(Mesh);
+				const bool bWouldEnable = Options.Processing.NanitePolicy == EConVerseNanitePolicy::AllSupportedMeshes
+					|| Converted.Contains(Mesh);
+				const bool bSelected = OnlyElements.IsEmpty() || OnlyElements.Contains(Pair.Key.ToString());
+				bool bCompatible = !Disabled.Contains(Mesh) && !Incompatible.Contains(Mesh);
+				for (const auto& Slot : Mesh->GetStaticMaterials())
+					if (Slot.MaterialInterface && Slot.MaterialInterface->GetBlendMode() != BLEND_Opaque && Slot.MaterialInterface->GetBlendMode() != BLEND_Masked)
+						bCompatible = false;
+				if (bWouldEnable && bSelected && bCompatible) Eligible.Add({ Mesh, Pair.Key.ToString(), Uses.FindRef(Mesh) });
+			}
+			if (Eligible.Num() > Budget)
+			{
+				Eligible.Sort([](const FRanked& Left, const FRanked& Right)
+				{
+					return Left.Uses != Right.Uses ? Left.Uses > Right.Uses : Left.Element < Right.Element;
+				});
+				for (int32 Index = Budget; Index < Eligible.Num(); ++Index) OverBudget.Add(Eligible[Index].Mesh);
+				Result.Diagnostics.Add(FString::Printf(
+					TEXT("Nanite budget: %d meshes were eligible but the budget is %d, so the %d least-used meshes were left without Nanite."),
+					Eligible.Num(), Budget, OverBudget.Num()));
+			}
+		}
 		FScopedSlowTask Progress(Scene.StaticMeshes.Num(), NSLOCTEXT("ConVerseHISM", "MeshProcessing", "Processing imported meshes..."));
 		TArray<UStaticMesh*> Meshes;
 		TSet<UStaticMesh*> Seen;
-		for (const auto& Pair : Scene.StaticMeshes)
 		{
-			Progress.EnterProgressFrame(1, FText::FromString(Pair.Key.ToString()));
-			if (Progress.ShouldCancel() || (Options.CancelRequested && Options.CancelRequested()))
-			{ OutError = TEXT("Mesh processing cancelled."); return false; }
-			UStaticMesh* Mesh = Pair.Value.LoadSynchronous();
-			if (!Mesh) { OutError = TEXT("Imported scene contains an unresolved static mesh."); return false; }
-			if (Seen.Contains(Mesh)) continue;
-			Seen.Add(Mesh);
-			if (!Mesh->GetOutermost()->GetName().StartsWith(AttemptFolder + TEXT("/")))
+			TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_MeshPolicyAssets);
+			UE_LOG(LogConVerseOptimizedImport, Display, TEXT("Import step started: Mesh policy assets"));
+			const double AssetsStarted = FPlatformTime::Seconds();
+			ON_SCOPE_EXIT { Result.StepSeconds.Emplace(TEXT("Mesh policy assets"), FPlatformTime::Seconds() - AssetsStarted); };
+			for (const auto& Pair : Scene.StaticMeshes)
 			{
-				OutError = TEXT("Refusing to change a mesh outside this import's owned folder: ") + Mesh->GetPathName();
-				return false;
+				Progress.EnterProgressFrame(1, FText::FromString(Pair.Key.ToString()));
+				if (Progress.ShouldCancel() || (Options.CancelRequested && Options.CancelRequested()))
+				{ OutError = TEXT("Mesh processing cancelled."); return false; }
+				UStaticMesh* Mesh = Pair.Value.LoadSynchronous();
+				if (!Mesh) { OutError = TEXT("Imported scene contains an unresolved static mesh."); return false; }
+				if (Seen.Contains(Mesh)) continue;
+				Seen.Add(Mesh);
+				if (!Mesh->GetOutermost()->GetName().StartsWith(AttemptFolder + TEXT("/")))
+				{
+					OutError = TEXT("Refusing to change a mesh outside this import's owned folder: ") + Mesh->GetPathName();
+					return false;
+				}
+				bool bEnable = Options.Processing.NanitePolicy == EConVerseNanitePolicy::AllSupportedMeshes
+					|| (Options.Processing.NanitePolicy == EConVerseNanitePolicy::ConvertedISMOnly && Converted.Contains(Mesh));
+				bool bDisable = Disabled.Contains(Mesh);
+				// An explicit selection (Apply Nanite step): everything outside it ends up Nanite-off.
+				if (!OnlyElements.IsEmpty() && !OnlyElements.Contains(Pair.Key.ToString())) { bEnable = false; bDisable = true; }
+				for (const auto& Slot : Mesh->GetStaticMaterials())
+					if (Slot.MaterialInterface && (Slot.MaterialInterface->GetBlendMode() != BLEND_Opaque && Slot.MaterialInterface->GetBlendMode() != BLEND_Masked))
+						Incompatible.Add(Mesh);
+				if (Incompatible.Contains(Mesh) && bEnable)
+				{
+					bEnable = false;
+					bDisable = true;
+					++Result.NaniteSkippedMeshes;
+					Result.Diagnostics.Add(TEXT("Nanite excluded due to incompatible effective material: ") + Pair.Key.ToString());
+				}
+				if (bEnable && OverBudget.Contains(Mesh))
+				{
+					bEnable = false;
+					bDisable = true;
+					++Result.NaniteBudgetSkippedMeshes;
+				}
+				if (bDisable) bEnable = false;
+				if ((bEnable || bDisable) && Mesh->GetNaniteSettings().bEnabled != bEnable)
+				{
+					const TCHAR* PolicyName = Options.Processing.NanitePolicy == EConVerseNanitePolicy::AllSupportedMeshes
+						? TEXT("AllSupportedMeshes")
+						: Options.Processing.NanitePolicy == EConVerseNanitePolicy::ConvertedISMOnly
+							? TEXT("ConvertedISMOnly") : TEXT("PreserveImported");
+					const FString ChangeDetails = FString::Printf(
+						TEXT("source_element=\"%s\" mesh_asset=\"%s\" policy=%s previous_enabled=%s requested_enabled=%s"),
+						*Pair.Key.ToString(), *Mesh->GetPathName(), PolicyName,
+						Mesh->GetNaniteSettings().bEnabled ? TEXT("true") : TEXT("false"),
+						bEnable ? TEXT("true") : TEXT("false"));
+					WriteProgress(FString::Printf(TEXT("Nanite setting change started %s"), *ChangeDetails), true);
+					double PostEditChangeSeconds = 0.0;
+					Mesh->Modify();
+					Mesh->GetNaniteSettings().bEnabled = bEnable;
+					const double PostEditChangeStartedAt = FPlatformTime::Seconds();
+					{
+						TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_NanitePostEditChange);
+						Mesh->PostEditChange();
+					}
+					PostEditChangeSeconds = FPlatformTime::Seconds() - PostEditChangeStartedAt;
+					WriteProgress(FString::Printf(
+						TEXT("Nanite setting change returned %s post_edit_change_seconds=%.6f"),
+						*ChangeDetails, PostEditChangeSeconds), false);
+					++Result.NaniteRebuiltMeshes;
+				}
+				Meshes.Add(Mesh);
 			}
-			bool bEnable = Options.Processing.NanitePolicy == EConVerseNanitePolicy::AllSupportedMeshes
-				|| (Options.Processing.NanitePolicy == EConVerseNanitePolicy::ConvertedISMOnly && Converted.Contains(Mesh));
-			bool bDisable = Disabled.Contains(Mesh);
-			for (const auto& Slot : Mesh->GetStaticMaterials())
-				if (Slot.MaterialInterface && Slot.MaterialInterface->GetBlendMode() != BLEND_Opaque && Slot.MaterialInterface->GetBlendMode() != BLEND_Masked)
-					Incompatible.Add(Mesh);
-			if (Incompatible.Contains(Mesh) && bEnable)
-			{
-				bEnable = false;
-				bDisable = true;
-				++Result.NaniteSkippedMeshes;
-				Result.Diagnostics.Add(TEXT("Nanite excluded due to incompatible effective material: ") + Pair.Key.ToString());
-			}
-			if (bDisable) bEnable = false;
-			if ((bEnable || bDisable) && Mesh->GetNaniteSettings().bEnabled != bEnable)
-			{
-				Mesh->Modify();
-				Mesh->GetNaniteSettings().bEnabled = bEnable;
-				Mesh->PostEditChange();
-				++Result.NaniteRebuiltMeshes;
-			}
-			Meshes.Add(Mesh);
 		}
-		const double BuildStarted = FPlatformTime::Seconds();
-		FStaticMeshCompilingManager::Get().FinishCompilation(Meshes);
-		Result.MeshBuildSeconds += FPlatformTime::Seconds() - BuildStarted;
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_MeshCompilationWait);
+			UE_LOG(LogConVerseOptimizedImport, Display, TEXT("Import step started: Mesh compilation wait"));
+			const double BuildStarted = FPlatformTime::Seconds();
+			FStaticMeshCompilingManager::Get().FinishCompilation(Meshes);
+			Result.MeshBuildSeconds += FPlatformTime::Seconds() - BuildStarted;
+		}
 		if (Progress.ShouldCancel() || (Options.CancelRequested && Options.CancelRequested()))
 		{ OutError = TEXT("Mesh processing cancelled after compilation completed."); return false; }
 		for (UStaticMesh* Mesh : Meshes)

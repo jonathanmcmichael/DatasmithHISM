@@ -1,26 +1,24 @@
 # Build, tests, and release acceptance
 
-Current baseline: **2026-09-29, UE 5.8.3 editor build passed, 36/36 automation tests passed** (texture search folders and missing-texture prompt, Amendment 8, Batch A/C/D checkpoints). Previously 33/33, exit 0 and zero controller errors. [Executed evidence](Validation/2026-09-27-live-ui.md) and [55 source hashes/results](Validation/2026-09-27-live-ui-evidence.json) cover live native UI results and the two resulting fixes. [Preset/cancellation evidence](Validation/2026-09-27-preset-cancellation.md) covers the previous changes. Earlier [persistence/recovery](Validation/2026-09-26-phase2.md) results retain their original dates. The recent [runtime packaging evidence](Validation/2026-09-29-packaging.md) proves the successful cook of the latest changes.
-
-The separately recorded [2026-09-28 verification snapshot](Validation/2026-09-28-verification.md) reports its own UE 5.8.3 build and 38/38 tests for the verification fixes. That result is not validation of the combined remote-plus-stashed tree; rebuild and rerun automation after conflict resolution. The [earlier documentation closeout](Validation/2026-09-27-closeout.md) records its own 54-file snapshot. Live native UI remains incomplete.
+Current build and test status is kept in the [handoff](../HANDOFF.md#current-status). Dated records under [Validation](Validation/) keep the results of their own runs; the [documentation index](README.md) lists them.
 
 ## Build and automation
 
-Close Unreal Editor before either command. If Live Coding blocks the build, close the editor or disable Live Coding through its normal workflow; do not kill an editor holding user work. IntelliSense error output does not substitute for this build.
+Close Unreal Editor before either command. If Live Coding blocks the build, close the editor or disable Live Coding through its normal workflow; do not kill an editor holding user work. IntelliSense error output does not substitute for this build. The host project is `C:\Unreal\Projects\AdvancedHISM`; adjust paths for another checkout.
 
 ```powershell
 & 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat' `
   AdvancedHISMEditor Win64 Development `
-  -Project='D:\Unreal\Sandbox\AdvancedHISM\AdvancedHISM.uproject' -WaitMutex
+  -Project='C:\Unreal\Projects\AdvancedHISM\AdvancedHISM.uproject' -WaitMutex
 
 & 'C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' `
-  'D:\Unreal\Sandbox\AdvancedHISM\AdvancedHISM.uproject' `
+  'C:\Unreal\Projects\AdvancedHISM\AdvancedHISM.uproject' `
   '-ExecCmds=Automation RunTests DatasmithHISM; Quit' `
   -unattended -nopause -nosplash -NullRHI `
-  '-abslog=D:\Unreal\Sandbox\AdvancedHISM\Saved\Logs\Automation.txt'
+  '-abslog=C:\Unreal\Projects\AdvancedHISM\Saved\Logs\Automation.txt'
 ```
 
-Capture each process exit code. Inspect `Test Completed`, `LogAutomationController: Error:`, and the final test-complete exit marker. The separately recorded 2026-09-28 verification run exited 0 with 38 successes and zero controller errors; it does not validate the combined remote-plus-stashed tree. The 2026-09-29 remote baseline recorded 36/36, and the combined tree remains unverified. Optional LinuxArm64/VisionOS validation messages do not block runs.
+Capture each process exit code. Inspect `Test Completed`, `LogAutomationController: Error:`, and the final test-complete exit marker. Optional LinuxArm64/VisionOS validation messages do not block runs.
 
 ## Fixture-driven imports
 
@@ -28,12 +26,24 @@ Use a disposable destination and a complete source plus sidecars. `-AnalyzeOnly`
 
 ```powershell
 & 'C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' `
-  'D:\Unreal\Sandbox\AdvancedHISM\AdvancedHISM.uproject' -run=ConVerseOptimizedImport `
-  '-Source=D:\Unreal\Sandbox\AdvancedHISM\Plugins\DatasmithHISM\Tests\Fixtures\Joist16K6\Joist16K6.udatasmith' `
+  'C:\Unreal\Projects\AdvancedHISM\AdvancedHISM.uproject' -run=ConVerseOptimizedImport `
+  '-Source=C:\Unreal\Projects\AdvancedHISM\Plugins\DatasmithHISM\Tests\Fixtures\Joist16K6\Joist16K6.udatasmith' `
   -Destination=/Game/ConVerseValidation/JoistReview -InstanceType=ISM -Nanite=All `
   -NewMap=/Game/ConVerseValidation/JoistReviewMap -Save `
   -unattended -nopause -nosplash -NullRHI
 ```
+
+`-AnalyzeNanite` logs the read-only Nanite analysis of the import it just made (Amendment 17), `-NaniteAnalysisFile=<csv>` also writes every mesh row, `-NaniteCoverage=<percent>` and `-NaniteMinTriangles=<n>` set its heuristic thresholds (defaults 95 and 1000), and `-ApplyNanite=Recommended` applies exactly the recommendation (it fails if there is none). The metrics then include `AnalysisEligibleMeshes`, `AnalysisCandidateMeshes`, `AnalysisRecommendedMeshes`, `AnalysisTotalPlacedTriangles` and `AnalysisRecommendedPlacedTriangles`. A successful run that accepted an unimportable or absent IES file can still make the engine process exit 1, because Datasmith logs an Error for it; read the commandlet's own "import succeeded" line and the metrics file.
+
+`-ApplyNanite=All|ISM` runs the separate Apply Nanite step on the import it just made (Amendment 16); `-NaniteBudget` and `-DisableNanite` feed it, and a failed step exits 1. The metrics then include `ApplyNaniteSeconds`, `ApplyNaniteMeshBuildSeconds`, `ApplyNaniteEnabledMeshes`, `ApplyNaniteRebuiltMeshes` and `ApplyNaniteBudgetSkippedMeshes`. An import without it builds meshes once and leaves Nanite as imported. `-Nanite=` still applies Nanite inline during the import.
+
+`-NaniteBudget=<n>` sets the Nanite mesh budget for a run (0 = unlimited; omitted uses the recipe or preset value, default 16,384). The metrics file records `NaniteBudgetSkippedMeshes`.
+
+### Benchmark metrics and budgets
+
+Add `-MetricsFile=<path>.json` to write one run's import-side metrics (durations per stage, mesh build/processing time, process peak physical MB, source/planned/Nanite counts, and after an import the world's actor, primitive-component, instanced-component and instance counts). The file is written for failed runs too. Add `-Budget=<budget>.json` to fail the run (exit 1) when a metric exceeds its limit. Budget keys are `Max<Metric>`, for example `{ "MaxDurationSeconds": 120, "MaxActorCount": 500, "MaxPeakPhysicalMB": 8000 }`. An unknown or non-numeric key fails the run, so a typo cannot become an unchecked budget. `-Budget` requires `-MetricsFile`.
+
+`PeakPhysicalMB` is the whole process lifetime including editor startup, so compare it only against the same command on the same machine. These are import-side numbers only: draw calls and frame time need a rendered camera-path run and are not measured here, so a passing budget never implies rendered speed. Use a fresh `-Destination` per run or the second run returns `AlreadyCurrent`. Covered by `DatasmithHISM.OptimizedImport.BenchmarkMetricsAndBudgets`, which drives the commandlet entry point: a satisfiable budget exits 0 with metrics matching the real world, and an exceeded budget, typo'd key, metric the run never recorded, non-numeric limit, unreadable budget file, and `-Budget` without `-MetricsFile` each exit 1.
 
 This negative joist fixture proves source preservation, not restored diagonals. Generated automation fixtures are isolated per test; cleanup must diff pre-existing world objects because the editor world persists across tests. Use [fixture provenance](../Tests/Fixtures/README.md) and the [complete commandlet options](IMPORT_WORKFLOW.md#automation-and-runtime).
 
@@ -66,4 +76,4 @@ Legacy acceptance additionally includes Dedupe dry-run/decline/accept, external 
 
 Record engine/plugin/source/exporter/fixture versions, source fingerprints, exact normalized settings, test/command, exit code, log, and observed limitations. Keep editor, automation, persistence, package, rendered and performance evidence distinct. Use [Windows packaging](RUNTIME_AND_PACKAGING.md) for cook and runtime checks.
 
-Missing source data blocks the relevant acceptance gate rather than converting it into a pass. Keep negative fixtures. Do not claim the 245-row observed appearance list is verified stock coverage or that Unitless preservation establishes photometric correctness. The [execution ledger](../ROADMAP_EXECUTION.md) is the release-status authority alongside this procedure and dated evidence.
+Missing source data blocks the relevant acceptance gate rather than converting it into a pass. Keep negative fixtures. Do not claim the 245-row observed appearance list is verified stock coverage or that Unitless preservation establishes photometric correctness. The [roadmap](../ROADMAP.md) is the release-status authority alongside this procedure and dated evidence.

@@ -1,4 +1,5 @@
 #include "ConVerseDatasmithImportPanel.h"
+#include "ConVerseImportTraceCapture.h"
 #include "ConVerseMaterialReview.h"
 #include "ConVerseOptimizedImportManifest.h"
 
@@ -20,6 +21,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -172,7 +174,7 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 				SNew(STextBlock)
 				.Text(LOCTEXT(
 					"PanelDescription",
-					"Analyze a Datasmith scene, replace safe repeated mesh actors in memory, then import and verify ISM or HISM output in the current editor world."))
+					"Preview the source with Analyze, or import and verify ISM or HISM output directly in the current editor world."))
 				.AutoWrapText(true)
 			]
 
@@ -260,7 +262,7 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 						.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
 						.IsChecked(this, &SConVerseDatasmithImportPanel::GetISMCheckState)
 						.OnCheckStateChanged(this, &SConVerseDatasmithImportPanel::HandleISMCheckStateChanged)
-						.ToolTipText(LOCTEXT("ISMTooltip", "Create standard Instanced Static Mesh components. This is the default Nanite-first option."))
+						.ToolTipText(LOCTEXT("ISMTooltip", "Create standard Instanced Static Mesh components. Nanite is applied afterwards by the separate Apply Nanite step, so this choice does not depend on it."))
 						[
 							SNew(STextBlock)
 							.Text(LOCTEXT("ISMOption", "ISM"))
@@ -497,6 +499,106 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("ReviewMaterials", "Review materials")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleReviewMaterials)]
 				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("RenderingSettings", "Rendering settings")).OnClicked_Lambda([] { FModuleManager::LoadModuleChecked<ISettingsModule>(TEXT("Settings")).ShowViewer("Project", "Engine", "Rendering"); return FReply::Handled(); })]
 			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("ApplyNaniteLabel", "Nanite (separate step):"))
+					.ToolTipText(LOCTEXT("ApplyNaniteLabelTooltip", "Imports leave Nanite as imported, so each mesh builds once. Apply Nanite afterwards to enable it on the imported meshes."))
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SBox).WidthOverride(210.0f)
+					[
+						SNew(SComboButton)
+						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+						.OnGetMenuContent(this, &SConVerseDatasmithImportPanel::BuildNaniteScopeMenu)
+						.ToolTipText(LOCTEXT("ApplyNaniteScopeTooltip", "Which meshes receive Nanite. Meshes marked Disable mesh Nanite in the inspection list are always left out."))
+						.ButtonContent()[SNew(STextBlock).Text(this, &SConVerseDatasmithImportPanel::GetNaniteScopeText)]
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("ApplyNaniteBudgetLabel", "Max meshes"))
+					.ToolTipText(LOCTEXT("ApplyNaniteBudgetTooltip", "Most meshes that may receive Nanite; 0 is unlimited. The most-placed meshes keep it. UE 5.8.3 crashes when its Nanite root-page pool is exhausted, so keep this below 16,384 on large scenes."))
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SBox).WidthOverride(100.0f)
+					[
+						SNew(SNumericEntryBox<int32>)
+						.Value_Lambda([this] { return TOptional<int32>(ApplyNaniteBudget); })
+						.MinValue(0)
+						.AllowSpin(false)
+						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+						.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { ApplyNaniteBudget = FMath::Max(0, NewValue); })
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SButton).Text(LOCTEXT("ApplyNanite", "Apply Nanite"))
+					.IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); })
+					.ToolTipText(LOCTEXT("ApplyNaniteTooltip", "Enable Nanite on the last imported result. Refused if the import has manual edits. A cancel or failure restores the meshes. Save the imported result afterwards to keep it."))
+					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleApplyNanite)
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SButton).Text(LOCTEXT("AnalyzeNanite", "Analyze Nanite"))
+					.IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); })
+					.ToolTipText(LOCTEXT("AnalyzeNaniteTooltip", "Read-only. Ranks the last import's meshes by placed triangles (triangles x placements) and recommends the fewest that cover the chosen share of that load. Choose Recommended meshes in the scope menu to apply it."))
+					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleAnalyzeNanite)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("NaniteCoverageLabel", "Cover %"))
+					.ToolTipText(LOCTEXT("NaniteCoverageTooltip", "Share of the candidate meshes' placed triangles the recommendation must cover."))
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+				[
+					SNew(SBox).WidthOverride(70.0f)
+					[
+						SNew(SNumericEntryBox<int32>)
+						.Value_Lambda([this] { return TOptional<int32>(NaniteCoveragePercent); })
+						.MinValue(1).MaxValue(100)
+						.AllowSpin(false)
+						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+						.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { NaniteCoveragePercent = FMath::Clamp(NewValue, 1, 100); })
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("NaniteMinTrianglesLabel", "Min triangles"))
+					.ToolTipText(LOCTEXT("NaniteMinTrianglesTooltip", "Meshes below this triangle count are not recommended. A heuristic, not a measured Nanite break-even."))
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SBox).WidthOverride(90.0f)
+					[
+						SNew(SNumericEntryBox<int32>)
+						.Value_Lambda([this] { return TOptional<int32>(NaniteMinTriangles); })
+						.MinValue(0)
+						.AllowSpin(false)
+						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+						.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { NaniteMinTriangles = FMath::Max(0, NewValue); })
+					]
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.0f)
+			[
+				SNew(SCheckBox)
+				.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+				.IsChecked_Lambda([this]() { return bProfileNextImport ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+				.OnCheckStateChanged_Lambda([this](ECheckBoxState State) { bProfileNextImport = State == ECheckBoxState::Checked; })
+				.ToolTipText(LOCTEXT("ProfileNextImportTooltip", "Capture CPU, frame, bookmark, and log events for the next Import or Rebuild. The trace is saved under Saved/Profiling and stopped when the operation resolves."))
+			[
+					SNew(STextBlock).Text(LOCTEXT("ProfileNextImport", "Profile next import"))
+			]
+			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(0.0f, 8.0f)
@@ -507,8 +609,8 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 				+ SUniformGridPanel::Slot(0, 0)
 				[
 					SNew(SButton)
-					.Text(LOCTEXT("AnalyzeButton", "Analyze"))
-					.ToolTipText(LOCTEXT("AnalyzeTooltip", "Parse and plan the source scene without creating assets or actors."))
+					.Text(LOCTEXT("AnalyzeButton", "Analyze (optional)"))
+					.ToolTipText(LOCTEXT("AnalyzeTooltip", "Preview the source plan without creating assets or actors. Import runs its own fresh checks, so Analyze is not required and running both repeats source and sidecar checks."))
 					.IsEnabled(this, &SConVerseDatasmithImportPanel::CanAnalyze)
 					.HAlign(HAlign_Center)
 					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleAnalyze)
@@ -696,6 +798,8 @@ FReply SConVerseDatasmithImportPanel::HandleImportAndVerify()
 	{
 		return FReply::Handled();
 	}
+	const bool bProfileThisImport = bProfileNextImport;
+	bProfileNextImport = false;
 
 	bOperationInProgress = true;
 	PanelStatus = EPanelStatus::Working;
@@ -706,6 +810,20 @@ FReply SConVerseDatasmithImportPanel::HandleImportAndVerify()
 	// owns real assets and actors, so it must never outlive this handler.
 	FConVerseOptimizedImportOptions Options = MakeOptions();
 	Options.bDeferRollbackOnVerificationFailure = true;
+	FConVerseImportTraceCapture TraceCapture;
+	FString TraceStartError;
+	if (bProfileThisImport)
+	{
+		if (TraceCapture.Start(TraceStartError))
+		{
+			Options.TraceFilePath = TraceCapture.GetTraceFilePath();
+		}
+		else
+		{
+			UE_LOG(LogConVerseOptimizedImport, Warning, TEXT("Import trace was not started: %s"), *TraceStartError);
+		}
+	}
+	ON_SCOPE_EXIT { TraceCapture.Stop(); };
 
 	FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
 	if (ConfirmMissingTextures(Result))
@@ -751,7 +869,28 @@ FReply SConVerseDatasmithImportPanel::HandleImportAndVerify()
 			: FConVerseDatasmithImportService::DiscardFailedVerification(Result.SessionId);
 	}
 
+	FString TraceWarning;
+	if (bProfileThisImport && TraceStartError.IsEmpty() && !TraceCapture.Stop())
+	{
+		TraceWarning = FString::Printf(
+			TEXT("Unreal Insights trace could not be finalized at %s."), *TraceCapture.GetTraceFilePath());
+		UE_LOG(LogConVerseOptimizedImport, Warning, TEXT("%s"), *TraceWarning);
+		Result.Report += TEXT("\n") + TraceWarning + TEXT("\n");
+	}
 	SetResult(Result, true);
+	if (!TraceWarning.IsEmpty())
+	{
+		StatusDetail = FText::Format(
+			LOCTEXT("ImportTraceFinalizeFailed", "{0}\n\nThe Insights trace could not be finalized. See the report and Output Log."),
+			StatusDetail);
+	}
+	if (!TraceStartError.IsEmpty())
+	{
+		StatusDetail = FText::Format(
+			LOCTEXT("ImportTraceStartFailed", "{0}\n\nInsights capture did not start: {1} The import operation continued without tracing."),
+			StatusDetail,
+			FText::FromString(TraceStartError));
+	}
 	bOperationInProgress = false;
 	return FReply::Handled();
 }
@@ -796,6 +935,7 @@ void SConVerseDatasmithImportPanel::ApplyInputOptions(const FConVerseOptimizedIm
 		InspectionRows.Reset();
 		Appearances.Reset();
 		LastManifestPath.Reset();
+		NaniteRecommended.Reset();
 		if (InspectionList) InspectionList->ClearSelection();
 		RefreshInspection();
 		ReportText = LOCTEXT("ResultCleared", "Source or destination changed. Run Analyze to inspect the current source.");
@@ -962,8 +1102,8 @@ FText SConVerseDatasmithImportPanel::GetImportButtonText() const
 FText SConVerseDatasmithImportPanel::GetImportButtonToolTipText() const
 {
 	return bActiveImportExists
-		? LOCTEXT("ReimportTooltip", "An active optimized import already owns this source and destination. Reimport verifies a new session first, then removes the previous session's actors. Superseded assets are retained.")
-		: LOCTEXT("ImportTooltip", "Import the optimized scene into the current editor world and verify every planned group.");
+		? LOCTEXT("ReimportTooltip", "Analyze is optional. Reimport rechecks the source and verifies a new session first, then removes the previous session's actors. Superseded assets are retained.")
+		: LOCTEXT("ImportTooltip", "Analyze is optional. Import rechecks the source, creates the optimized scene in the current editor world, and verifies every planned group.");
 }
 
 bool SConVerseDatasmithImportPanel::CanAnalyze() const
@@ -1199,7 +1339,7 @@ void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResu
 	ClearFocusedInstanceSelection();
 	FString SessionError;
 	FConVerseDatasmithImportService::SavePreset(FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Presets/Session.json"), MakeOptions(), SessionError);
-	if (Result.ManifestAssetPath.IsValid()) LastManifestPath = Result.ManifestAssetPath;
+	if (Result.ManifestAssetPath.IsValid()) { LastManifestPath = Result.ManifestAssetPath; NaniteRecommended.Reset(); }
 	InspectionRows = Result.InspectionRows;
 	Appearances = Result.Appearances;
 	RefreshInspection();
@@ -1352,6 +1492,112 @@ FReply SConVerseDatasmithImportPanel::HandleSaveResult()
 	StatusDetail = FText::FromString(Message);
 	SaveOutcomeText = FText::FromString(Message);
 	PanelStatus = !bSaved ? EPanelStatus::Failed : (bVerified ? EPanelStatus::Verified : EPanelStatus::ImportedWithFailures);
+	return FReply::Handled();
+}
+
+FText SConVerseDatasmithImportPanel::GetNaniteScopeText() const
+{
+	if (bApplyRecommendedOnly) return LOCTEXT("NaniteScopeRecommended", "Recommended meshes");
+	return ApplyNanitePolicy == EConVerseNanitePolicy::ConvertedISMOnly
+		? LOCTEXT("NaniteScopeGroups", "Converted ISM/HISM groups only")
+		: LOCTEXT("NaniteScopeAll", "All supported meshes");
+}
+
+TSharedRef<SWidget> SConVerseDatasmithImportPanel::BuildNaniteScopeMenu()
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	auto AddEntry = [this, &MenuBuilder](EConVerseNanitePolicy Policy, const FText& Label, const FText& ToolTip)
+	{
+		MenuBuilder.AddMenuEntry(Label, ToolTip, FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([this, Policy] { ApplyNanitePolicy = Policy; bApplyRecommendedOnly = false; }),
+				FCanExecuteAction(),
+				FIsActionChecked::CreateLambda([this, Policy] { return !bApplyRecommendedOnly && ApplyNanitePolicy == Policy; })),
+			NAME_None, EUserInterfaceActionType::RadioButton);
+	};
+	AddEntry(EConVerseNanitePolicy::AllSupportedMeshes, LOCTEXT("NaniteScopeAllMenu", "All supported meshes"),
+		LOCTEXT("NaniteScopeAllTooltip", "Every imported mesh, including ordinary ones that were not instanced. Subject to the max-meshes budget."));
+	AddEntry(EConVerseNanitePolicy::ConvertedISMOnly, LOCTEXT("NaniteScopeGroupsMenu", "Converted ISM/HISM groups only"),
+		LOCTEXT("NaniteScopeGroupsTooltip", "Only meshes drawn through an instanced group. The right choice for sources with many unique meshes."));
+	MenuBuilder.AddMenuEntry(LOCTEXT("NaniteScopeRecommendedMenu", "Recommended meshes (run Analyze Nanite first)"),
+		LOCTEXT("NaniteScopeRecommendedTooltip", "Only the meshes the last Analyze Nanite recommended. Every other mesh ends up without Nanite."), FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([this] { bApplyRecommendedOnly = true; }),
+			FCanExecuteAction(),
+			FIsActionChecked::CreateLambda([this] { return bApplyRecommendedOnly; })),
+		NAME_None, EUserInterfaceActionType::RadioButton);
+	return MenuBuilder.MakeWidget();
+}
+
+FReply SConVerseDatasmithImportPanel::HandleAnalyzeNanite()
+{
+	if (bOperationInProgress || !LastManifestPath.IsValid()) return FReply::Handled();
+	FConVerseNaniteAnalysisOptions Analysis;
+	Analysis.ManifestPath = LastManifestPath;
+	Analysis.CoverageTarget = double(NaniteCoveragePercent) / 100.0;
+	Analysis.MinTriangles = NaniteMinTriangles;
+	Analysis.DisableNaniteMeshElements = ProcessingRecipe->Processing.DisableNaniteMeshElements;
+	const FConVerseNaniteAnalysisResult Result = FConVerseDatasmithImportService::AnalyzeNanite(Analysis);
+
+	NaniteRecommended = Result.RecommendedElements;
+	FString Message = Result.Summary;
+	if (Result.bSucceeded)
+	{
+		// The heaviest meshes, with the running share of the candidates' load, are what the user decides on.
+		Message += TEXT("\nMesh | triangles x placements = placed | running share | note");
+		const int32 Shown = FMath::Min(Result.Rows.Num(), 15);
+		for (int32 Index = 0; Index < Shown; ++Index)
+		{
+			const FConVerseNaniteAnalysisRow& Row = Result.Rows[Index];
+			Message += FString::Printf(TEXT("\n%s%s | %d x %d = %lld | %.0f%%%s%s"),
+				Row.bRecommended ? TEXT("* ") : TEXT(""), *Row.MeshElement, Row.Triangles, Row.Placements, Row.PlacedTriangles,
+				Row.CumulativeShare * 100.0, Row.Note.IsEmpty() ? TEXT("") : TEXT(" | "), *Row.Note);
+		}
+		if (Result.Rows.Num() > Shown) Message += FString::Printf(TEXT("\n... and %d more. * marks recommended meshes."), Result.Rows.Num() - Shown);
+		else Message += TEXT("\n* marks recommended meshes.");
+	}
+	StatusDetail = FText::FromString(Result.Summary);
+	SaveOutcomeText = FText::FromString(Message);
+	return FReply::Handled();
+}
+
+FReply SConVerseDatasmithImportPanel::HandleApplyNanite()
+{
+	if (bOperationInProgress || !LastManifestPath.IsValid()) return FReply::Handled();
+	if (bApplyRecommendedOnly && NaniteRecommended.IsEmpty())
+	{
+		// Refuse rather than turn Nanite off everywhere: an empty selection would mean "every mesh".
+		const FText Message = LOCTEXT("NoRecommendation", "Nanite was not applied: there is no recommendation. Run Analyze Nanite first, or lower Min triangles if it found no candidates.");
+		StatusDetail = Message;
+		SaveOutcomeText = Message;
+		return FReply::Handled();
+	}
+	bOperationInProgress = true;
+	const EPanelStatus StatusBefore = PanelStatus;
+	PanelStatus = EPanelStatus::Working;
+	StatusDetail = LOCTEXT("ApplyingNaniteStatus", "Applying Nanite...");
+
+	FConVerseNaniteApplyOptions Apply;
+	Apply.ManifestPath = LastManifestPath;
+	Apply.Policy = ApplyNanitePolicy;
+	Apply.MaxNaniteMeshes = ApplyNaniteBudget;
+	Apply.DisableNaniteMeshElements = ProcessingRecipe->Processing.DisableNaniteMeshElements;
+	if (bApplyRecommendedOnly) Apply.OnlyMeshElements = NaniteRecommended;
+	// Nobody is there to press Cancel in an unattended run, so skip the dialog; attended runs get one.
+	Apply.bAutomated = FApp::IsUnattended();
+	const FConVerseNaniteApplyResult Result = FConVerseDatasmithImportService::ApplyNanite(Apply);
+	bOperationInProgress = false;
+
+	// The import stays valid whether or not this succeeded, so the status reflects the import and the
+	// outcome of the step is shown beside it. Differences name what blocked a refusal.
+	FString Message = Result.Summary;
+	if (!Result.bSucceeded && !Result.Diagnostics.IsEmpty())
+	{
+		Message += TEXT("\n") + FString::Join(TArray<FString>(Result.Diagnostics.GetData(), FMath::Min(Result.Diagnostics.Num(), 8)), TEXT("\n"));
+	}
+	StatusDetail = FText::FromString(Result.Summary);
+	SaveOutcomeText = FText::FromString(Message);
+	PanelStatus = StatusBefore;
 	return FReply::Handled();
 }
 

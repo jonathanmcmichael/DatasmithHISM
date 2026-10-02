@@ -34,6 +34,8 @@ private:
 	friend class FConVersePanelMissingTexturesTest;
 	friend class FConVersePanelSaveUpdatesReportTest;
 	friend class FConVerseFocusClearsPriorSelectionTest;
+	friend class FConVersePanelTraceOptionTest;
+	friend class FConVersePanelApplyNaniteTest;
 	void ApplyInputOptions(const FConVerseOptimizedImportOptions& Options);
 	/** Asks whether to proceed without the result's missing textures; on Yes, records them as accepted. */
 	bool ConfirmMissingTextures(const FConVerseOptimizedImportResult& Result);
@@ -47,6 +49,10 @@ private:
 	FReply HandleImportAndVerify();
 	FReply HandleRebuild();
 	FReply HandleSaveResult();
+	FReply HandleApplyNanite();
+	FReply HandleAnalyzeNanite();
+	TSharedRef<SWidget> BuildNaniteScopeMenu();
+	FText GetNaniteScopeText() const;
 	FReply HandleSavePreset();
 	FReply HandleLoadPreset();
 	void RefreshInspection();
@@ -128,6 +134,15 @@ private:
 	void ClearFocusedInstanceSelection();
 	bool bApplyingInputs = false;
 	bool bForceRebuildNext = false;
+	bool bProfileNextImport = false;
+	/** Apply Nanite step settings (Amendment 16). Kept apart from the import settings so changing them never invalidates the import. */
+	EConVerseNanitePolicy ApplyNanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
+	int32 ApplyNaniteBudget = 16384;
+	/** Nanite analysis (read-only). The recommendation is cleared whenever the import it describes changes. */
+	int32 NaniteCoveragePercent = 95;
+	int32 NaniteMinTriangles = 1000;
+	TArray<FString> NaniteRecommended;
+	bool bApplyRecommendedOnly = false;
 	FSoftObjectPath LastManifestPath;
 	TSharedPtr<SEditableTextBox> SourcePathTextBox;
 	TSharedPtr<SEditableTextBox> DestinationPathTextBox;

@@ -14,6 +14,13 @@
 #include "Misc/PackageName.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
+#include "EngineUtils.h"
+#include "GameFramework/Actor.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogConVerseOptimizedImportCommandlet, Log, All);
 
@@ -73,6 +80,123 @@ namespace ConVerseOptimizedImportCommandlet
 		return Result.Status == EConVerseOptimizedImportStatus::AlreadyCurrent
 			&& Result.bVerificationSucceeded;
 	}
+
+	/**
+	 * Benchmark metrics for one run. Import-side only: draw calls and frame time need a rendered
+	 * camera-path run and are deliberately absent, so a passing budget never implies rendered speed.
+	 */
+	static TSharedRef<FJsonObject> BuildMetrics(const FConVerseOptimizedImportResult& Result, bool bAnalyzeOnly, const FString& Source,
+		const FConVerseNaniteApplyResult* Apply = nullptr, const FConVerseNaniteAnalysisResult* Analysis = nullptr)
+	{
+		TSharedRef<FJsonObject> Metrics = MakeShared<FJsonObject>();
+		Metrics->SetStringField(TEXT("Source"), Source);
+		Metrics->SetStringField(TEXT("Status"), ToString(Result.Status));
+		Metrics->SetStringField(TEXT("Operation"), bAnalyzeOnly ? TEXT("Analyze") : TEXT("Import"));
+		Metrics->SetNumberField(TEXT("DurationSeconds"), Result.DurationSeconds);
+		Metrics->SetNumberField(TEXT("MeshBuildSeconds"), Result.MeshBuildSeconds);
+		Metrics->SetNumberField(TEXT("MeshProcessingSeconds"), Result.MeshProcessingSeconds);
+		Metrics->SetNumberField(TEXT("PeakPhysicalMB"), double(Result.ProcessPeakPhysicalBytes) / (1024.0 * 1024.0));
+		Metrics->SetNumberField(TEXT("SourceMeshActors"), Result.TotalSourceMeshActors);
+		Metrics->SetNumberField(TEXT("SourceMeshAssets"), Result.SourceMeshAssetCount);
+		Metrics->SetNumberField(TEXT("PlannedGroups"), Result.PlannedGroupCount);
+		Metrics->SetNumberField(TEXT("PlannedInstances"), Result.PlannedInstanceCount);
+		Metrics->SetNumberField(TEXT("NaniteEnabledMeshes"), Result.NaniteEnabledMeshes);
+		Metrics->SetNumberField(TEXT("NaniteRebuiltMeshes"), Result.NaniteRebuiltMeshes);
+		Metrics->SetNumberField(TEXT("NaniteBudgetSkippedMeshes"), Result.NaniteBudgetSkippedMeshes);
+		Metrics->SetNumberField(TEXT("ProjectedNaniteMeshes"), Result.ProjectedNaniteMeshes);
+		Metrics->SetNumberField(TEXT("SourceLights"), Result.SourceLightCount);
+		if (Analysis)
+		{
+			Metrics->SetNumberField(TEXT("AnalysisEligibleMeshes"), Analysis->EligibleMeshes);
+			Metrics->SetNumberField(TEXT("AnalysisCandidateMeshes"), Analysis->CandidateMeshes);
+			Metrics->SetNumberField(TEXT("AnalysisRecommendedMeshes"), Analysis->RecommendedElements.Num());
+			Metrics->SetNumberField(TEXT("AnalysisTotalPlacedTriangles"), double(Analysis->TotalPlacedTriangles));
+			Metrics->SetNumberField(TEXT("AnalysisRecommendedPlacedTriangles"), double(Analysis->RecommendedPlacedTriangles));
+		}
+		if (Apply)
+		{
+			// The separate Apply Nanite step (Amendment 16); absent when the run did not request it.
+			Metrics->SetNumberField(TEXT("ApplyNaniteSeconds"), Apply->DurationSeconds);
+			Metrics->SetNumberField(TEXT("ApplyNaniteMeshBuildSeconds"), Apply->MeshBuildSeconds);
+			Metrics->SetNumberField(TEXT("ApplyNaniteEnabledMeshes"), Apply->NaniteEnabledMeshes);
+			Metrics->SetNumberField(TEXT("ApplyNaniteRebuiltMeshes"), Apply->NaniteRebuiltMeshes);
+			Metrics->SetNumberField(TEXT("ApplyNaniteBudgetSkippedMeshes"), Apply->NaniteBudgetSkippedMeshes);
+		}
+
+		TSharedRef<FJsonObject> Stages = MakeShared<FJsonObject>();
+		for (const TPair<FString, double>& Stage : Result.StageSeconds)
+		{
+			Stages->SetNumberField(Stage.Key, Stage.Value);
+		}
+		Metrics->SetObjectField(TEXT("StageSeconds"), Stages);
+
+		if (!bAnalyzeOnly)
+		{
+			// Scene cost of the result, after the import: what the renderer and the editor must carry.
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			int32 Actors = 0, Components = 0, IsmComponents = 0;
+			int64 Instances = 0;
+			if (World)
+			{
+				for (TActorIterator<AActor> It(World); It; ++It)
+				{
+					++Actors;
+					TInlineComponentArray<UPrimitiveComponent*> Primitives;
+					It->GetComponents(Primitives);
+					Components += Primitives.Num();
+					for (UPrimitiveComponent* Primitive : Primitives)
+					{
+						if (const UInstancedStaticMeshComponent* Ism = Cast<UInstancedStaticMeshComponent>(Primitive))
+						{
+							++IsmComponents;
+							Instances += Ism->GetInstanceCount();
+						}
+					}
+				}
+			}
+			Metrics->SetNumberField(TEXT("ActorCount"), Actors);
+			Metrics->SetNumberField(TEXT("PrimitiveComponentCount"), Components);
+			Metrics->SetNumberField(TEXT("InstancedComponentCount"), IsmComponents);
+			Metrics->SetNumberField(TEXT("InstanceCount"), double(Instances));
+		}
+		return Metrics;
+	}
+
+	/**
+	 * Compares metrics to a budget file whose keys are "Max<Metric>". An unknown or non-numeric
+	 * budget key fails the run: a typo must not become a silently unchecked budget.
+	 */
+	static bool CheckBudget(const FJsonObject& Metrics, const FString& BudgetPath)
+	{
+		FString Text;
+		TSharedPtr<FJsonObject> Budget;
+		if (!FFileHelper::LoadFileToString(Text, *BudgetPath)
+			|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Budget) || !Budget.IsValid())
+		{
+			UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Budget file '%s' could not be read as JSON."), *BudgetPath);
+			return false;
+		}
+		bool bWithinBudget = true;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : Budget->Values)
+		{
+			double Limit = 0.0, Actual = 0.0;
+			const FString Metric = Entry.Key.StartsWith(TEXT("Max")) ? Entry.Key.RightChop(3) : FString();
+			if (Metric.IsEmpty() || !Entry.Value->TryGetNumber(Limit) || !Metrics.TryGetNumberField(Metric, Actual))
+			{
+				UE_LOG(LogConVerseOptimizedImportCommandlet, Error,
+					TEXT("Budget key '%s' is not Max<NumericMetric> for a metric recorded by this run."), *Entry.Key);
+				bWithinBudget = false;
+				continue;
+			}
+			if (Actual > Limit)
+			{
+				UE_LOG(LogConVerseOptimizedImportCommandlet, Error,
+					TEXT("Budget exceeded: %s = %.2f, limit %.2f."), *Metric, Actual, Limit);
+				bWithinBudget = false;
+			}
+		}
+		return bWithinBudget;
+	}
 }
 
 int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
@@ -129,6 +253,12 @@ int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
 		return 1;
 	}
 
+	if (Arguments.Contains(TEXT("Budget")) && !Arguments.Contains(TEXT("MetricsFile")))
+	{
+		UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("-Budget requires -MetricsFile."));
+		return 1;
+	}
+
 	FConVerseOptimizedImportOptions Options;
 	if (const FString* Preset = Arguments.Find(TEXT("Preset")))
 	{
@@ -153,6 +283,8 @@ int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
 		else if (*Policy == TEXT("Preserve")) Options.Processing.NanitePolicy = EConVerseNanitePolicy::PreserveImported;
 		else { UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Nanite must be All, ISM (covers converted ISM and HISM group output), or Preserve.")); return 1; }
 	}
+	// 0 = unlimited. Omitted keeps the recipe/preset value (default 16384).
+	if (const FString* NaniteBudget = Arguments.Find(TEXT("NaniteBudget"))) Options.Processing.MaxNaniteMeshes = FMath::Max(0, FCString::Atoi(**NaniteBudget));
 	if (const FString* Threshold = Arguments.Find(TEXT("ManyLightThreshold"))) Options.Processing.ManyLightThreshold = FCString::Atoi(**Threshold);
 	if (const FString* Names = Arguments.Find(TEXT("KeepOrdinary"))) Names->ParseIntoArray(Options.Processing.KeepOrdinaryMeshElements, TEXT(","), true);
 	if (const FString* Names = Arguments.Find(TEXT("DisableNanite"))) Names->ParseIntoArray(Options.Processing.DisableNaniteMeshElements, TEXT(","), true);
@@ -291,11 +423,107 @@ int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
 			Result.SidecarFileCountAtCommit);
 	}
 
+	// Amendment 17: optional read-only Nanite analysis, run before any apply so it describes the import as
+	// made. -AnalyzeNanite logs it, -NaniteAnalysisFile=<csv> also writes every row, and
+	// -ApplyNanite=Recommended applies exactly its recommendation. -NaniteCoverage=<percent> and
+	// -NaniteMinTriangles=<n> set its heuristic thresholds (defaults 95 and 1000).
+	const FString* ApplyPolicy = Arguments.Find(TEXT("ApplyNanite"));
+	const FString* AnalysisFile = Arguments.Find(TEXT("NaniteAnalysisFile"));
+	const bool bApplyRecommended = ApplyPolicy && *ApplyPolicy == TEXT("Recommended");
+	FConVerseNaniteAnalysisResult Analysis;
+	bool bAnalysisRan = false;
+	if ((FParse::Param(*Params, TEXT("AnalyzeNanite")) || AnalysisFile || bApplyRecommended) && !bAnalyzeOnly && bSucceeded)
+	{
+		FConVerseNaniteAnalysisOptions Request;
+		Request.ManifestPath = Result.ManifestAssetPath;
+		Request.DisableNaniteMeshElements = Options.Processing.DisableNaniteMeshElements;
+		if (const FString* Coverage = Arguments.Find(TEXT("NaniteCoverage"))) Request.CoverageTarget = FMath::Clamp(FCString::Atod(**Coverage), 1.0, 100.0) / 100.0;
+		if (const FString* MinTriangles = Arguments.Find(TEXT("NaniteMinTriangles"))) Request.MinTriangles = FMath::Max(0, FCString::Atoi(**MinTriangles));
+		Analysis = FConVerseDatasmithImportService::AnalyzeNanite(Request);
+		bAnalysisRan = Analysis.bSucceeded;
+		UE_LOG(LogConVerseOptimizedImportCommandlet, Display, TEXT("%s"), *Analysis.Summary);
+		if (AnalysisFile && Analysis.bSucceeded)
+		{
+			FString Csv = TEXT("MeshElement,Triangles,Placements,PlacedTriangles,Eligible,Recommended,CumulativeShare,NaniteEnabled,Note\n");
+			for (const FConVerseNaniteAnalysisRow& Row : Analysis.Rows)
+				Csv += FString::Printf(TEXT("%s,%d,%d,%lld,%d,%d,%.6f,%d,%s\n"), *Row.MeshElement, Row.Triangles, Row.Placements,
+					Row.PlacedTriangles, Row.bEligible, Row.bRecommended, Row.CumulativeShare, Row.bNaniteEnabled, *Row.Note);
+			if (FFileHelper::SaveStringToFile(Csv, **AnalysisFile))
+			{
+				UE_LOG(LogConVerseOptimizedImportCommandlet, Display, TEXT("Nanite analysis: %s"), **AnalysisFile);
+			}
+			else
+			{
+				UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Could not write the Nanite analysis file '%s'."), **AnalysisFile);
+			}
+		}
+	}
+
+	// Amendment 16: Nanite is a separate step on the committed import. Run it here so the benchmark
+	// metrics can report it next to the import it follows.
+	FConVerseNaniteApplyResult ApplyResult;
+	bool bApplyRan = false;
+	bool bApplyOk = true;
+	if (ApplyPolicy)
+	{
+		FConVerseNaniteApplyOptions Apply;
+		if (*ApplyPolicy == TEXT("All")) Apply.Policy = EConVerseNanitePolicy::AllSupportedMeshes;
+		else if (*ApplyPolicy == TEXT("ISM")) Apply.Policy = EConVerseNanitePolicy::ConvertedISMOnly;
+		else if (bApplyRecommended) Apply.Policy = EConVerseNanitePolicy::AllSupportedMeshes;
+		else { UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("ApplyNanite must be All, ISM (converted ISM and HISM group output) or Recommended.")); return 1; }
+		if (bAnalyzeOnly)
+		{ UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("-ApplyNanite needs an import; it cannot follow -AnalyzeOnly.")); return 1; }
+		if (bSucceeded)
+		{
+			Apply.ManifestPath = Result.ManifestAssetPath;
+			Apply.bAutomated = true;
+			Apply.MaxNaniteMeshes = Options.Processing.MaxNaniteMeshes;
+			Apply.DisableNaniteMeshElements = Options.Processing.DisableNaniteMeshElements;
+			if (bApplyRecommended)
+			{
+				// An empty selection means "every mesh" to the service, so refuse it here.
+				if (!bAnalysisRan || Analysis.RecommendedElements.IsEmpty())
+				{ UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("-ApplyNanite=Recommended found nothing to recommend; lower -NaniteMinTriangles or check the analysis.")); return 1; }
+				Apply.OnlyMeshElements = Analysis.RecommendedElements;
+			}
+			ApplyResult = FConVerseDatasmithImportService::ApplyNanite(Apply);
+			bApplyRan = true;
+			bApplyOk = ApplyResult.bSucceeded;
+			UE_LOG(LogConVerseOptimizedImportCommandlet, Display, TEXT("%s"), *ApplyResult.Summary);
+			if (!bApplyOk) UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Apply Nanite did not succeed."));
+		}
+	}
+
+	// Written for failed runs too: a failed benchmark still shows where time and memory went.
+	bool bBudgetMet = true;
+	if (const FString* MetricsFile = Arguments.Find(TEXT("MetricsFile")))
+	{
+		const TSharedRef<FJsonObject> Metrics = BuildMetrics(Result, bAnalyzeOnly, Options.FilePath, bApplyRan ? &ApplyResult : nullptr, bAnalysisRan ? &Analysis : nullptr);
+		FString Json;
+		FJsonSerializer::Serialize(Metrics, TJsonWriterFactory<>::Create(&Json));
+		if (!FFileHelper::SaveStringToFile(Json, **MetricsFile))
+		{ UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Could not write metrics file '%s'."), **MetricsFile); return 1; }
+		UE_LOG(LogConVerseOptimizedImportCommandlet, Display, TEXT("Metrics: %s"), **MetricsFile);
+		if (const FString* Budget = Arguments.Find(TEXT("Budget")))
+		{
+			bBudgetMet = CheckBudget(*Metrics, *Budget);
+		}
+	}
+
 	if (!bSucceeded)
 	{
 		UE_LOG(LogConVerseOptimizedImportCommandlet, Error,
 			TEXT("ConVerse optimized import did not succeed (status %s). See the report and log above."),
 			ToString(Result.Status));
+		return 1;
+	}
+	if (!bApplyOk)
+	{
+		return 1;
+	}
+	if (!bBudgetMet)
+	{
+		UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("ConVerse optimized import exceeded its benchmark budget."));
 		return 1;
 	}
 

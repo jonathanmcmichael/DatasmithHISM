@@ -1,9 +1,15 @@
 #include "ConVerseDatasmithImportService.h"
 
 #include "ConVerseOptimizedImportManifest.h"
+#include "ConVerseOptimizedImportCommandlet.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "UObject/StrongObjectPtr.h"
 #include "ConVerseImportProcessing.h"
 #include "ConVerseImportProgress.h"
 #include "ConVerseDatasmithImportPanel.h"
+#include "ConVerseImportTraceCapture.h"
 #include "FileHelpers.h"
 #include "Misc/FileHelper.h"
 #include "Widgets/SWindow.h"
@@ -549,8 +555,31 @@ bool FConVerseOptimizedImportEndToEndTest::RunTest(const FString& Parameters)
 
 		const FConVerseOptimizedImportResult FirstAnalysis = FConVerseDatasmithImportService::Analyze(Options);
 		const FConVerseOptimizedImportResult SecondAnalysis = FConVerseDatasmithImportService::Analyze(Options);
+		auto CheckProgressLog = [this, ModeName](const FConVerseOptimizedImportResult& Result, const TCHAR* ExpectedStatus)
+		{
+			FString Contents;
+			TestTrue(*FString::Printf(TEXT("%s progress log is readable"), ModeName),
+				!Result.ProgressLogPath.IsEmpty() && FFileHelper::LoadFileToString(Contents, *Result.ProgressLogPath));
+			TestTrue(*FString::Printf(TEXT("%s progress log records a stage start"), ModeName),
+				Contents.Contains(TEXT("started Reading source file...")) || Contents.Contains(TEXT("started Hashing the source file...")));
+			TestTrue(*FString::Printf(TEXT("%s progress log records terminal status"), ModeName),
+				Contents.Contains(FString::Printf(TEXT("finished %s"), ExpectedStatus)));
+			if (FCString::Strcmp(ExpectedStatus, TEXT("Verified")) == 0)
+				TestTrue(*FString::Printf(TEXT("%s progress log records planned counts"), ModeName),
+					Contents.Contains(TEXT("started Running the Datasmith import...; groups=1 planned_instances=2")));
+		};
+		auto CheckTiming = [this, ModeName](const FConVerseOptimizedImportResult& Result, const TCHAR* StepName)
+		{
+			const TPair<FString, double>* Step = Result.StepSeconds.FindByPredicate(
+				[StepName](const TPair<FString, double>& Entry) { return Entry.Key == StepName; });
+			TestTrue(*FString::Printf(TEXT("%s %s is timed"), ModeName, StepName), Step != nullptr && Step->Value >= 0.0);
+			TestTrue(*FString::Printf(TEXT("%s %s is reported"), ModeName, StepName), Result.Report.Contains(FString::Printf(TEXT("Step %s "), StepName)));
+		};
 		TestTrue(*FString::Printf(TEXT("%s analysis succeeds"), ModeName),
 			FirstAnalysis.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+		CheckProgressLog(FirstAnalysis, TEXT("AnalysisSucceeded"));
+		for (const TCHAR* StepName : {TEXT("Sidecar enumerate and sort"), TEXT("Sidecar file sizes"), TEXT("Sidecar file hashes")})
+			CheckTiming(FirstAnalysis, StepName);
 		TestEqual(*FString::Printf(TEXT("%s analysis PlanId is deterministic"), ModeName),
 			SecondAnalysis.PlanId, FirstAnalysis.PlanId);
 		TestEqual(*FString::Printf(TEXT("%s analysis finds one group"), ModeName),
@@ -576,6 +605,12 @@ bool FConVerseOptimizedImportEndToEndTest::RunTest(const FString& Parameters)
 			FConVerseDatasmithImportService::ImportAndVerify(Options);
 		TestTrue(*FString::Printf(TEXT("%s import reaches Verified"), ModeName),
 			ImportResult.Status == EConVerseOptimizedImportStatus::Verified);
+		CheckProgressLog(ImportResult, TEXT("Verified"));
+		for (const TCHAR* StepName : {TEXT("Sidecar enumerate and sort"), TEXT("Sidecar file sizes"), TEXT("Sidecar file hashes"),
+			TEXT("Gather imported components"), TEXT("Apply imported materials"), TEXT("Capture imported snapshots"),
+			TEXT("Process imported meshes"), TEXT("Mesh policy world scan"), TEXT("Mesh policy assets"), TEXT("Capture imported state")})
+			CheckTiming(ImportResult, StepName);
+		if (InstanceType == EConVerseOptimizedInstanceType::ISM) CheckTiming(ImportResult, TEXT("Replace HISM with ISM"));
 		TestEqual(*FString::Printf(TEXT("%s import consumes the analyzed plan"), ModeName),
 			ImportResult.PlanId, FirstAnalysis.PlanId);
 		TestEqual(*FString::Printf(TEXT("%s verifies one group"), ModeName),
@@ -2388,17 +2423,70 @@ bool FConVerseMeshPolicyTest::RunTest(const FString&)
 	Options.bAutomated = true;
 	Options.MinimumInstanceCount = 50;
 	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	// Amendment 16 made PreserveImported the default; this test covers the inline All policy.
+	Options.Processing.NanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
 	const auto Analysis = FConVerseDatasmithImportService::Analyze(Options);
+	TestTrue(TEXT("All-mesh Nanite projection covers every source mesh asset"),
+		Analysis.SourceMeshAssetCount > 0 && Analysis.ProjectedNaniteMeshes == Analysis.SourceMeshAssetCount);
 	Options.Processing.ManyLightThreshold = 50;
 	TestEqual(TEXT("Advisory does not change plan identity"), FConVerseDatasmithImportService::Analyze(Options).PlanId, Analysis.PlanId);
+	Options.Processing.NanitePolicy = EConVerseNanitePolicy::ConvertedISMOnly;
+	TestEqual(TEXT("Converted-only Nanite projection counts no meshes without groups"),
+		FConVerseDatasmithImportService::Analyze(Options).ProjectedNaniteMeshes, 0);
 	Options.Processing.NanitePolicy = EConVerseNanitePolicy::PreserveImported;
-	TestNotEqual(TEXT("Nanite policy changes output identity"), FConVerseDatasmithImportService::Analyze(Options).PlanId, Analysis.PlanId);
+	const auto PreserveAnalysis = FConVerseDatasmithImportService::Analyze(Options);
+	TestNotEqual(TEXT("Nanite policy changes output identity"), PreserveAnalysis.PlanId, Analysis.PlanId);
+	TestEqual(TEXT("Preserved Nanite settings are not projected"), PreserveAnalysis.ProjectedNaniteMeshes, int32(INDEX_NONE));
 	Options.Processing.NanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
 	const auto Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
 	TestTrue(TEXT("Zero groups can import and verify ordinary geometry"), Result.Status == EConVerseOptimizedImportStatus::Verified);
 	TestEqual(TEXT("No instancing required"), Result.PlannedGroupCount, 0);
 	TestEqual(TEXT("All ordinary mesh elements accounted for"), Result.VerifiedOrdinaryMeshes, 3);
 	TestTrue(TEXT("Ordinary imported assets received Nanite"), Result.NaniteEnabledMeshes > 0);
+	FString ProgressContents;
+	TestTrue(TEXT("Nanite progress log is readable"),
+		!Result.ProgressLogPath.IsEmpty() && FFileHelper::LoadFileToString(ProgressContents, *Result.ProgressLogPath));
+	TArray<FString> ProgressLines;
+	ProgressContents.ParseIntoArrayLines(ProgressLines);
+	TArray<FString> StartedNaniteChangeDetails;
+	TArray<FString> ReturnedNaniteChangeDetails;
+	FString FirstNaniteChange;
+	const FString StartPrefix = TEXT("Nanite setting change started ");
+	const FString ReturnPrefix = TEXT("Nanite setting change returned ");
+	for (const FString& Line : ProgressLines)
+	{
+		const int32 StartIndex = Line.Find(StartPrefix);
+		if (StartIndex != INDEX_NONE)
+		{
+			const FString Details = Line.RightChop(StartIndex + StartPrefix.Len());
+			StartedNaniteChangeDetails.Add(Details);
+			if (FirstNaniteChange.IsEmpty()) FirstNaniteChange = Details;
+		}
+		else
+		{
+			const int32 ReturnIndex = Line.Find(ReturnPrefix);
+			if (ReturnIndex == INDEX_NONE) continue;
+			const FString ReturnedDetailsAndTime = Line.RightChop(ReturnIndex + ReturnPrefix.Len());
+			FString Details;
+			FString Timing;
+			if (ReturnedDetailsAndTime.Split(TEXT(" post_edit_change_seconds="), &Details, &Timing))
+				ReturnedNaniteChangeDetails.Add(Details);
+		}
+	}
+	TestTrue(TEXT("Nanite policy changed at least one fixture mesh"), StartedNaniteChangeDetails.Num() > 0);
+	TestEqual(TEXT("Every Nanite change has a pre-call breadcrumb"), StartedNaniteChangeDetails.Num(), Result.NaniteRebuiltMeshes);
+	TestEqual(TEXT("Every returned Nanite change is recorded"), ReturnedNaniteChangeDetails.Num(), StartedNaniteChangeDetails.Num());
+	for (int32 Index = 0; Index < FMath::Min(StartedNaniteChangeDetails.Num(), ReturnedNaniteChangeDetails.Num()); ++Index)
+	{
+		TestEqual(*FString::Printf(TEXT("Nanite change %d return matches its start"), Index),
+			ReturnedNaniteChangeDetails[Index], StartedNaniteChangeDetails[Index]);
+	}
+	TestTrue(TEXT("Nanite breadcrumb identifies source, asset, policy, and state transition"),
+		FirstNaniteChange.Contains(TEXT("source_element=\""))
+		&& FirstNaniteChange.Contains(TEXT("mesh_asset=\""))
+		&& FirstNaniteChange.Contains(TEXT("policy=AllSupportedMeshes"))
+		&& FirstNaniteChange.Contains(TEXT("previous_enabled="))
+		&& FirstNaniteChange.Contains(TEXT("requested_enabled=")));
 	auto* Scene = Cast<UDatasmithScene>(Result.ImportAssetPath.ResolveObject());
 	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Result.ManifestAssetPath.ResolveObject());
 	if (Manifest)
@@ -2819,6 +2907,176 @@ bool FConVerseAmbiguousOwnershipTest::RunTest(const FString&)
 	TArray<UObject*> DuplicateObjects{DuplicateScene};
 	ObjectTools::ForceDeleteObjects(DuplicateObjects, false);
 	CleanupCommittedImport(*GEditor->GetEditorWorldContext().World(), Manifest, Scene);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConVerseImportTraceCaptureTest,
+	"DatasmithHISM.OptimizedImport.TraceCaptureAndReportPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+class FConVerseTraceCaptureRepeatLatentCommand final : public IAutomationLatentCommand
+{
+public:
+	FConVerseTraceCaptureRepeatLatentCommand(FAutomationTestBase& InTest, FString InFirstTracePath)
+		: Test(&InTest)
+		, FirstTracePath(MoveTemp(InFirstTracePath))
+		, WaitStartSeconds(FPlatformTime::Seconds())
+	{
+	}
+
+	bool Update() override
+	{
+		if (Phase == 0)
+		{
+			if (UE::Trace::IsTracing())
+			{
+				return WaitOrTimeout(TEXT("Timed out waiting for the previous Unreal Insights file trace to close."));
+			}
+
+			FString TraceError;
+			if (!Test->TestTrue(TEXT("A later one-shot capture can start"), SecondCapture.Start(TraceError)))
+			{
+				Test->AddError(TraceError);
+				IFileManager::Get().Delete(*FirstTracePath);
+				return true;
+			}
+
+			bSecondCaptureStarted = true;
+			SecondTracePath = SecondCapture.GetTraceFilePath();
+			Test->TestTrue(TEXT("A later one-shot file trace starts after stopping the first"), SecondCapture.IsStarted());
+			Phase = 1;
+			WaitStartSeconds = FPlatformTime::Seconds();
+			return false;
+		}
+
+		if (Phase == 1)
+		{
+			if (FPlatformTime::Seconds() - WaitStartSeconds < 0.25)
+			{
+				return false;
+			}
+			Test->TestTrue(TEXT("The later file trace stops"), SecondCapture.Stop());
+			Phase = 2;
+			WaitStartSeconds = FPlatformTime::Seconds();
+			return false;
+		}
+
+		if (UE::Trace::IsTracing())
+		{
+			return WaitOrTimeout(TEXT("Timed out waiting for the later Unreal Insights file trace to close."));
+		}
+
+		Test->TestTrue(TEXT("The first trace file contains captured data"), IFileManager::Get().FileSize(*FirstTracePath) > 0);
+		Test->TestTrue(TEXT("The later trace file contains captured data"), IFileManager::Get().FileSize(*SecondTracePath) > 0);
+		IFileManager::Get().Delete(*FirstTracePath);
+		IFileManager::Get().Delete(*SecondTracePath);
+		return true;
+	}
+
+private:
+	bool WaitOrTimeout(const TCHAR* ErrorMessage)
+	{
+		if (FPlatformTime::Seconds() - WaitStartSeconds <= 10.0)
+		{
+			return false;
+		}
+
+		Test->AddError(ErrorMessage);
+		return true;
+	}
+
+	FAutomationTestBase* Test;
+	FConVerseImportTraceCapture SecondCapture;
+	FString FirstTracePath;
+	FString SecondTracePath;
+	double WaitStartSeconds;
+	int32 Phase = 0;
+	bool bSecondCaptureStarted = false;
+};
+
+bool FConVerseImportTraceCaptureTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	if (FTraceAuxiliary::GetConnectionType() != FTraceAuxiliary::EConnectionType::None)
+	{
+		FConVerseImportTraceCapture ExistingTraceGuard;
+		FString Error;
+		const FString ExistingDestination = FTraceAuxiliary::GetTraceDestinationString();
+		TestFalse(TEXT("A new import capture does not take over an existing trace"), ExistingTraceGuard.Start(Error));
+		TestEqual(TEXT("The existing trace destination is unchanged"), FTraceAuxiliary::GetTraceDestinationString(), ExistingDestination);
+		return true;
+	}
+
+	FFixtureFiles Fixture;
+	FString FixtureError;
+	if (!TestTrue(TEXT("A valid temporary Datasmith fixture is exported"), CreateFixture(Fixture, FixtureError)))
+	{
+		AddError(FixtureError);
+		return false;
+	}
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	TStringBuilder<256> OriginalActiveChannelBuilder;
+	FTraceAuxiliary::GetActiveChannelsString(OriginalActiveChannelBuilder);
+	const FString OriginalActiveChannels = OriginalActiveChannelBuilder.ToString();
+	FConVerseImportTraceCapture Capture;
+	FString TraceError;
+	if (!TestTrue(TEXT("File trace starts"), Capture.Start(TraceError)))
+	{
+		AddError(TraceError);
+		return false;
+	}
+	const FString TracePath = Capture.GetTraceFilePath();
+	ON_SCOPE_EXIT
+	{
+		Capture.Stop();
+	};
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	Options.bAutomated = true;
+	Options.Processing.NanitePolicy = EConVerseNanitePolicy::PreserveImported;
+	Options.TraceFilePath = TracePath;
+	const FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Result.ManifestAssetPath.ResolveObject());
+	auto* Scene = Cast<UDatasmithScene>(Result.ImportAssetPath.ResolveObject());
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+
+	TestTrue(TEXT("Fixture import verifies while tracing"), Result.Status == EConVerseOptimizedImportStatus::Verified);
+	TestTrue(TEXT("Import report records the generated trace path"), Result.Report.Contains(TracePath));
+	TestTrue(TEXT("File trace remains active through import"), FTraceAuxiliary::IsConnected());
+	TStringBuilder<256> ActiveDuringImportBuilder;
+	FTraceAuxiliary::GetActiveChannelsString(ActiveDuringImportBuilder);
+	const FString ActiveDuringImport = ActiveDuringImportBuilder.ToString();
+	for (const TCHAR* Channel : { TEXT("cpu"), TEXT("frame"), TEXT("bookmark"), TEXT("log") })
+	{
+		TestTrue(FString::Printf(TEXT("%s channel is enabled during import"), Channel),
+			ActiveDuringImport.Contains(Channel, ESearchCase::IgnoreCase));
+	}
+	TestTrue(TEXT("Owned file trace stops"), Capture.Stop());
+	TestTrue(TEXT("Trace file was written"), IFileManager::Get().FileExists(*TracePath));
+	TStringBuilder<256> RestoredActiveChannelBuilder;
+	FTraceAuxiliary::GetActiveChannelsString(RestoredActiveChannelBuilder);
+	TestEqual(TEXT("The editor's active channels are restored"), RestoredActiveChannelBuilder.ToString(), OriginalActiveChannels);
+
+	ADD_LATENT_AUTOMATION_COMMAND(FConVerseTraceCaptureRepeatLatentCommand(*this, TracePath));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVersePanelTraceOptionTest,
+	"DatasmithHISM.OptimizedImport.PanelTraceOptionIsTransient",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FConVersePanelTraceOptionTest::RunTest(const FString&)
+{
+	const auto Panel = SNew(SConVerseDatasmithImportPanel);
+	TestFalse(TEXT("Profile next import is off by default"), Panel->bProfileNextImport);
+	Panel->bProfileNextImport = true;
+	TestTrue(TEXT("Profiling choice is panel-local"), Panel->bProfileNextImport);
+	TestTrue(TEXT("Ordinary panel options do not carry a trace path"), Panel->MakeOptions().TraceFilePath.IsEmpty());
 	return true;
 }
 
@@ -3515,9 +3773,8 @@ bool FConVerseLightVerificationNamesFieldTest::RunTest(const FString&)
 			Corrupted.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("IES texture")); }));
 	}
 
-	// Accepted-missing-IES rule (Amendment 9): an IES source file explicitly accepted as missing
-	// downgrades to a visible warning instead of failing verification. Unaccepted, it still stops
-	// preflight (covered by ZeroByteDependenciesAreMissing).
+	// Unavailable-IES rule (Amendments 9 and 18): an IES profile file that is empty (here), absent or not
+	// importable is a visible warning on the light, never a blocker and never needing acceptance.
 	{
 		TArray<uint8> OriginalIESBytes;
 		if (!TestTrue(TEXT("Read original IES bytes"), FFileHelper::LoadFileToArray(OriginalIESBytes, *Fixture.IESFile))) return false;
@@ -3528,24 +3785,104 @@ bool FConVerseLightVerificationNamesFieldTest::RunTest(const FString&)
 		BaseOptions.FilePath = Fixture.SceneFile;
 		BaseOptions.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		BaseOptions.bAutomated = true;
-		const auto Refused = FConVerseDatasmithImportService::Analyze(BaseOptions);
-		TestTrue(TEXT("Unaccepted missing IES stops preflight"), Refused.Status == EConVerseOptimizedImportStatus::SourceLoadFailed);
-		TestTrue(TEXT("Missing IES entry is marked empty"),
-			Refused.MissingTextures.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("(empty file)")); }));
+		const auto Analyzed = FConVerseDatasmithImportService::Analyze(BaseOptions);
+		TestTrue(TEXT("An empty IES profile does not stop preflight"), Analyzed.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+		TestTrue(TEXT("It is listed as an unavailable profile, marked empty"),
+			Analyzed.UnavailableIesProfiles.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("(empty file)")); }));
+		TestTrue(TEXT("It is not offered for acceptance as a missing texture"), Analyzed.MissingTextures.IsEmpty());
+		TestTrue(TEXT("The report carries a warning"),
+			Analyzed.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("WARN IES profile unavailable")); }));
 
-		FConVerseOptimizedImportOptions Accepted = BaseOptions;
-		Accepted.AcceptedMissingTextures = Refused.MissingTextures;
-		const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Accepted);
+		// With no acceptance of any kind, the import proceeds and the light verifies with a warning.
+		const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(BaseOptions);
 		auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
 		auto* Scene = Cast<UDatasmithScene>(Imported.ImportAssetPath.ResolveObject());
 		ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
-		TestTrue(TEXT("Accepted missing IES still verifies"), Imported.Status == EConVerseOptimizedImportStatus::Verified);
+		TestTrue(TEXT("The import verifies without accepting anything"), Imported.Status == EConVerseOptimizedImportStatus::Verified);
 		const auto* LightRow = Imported.InspectionRows.FindByPredicate(
 			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
-		if (TestTrue(TEXT("Accepted IES light row exists"), LightRow != nullptr))
-			TestTrue(TEXT("Accepted missing IES becomes a visible warning"), LightRow->Outcome.Contains(TEXT("IES profile missing (accepted)")));
+		if (TestTrue(TEXT("The IES light row exists"), LightRow != nullptr))
+			TestTrue(TEXT("The missing profile is a visible warning"), LightRow->Outcome.Contains(TEXT("IES profile unavailable (warning)")));
 	}
 
+	return true;
+}
+
+// Amendments 9 and 18: an IES profile file that is absent, empty, or has no .ies extension cannot become
+// a light profile (Datasmith hands the texture factory the extension and only "ies" builds one). That is
+// a warning on the light, not a blocker: preflight passes with no acceptance of any kind, the light
+// imports without the profile, and verification shows a visible warning instead of failing. A real
+// Revit export's extensionless "Generic" profile left 67 lights without one and rolled the whole
+// import back before this rule.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseExtensionlessIesIsUnimportableTest,
+	"DatasmithHISM.OptimizedImport.ExtensionlessIesIsReportedUpFront",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseExtensionlessIesIsUnimportableTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("Create light/IES fixture"), CreateFixture(Fixture, Error, 0, FString(), false, true, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.bAutomated = true;
+	Options.TextureSearchFolders.Reset(); // Hermetic: a library file must not satisfy this fixture.
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+
+	// Control: the proper .ies file is not flagged, so the check below is not just flagging every IES.
+	const auto Control = FConVerseDatasmithImportService::Analyze(Options);
+	TestTrue(TEXT("A .ies profile passes preflight"), Control.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+	TestTrue(TEXT("A usable profile is not reported unavailable"), Control.UnavailableIesProfiles.IsEmpty());
+
+	// Make the profile extensionless the way the export did: same bytes, no extension, reference updated.
+	const FString Extensionless = FPaths::ChangeExtension(Fixture.IESFile, TEXT(""));
+	if (!TestTrue(TEXT("Copy the profile without its extension"), IFileManager::Get().Copy(*Extensionless, *Fixture.IESFile) == COPY_OK)) return false;
+	TestTrue(TEXT("Premise: the extensionless file is present and non-empty"), IFileManager::Get().FileSize(*Extensionless) > 0);
+	FString SceneText;
+	if (!TestTrue(TEXT("Read the scene file"), FFileHelper::LoadFileToString(SceneText, *Fixture.SceneFile))) return false;
+	if (!TestTrue(TEXT("Scene references the profile by file name"), SceneText.ReplaceInline(TEXT("FixtureProfile.ies"), TEXT("FixtureProfile"), ESearchCase::CaseSensitive) > 0)) return false;
+	if (!TestTrue(TEXT("Rewrite the scene file"), FFileHelper::SaveStringToFile(SceneText, *Fixture.SceneFile))) return false;
+	IFileManager::Get().Delete(*Fixture.IESFile);
+
+	const auto Analyzed = FConVerseDatasmithImportService::Analyze(Options);
+	TestTrue(TEXT("An unimportable IES does not stop preflight"), Analyzed.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+	TestTrue(TEXT("It is reported with the reason"),
+		Analyzed.UnavailableIesProfiles.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("without a .ies extension")); }));
+	TestTrue(TEXT("It is not offered for acceptance as a missing texture"), Analyzed.MissingTextures.IsEmpty());
+	TestTrue(TEXT("A warning is in the report"),
+		Analyzed.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("WARN IES profile unavailable")); }));
+
+	// With no acceptance of any kind, the real Datasmith importer creates no profile and the light still
+	// verifies, with the warning visible on it.
+	const auto ImportAndCheck = [&](const TCHAR* What, const TCHAR* ExpectedEngineError)
+	{
+		AddExpectedError(ExpectedEngineError, EAutomationExpectedErrorFlags::Contains, 1);
+		FConVerseOptimizedImportOptions Run = Options;
+		Run.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Run);
+		auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
+		auto* Scene = Cast<UDatasmithScene>(Imported.ImportAssetPath.ResolveObject());
+		ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+		TestTrue(*FString::Printf(TEXT("%s: the import verifies without accepting anything"), What), Imported.Status == EConVerseOptimizedImportStatus::Verified);
+		const auto* LightRow = Imported.InspectionRows.FindByPredicate(
+			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
+		if (TestTrue(*FString::Printf(TEXT("%s: the IES light row exists"), What), LightRow != nullptr))
+			TestTrue(*FString::Printf(TEXT("%s: the missing profile is a visible warning"), What), LightRow->Outcome.Contains(TEXT("IES profile unavailable (warning)")));
+		TestTrue(*FString::Printf(TEXT("%s: the warning is in the report"), What),
+			Imported.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("IES profile unavailable")); }));
+	};
+	ImportAndCheck(TEXT("Extensionless"), TEXT("Texture import failed"));
+
+	// The same for a profile file that is simply absent.
+	IFileManager::Get().Delete(*Extensionless);
+	const auto Absent = FConVerseDatasmithImportService::Analyze(Options);
+	TestTrue(TEXT("An absent IES does not stop preflight"), Absent.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+	TestTrue(TEXT("It is listed as an unavailable profile"), Absent.UnavailableIesProfiles.Num() == 1 && !Absent.UnavailableIesProfiles[0].Contains(TEXT("(")));
+	TestTrue(TEXT("It is not offered for acceptance as a missing texture"), Absent.MissingTextures.IsEmpty());
+	ImportAndCheck(TEXT("Absent"), TEXT("Unable to find ies file"));
 	return true;
 }
 
@@ -3622,6 +3959,530 @@ bool FConVerseFailedVerificationSummaryNamesChecksTest::RunTest(const FString&)
 	TestTrue(TEXT("Accepted despite failed verification"), Accepted.Status == EConVerseOptimizedImportStatus::AcceptedWithFailedVerification);
 	TestTrue(TEXT("Accepted summary also names the failing lights category"), Accepted.Summary.Contains(TEXT("lights")));
 
+	return true;
+}
+
+// Amendment 15: UE 5.8.3's Nanite root-page pool is fixed and exhausting it is fatal, so the policy
+// may enable at most MaxNaniteMeshes meshes. The most-used meshes must keep Nanite, the budget must
+// enter plan identity only when it binds (so existing imports are not silently invalidated), and
+// 0 must mean unlimited.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseNaniteBudgetTest,
+	"DatasmithHISM.OptimizedImport.NaniteMeshBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseNaniteBudgetTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	// SharedFixtureMesh is placed 3 times (2 grouped instances + 1 ordinary mirrored actor);
+	// OrdinaryFixtureMesh is placed once. Both are eligible under AllSupportedMeshes.
+	if (!TestTrue(TEXT("Create source"), CreateFixture(Fixture, Error, 0, FString(), false, false, false, false, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+	const FString RunId = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+
+	const auto MakeOptions = [&](int32 Budget, const TCHAR* Name)
+	{
+		FConVerseOptimizedImportOptions Options;
+		Options.FilePath = Fixture.SceneFile;
+		Options.bAutomated = true;
+		Options.InstanceType = EConVerseOptimizedInstanceType::HISM;
+		Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+		Options.Processing.NanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
+		Options.Processing.MaxNaniteMeshes = Budget;
+		Options.DestinationPath = FString::Printf(TEXT("/Game/__ConVerseAutomation/%s/%s"), *RunId, Name);
+		return Options;
+	};
+
+	// Plan identity. Same destination for every Analyze so only the budget can differ.
+	const auto Plan = [&](int32 Budget) { return FConVerseDatasmithImportService::Analyze(MakeOptions(Budget, TEXT("Identity"))); };
+	const auto Unlimited = Plan(0);
+	TestEqual(TEXT("Premise: both meshes would use Nanite"), Unlimited.ProjectedNaniteMeshes, 2);
+	TestEqual(TEXT("A budget the policy stays under keeps the existing PlanId"), Plan(16384).PlanId, Unlimited.PlanId);
+	TestEqual(TEXT("A budget exactly met does not bind and keeps the PlanId"), Plan(2).PlanId, Unlimited.PlanId);
+	const auto Binding = Plan(1);
+	TestNotEqual(TEXT("A budget that binds changes generated output, so it changes the PlanId"), Binding.PlanId, Unlimited.PlanId);
+	TestNotEqual(TEXT("Different binding budgets are different plans"), Plan(1).PlanId, Plan(0).PlanId);
+	TestTrue(TEXT("Analyze reports the budget"),
+		Binding.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("Nanite budget")); }));
+	TestFalse(TEXT("No budget message when it does not bind"),
+		Unlimited.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("Nanite budget")); }));
+
+	// The settings JSON used for identity must not carry the field at all, or every existing PlanId changes.
+	FConVerseImportProcessingSettings A, B;
+	A.MaxNaniteMeshes = 16384;
+	B.MaxNaniteMeshes = 5;
+	TestTrue(TEXT("Persisted settings JSON stores the budget"), ConVerseImportProcessing::SettingsJson(A).Contains(TEXT("maxNaniteMeshes")));
+	TestFalse(TEXT("Identity settings JSON omits the budget"), ConVerseImportProcessing::IdentitySettingsJson(A).Contains(TEXT("maxNaniteMeshes")));
+	TestEqual(TEXT("Identity settings JSON is independent of the budget"),
+		ConVerseImportProcessing::IdentitySettingsJson(A), ConVerseImportProcessing::IdentitySettingsJson(B));
+
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	const auto ImportOnce = [&](int32 Budget, const TCHAR* Name, int32 ExpectedEnabled, int32 ExpectedSkipped, bool bExpectSharedKept)
+	{
+		const auto Result = FConVerseDatasmithImportService::ImportAndVerify(MakeOptions(Budget, Name));
+		auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Result.ManifestAssetPath.ResolveObject());
+		auto* Scene = Cast<UDatasmithScene>(Result.ImportAssetPath.ResolveObject());
+		ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+		if (!TestTrue(*FString::Printf(TEXT("%s import verifies"), Name), Result.Status == EConVerseOptimizedImportStatus::Verified)) return;
+		TestEqual(*FString::Printf(TEXT("%s meshes with Nanite"), Name), Result.NaniteEnabledMeshes, ExpectedEnabled);
+		TestEqual(*FString::Printf(TEXT("%s meshes left out by the budget"), Name), Result.NaniteBudgetSkippedMeshes, ExpectedSkipped);
+		if (!TestNotNull(TEXT("Manifest"), Manifest) || !TestEqual(TEXT("One group"), Manifest->Groups.Num(), 1)) return;
+		UStaticMesh* Shared = Cast<UStaticMesh>(Manifest->Groups[0].ImportedStaticMeshPath.ResolveObject());
+		const FConVerseImportInspectionRow* OrdinaryRow = Manifest->ImportedElements.FindByPredicate(
+			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("Instance_Ordinary"); });
+		auto* OrdinaryComponent = OrdinaryRow ? Cast<UStaticMeshComponent>(OrdinaryRow->ComponentPath.ResolveObject()) : nullptr;
+		UStaticMesh* Ordinary = OrdinaryComponent ? OrdinaryComponent->GetStaticMesh() : nullptr;
+		if (!TestNotNull(TEXT("Shared mesh"), Shared) || !TestNotNull(TEXT("Ordinary mesh"), Ordinary)) return;
+		TestEqual(*FString::Printf(TEXT("%s most-used mesh Nanite"), Name), Shared->GetNaniteSettings().bEnabled, bExpectSharedKept);
+		TestEqual(*FString::Printf(TEXT("%s least-used mesh Nanite"), Name), Ordinary->GetNaniteSettings().bEnabled, ExpectedSkipped == 0);
+		if (ExpectedSkipped > 0)
+		{
+			TestTrue(TEXT("Import reports the budget"),
+				Result.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("Nanite budget")); }));
+			const auto Repeat = FConVerseDatasmithImportService::ImportAndVerify(MakeOptions(Budget, Name));
+			TestTrue(TEXT("A repeated budgeted import is AlreadyCurrent"), Repeat.Status == EConVerseOptimizedImportStatus::AlreadyCurrent);
+		}
+	};
+	ImportOnce(1, TEXT("Budget1"), 1, 1, true);
+	ImportOnce(0, TEXT("Unlimited"), 2, 0, true);
+	return true;
+}
+
+// Nanite analysis: a read-only ranking of a committed import's meshes by placed-triangle load, with a
+// recommended set that covers a chosen share of it, which the Apply step can then use as its selection.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseNaniteAnalysisTest,
+	"DatasmithHISM.OptimizedImport.NaniteAnalysis",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseNaniteAnalysisTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	// SharedFixtureMesh: 2 triangles placed 3 times (6 placed). OrdinaryFixtureMesh: 2 triangles placed once (2 placed).
+	if (!TestTrue(TEXT("Create source"), CreateFixture(Fixture, Error, 0, FString(), false, false, false, false, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.bAutomated = true;
+	Options.InstanceType = EConVerseOptimizedInstanceType::HISM;
+	Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
+	auto* Scene = Cast<UDatasmithScene>(Imported.ImportAssetPath.ResolveObject());
+	ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+	if (!TestTrue(TEXT("Import verifies"), Imported.Status == EConVerseOptimizedImportStatus::Verified) || !TestNotNull(TEXT("Manifest"), Manifest)) return false;
+
+	const auto Analyze = [&](double Coverage, int32 MinTriangles, const TArray<FString>& Disabled = TArray<FString>())
+	{
+		FConVerseNaniteAnalysisOptions Analysis;
+		Analysis.ManifestPath = Imported.ManifestAssetPath;
+		Analysis.CoverageTarget = Coverage;
+		Analysis.MinTriangles = MinTriangles;
+		Analysis.DisableNaniteMeshElements = Disabled;
+		return FConVerseDatasmithImportService::AnalyzeNanite(Analysis);
+	};
+
+	const auto Full = Analyze(1.0, 0);
+	if (!TestTrue(TEXT("Analysis succeeds"), Full.bSucceeded) || !TestEqual(TEXT("Both meshes are listed"), Full.Rows.Num(), 2)) return false;
+	TestEqual(TEXT("Most-loaded mesh is first"), Full.Rows[0].Placements, 3);
+	TestEqual(TEXT("Its triangles are counted"), Full.Rows[0].Triangles, 2);
+	TestEqual(TEXT("Placed triangles are triangles x placements"), Full.Rows[0].PlacedTriangles, int64(6));
+	TestEqual(TEXT("The single-use mesh is second"), Full.Rows[1].Placements, 1);
+	TestEqual(TEXT("Total placed triangles"), Full.TotalPlacedTriangles, int64(8));
+	TestEqual(TEXT("Cumulative share after the first row"), Full.Rows[0].CumulativeShare, 0.75);
+	TestEqual(TEXT("Cumulative share after the second row"), Full.Rows[1].CumulativeShare, 1.0);
+	TestEqual(TEXT("Full coverage recommends both"), Full.RecommendedElements.Num(), 2);
+	const FString SharedElement = Full.Rows[0].MeshElement;
+	const FString OrdinaryElement = Full.Rows[1].MeshElement;
+	TestNotEqual(TEXT("Rows are keyed by distinct element names"), SharedElement, OrdinaryElement);
+	TestFalse(TEXT("Analysis reads state only; nothing has Nanite"), Full.Rows[0].bNaniteEnabled || Full.Rows[1].bNaniteEnabled);
+
+	const auto Half = Analyze(0.5, 0);
+	TestEqual(TEXT("A 50% target is met by the heaviest mesh alone"), Half.RecommendedElements.Num(), 1);
+	TestTrue(TEXT("That mesh is the shared one"), Half.RecommendedElements.Contains(SharedElement));
+
+	const auto TooSmall = Analyze(1.0, 3);
+	TestEqual(TEXT("Meshes under the triangle floor are not candidates"), TooSmall.CandidateMeshes, 0);
+	TestEqual(TEXT("Nothing is recommended below the floor"), TooSmall.RecommendedElements.Num(), 0);
+
+	const auto Excepted = Analyze(1.0, 0, { SharedElement });
+	const FConVerseNaniteAnalysisRow* ExceptedRow = Excepted.Rows.FindByPredicate([&](const auto& Row) { return Row.MeshElement == SharedElement; });
+	if (TestNotNull(TEXT("Excepted mesh is still listed"), ExceptedRow))
+	{
+		TestFalse(TEXT("A Nanite exception makes it ineligible"), ExceptedRow->bEligible);
+		TestTrue(TEXT("The row says why"), ExceptedRow->Note.Contains(TEXT("exception")));
+	}
+	TestFalse(TEXT("An excepted mesh is not recommended"), Excepted.RecommendedElements.Contains(SharedElement));
+	TestTrue(TEXT("The other mesh still is"), Excepted.RecommendedElements.Contains(OrdinaryElement));
+
+	// Read-only: no mesh changed and the import still verifies.
+	const auto Again = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	TestTrue(TEXT("Analysis leaves the import verifying"), Again.Status == EConVerseOptimizedImportStatus::AlreadyCurrent && Again.bVerificationSucceeded);
+	TestEqual(TEXT("Nothing was applied"), Manifest->NaniteApplyEnabledMeshes, -1);
+
+	// The recommendation drives the Apply step: listed meshes on, everything else off, and it converges.
+	const auto ApplyOnly = [&](const TArray<FString>& Only)
+	{
+		FConVerseNaniteApplyOptions Apply;
+		Apply.ManifestPath = Imported.ManifestAssetPath;
+		Apply.bAutomated = true;
+		Apply.OnlyMeshElements = Only;
+		return FConVerseDatasmithImportService::ApplyNanite(Apply);
+	};
+	const auto First = ApplyOnly({ SharedElement });
+	TestTrue(TEXT("Applying a selection succeeds"), First.bSucceeded);
+	TestEqual(TEXT("Only the selected mesh has Nanite"), First.NaniteEnabledMeshes, 1);
+	const auto AfterFirst = Analyze(1.0, 0);
+	TestTrue(TEXT("The selected mesh has Nanite"), AfterFirst.Rows[0].MeshElement == SharedElement && AfterFirst.Rows[0].bNaniteEnabled);
+	TestFalse(TEXT("The unselected mesh does not"), AfterFirst.Rows[1].bNaniteEnabled);
+	const auto Swap = ApplyOnly({ OrdinaryElement });
+	TestTrue(TEXT("Applying a different selection succeeds"), Swap.bSucceeded);
+	const auto AfterSwap = Analyze(1.0, 0);
+	TestFalse(TEXT("A mesh outside the new selection is turned off"), AfterSwap.Rows[0].bNaniteEnabled);
+	TestTrue(TEXT("The newly selected mesh is on"), AfterSwap.Rows[1].bNaniteEnabled);
+	TestTrue(TEXT("The selection is recorded"), Manifest->NaniteApplySettingsJson.Contains(OrdinaryElement));
+	TestTrue(TEXT("The import verifies after selection applies"),
+		FConVerseDatasmithImportService::ImportAndVerify(Options).bVerificationSucceeded);
+
+	FConVerseNaniteAnalysisOptions Missing;
+	TestFalse(TEXT("A missing manifest is reported, not guessed at"), FConVerseDatasmithImportService::AnalyzeNanite(Missing).bSucceeded);
+	return true;
+}
+
+// The panel's Apply Nanite control (Amendment 16). Drives the real click handler: it must apply to the
+// last import, honor the inspection list's Disable-Nanite exceptions, show a refusal instead of
+// failing silently, and leave the import's own status alone.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVersePanelApplyNaniteTest,
+	"DatasmithHISM.OptimizedImport.PanelApplyNanite",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVersePanelApplyNaniteTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	if (!TestTrue(TEXT("Disposable map tests require -unattended"), FApp::IsUnattended())) return false;
+	const FString Root = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	UWorld* World = UEditorLoadingAndSavingUtils::NewBlankMap(false);
+	if (!TestTrue(TEXT("Create named disposable map"), World && UEditorLoadingAndSavingUtils::SaveMap(World, Root / TEXT("Owner")))) return false;
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir() / TEXT("DatasmithHISM/Tests/Fixtures/Joist16K6/Joist16K6.udatasmith"));
+	Options.DestinationPath = Root / TEXT("Import");
+	Options.bAutomated = true;
+	const auto Result = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Result.ManifestAssetPath.ResolveObject());
+	auto* Scene = Cast<UDatasmithScene>(Result.ImportAssetPath.ResolveObject());
+	if (!TestTrue(TEXT("Fixture import verifies"), Result.Status == EConVerseOptimizedImportStatus::Verified)) return false;
+	ON_SCOPE_EXIT { CleanupCommittedImport(*GEditor->GetEditorWorldContext().World(), Manifest, Scene); };
+	UStaticMesh* Mesh = nullptr;
+	for (const auto& Pair : Scene->StaticMeshes) if (!Mesh) Mesh = Pair.Value.LoadSynchronous();
+	if (!TestNotNull(TEXT("Imported mesh"), Mesh)) return false;
+	TestFalse(TEXT("The default import left Nanite off"), Mesh->GetNaniteSettings().bEnabled);
+
+	const auto Panel = SNew(SConVerseDatasmithImportPanel);
+	Panel->SetResult(Result, true);
+	const auto StatusBefore = Panel->PanelStatus;
+	TestEqual(TEXT("The scope control defaults to all supported meshes"), Panel->GetNaniteScopeText().ToString(), FString(TEXT("All supported meshes")));
+	Panel->ApplyNanitePolicy = EConVerseNanitePolicy::ConvertedISMOnly;
+	TestEqual(TEXT("The scope label follows the choice"), Panel->GetNaniteScopeText().ToString(), FString(TEXT("Converted ISM/HISM groups only")));
+	Panel->ApplyNanitePolicy = EConVerseNanitePolicy::AllSupportedMeshes;
+
+	// A name in the inspection list's Disable-Nanite exceptions must keep that mesh out.
+	if (!TestTrue(TEXT("The result lists a source mesh element"), Panel->InspectionRows.Num() > 0 && !Panel->InspectionRows[0].MeshElement.IsEmpty())) return false;
+	const FString MeshElement = Panel->InspectionRows[0].MeshElement;
+	Panel->ProcessingRecipe->Processing.DisableNaniteMeshElements.Add(MeshElement);
+	Panel->HandleApplyNanite();
+	TestFalse(TEXT("A disabled mesh element does not receive Nanite"), Mesh->GetNaniteSettings().bEnabled);
+	TestTrue(TEXT("The outcome is shown in the report"), Panel->GetReportText().ToString().Contains(TEXT("Nanite applied")));
+	TestEqual(TEXT("Applying does not change the import's status"), Panel->PanelStatus, StatusBefore);
+	TestFalse(TEXT("The panel is not left busy"), Panel->bOperationInProgress);
+
+	Panel->ProcessingRecipe->Processing.DisableNaniteMeshElements.Reset();
+	Panel->HandleApplyNanite();
+	TestTrue(TEXT("The click applied Nanite to the last import"), Mesh->GetNaniteSettings().bEnabled && Mesh->HasValidNaniteData());
+	TestTrue(TEXT("The status line reports it"), Panel->StatusDetail.ToString().Contains(TEXT("Nanite applied")));
+	TestEqual(TEXT("The manifest recorded it"), Manifest->NaniteApplyEnabledMeshes, 1);
+
+	// A manual edit is refused, and the panel says so instead of staying silent.
+	Mesh->GetNaniteSettings().bEnabled = false;
+	Panel->HandleApplyNanite();
+	TestTrue(TEXT("A refusal reaches the report"), Panel->GetReportText().ToString().Contains(TEXT("tracked objects changed")));
+	TestEqual(TEXT("A refusal keeps the import's status"), Panel->PanelStatus, StatusBefore);
+	Mesh->GetNaniteSettings().bEnabled = true;
+
+	// The recommended-meshes scope. With no recommendation it refuses: an empty selection would mean every mesh.
+	Panel->bApplyRecommendedOnly = true;
+	TestEqual(TEXT("The scope label names the recommendation"), Panel->GetNaniteScopeText().ToString(), FString(TEXT("Recommended meshes")));
+	Panel->NaniteRecommended.Reset();
+	Panel->HandleApplyNanite();
+	TestTrue(TEXT("Applying with no recommendation is refused with a reason"), Panel->GetReportText().ToString().Contains(TEXT("no recommendation")));
+	TestTrue(TEXT("Nothing changed on that refusal"), Mesh->GetNaniteSettings().bEnabled && Manifest->NaniteApplyEnabledMeshes == 1);
+	Panel->NaniteMinTriangles = 0;
+	Panel->HandleAnalyzeNanite();
+	TestTrue(TEXT("Analyze Nanite reports in the panel"), Panel->GetReportText().ToString().Contains(TEXT("Nanite analysis")));
+	TestTrue(TEXT("The recommendation is kept for the scope"), Panel->NaniteRecommended.Contains(MeshElement));
+	// Turn the mesh off through the supported step (it moves the baseline), then apply the recommendation.
+	FConVerseNaniteApplyOptions TurnOff;
+	TurnOff.ManifestPath = Result.ManifestAssetPath;
+	TurnOff.bAutomated = true;
+	TurnOff.DisableNaniteMeshElements = { MeshElement };
+	TestTrue(TEXT("Turning the mesh off succeeds"), FConVerseDatasmithImportService::ApplyNanite(TurnOff).bSucceeded);
+	TestFalse(TEXT("The mesh is off before the recommendation applies"), Mesh->GetNaniteSettings().bEnabled);
+	Panel->HandleApplyNanite();
+	TestTrue(TEXT("Applying the recommendation reports success"), Panel->StatusDetail.ToString().Contains(TEXT("Nanite applied")));
+	TestTrue(TEXT("The recommended mesh has Nanite"), Mesh->GetNaniteSettings().bEnabled);
+	Panel->SetResult(Result, true);
+	TestTrue(TEXT("A new result clears the recommendation"), Panel->NaniteRecommended.IsEmpty());
+	Panel->bApplyRecommendedOnly = false;
+
+	// With nothing imported, the control does nothing.
+	const auto Empty = SNew(SConVerseDatasmithImportPanel);
+	Empty->HandleApplyNanite();
+	TestFalse(TEXT("Without an import the click does nothing"), Empty->bOperationInProgress);
+	return true;
+}
+
+// Amendment 16: Nanite is applied to a committed import by a separate step. The import itself must
+// not build any mesh twice, the step must fail closed (drift, wrong policy, cancel) and put back
+// every mesh it touched, and a successful step must leave the tracked baseline consistent so the
+// import still re-verifies instead of reporting its own change as a manual edit.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseApplyNaniteTest,
+	"DatasmithHISM.OptimizedImport.ApplyNaniteStep",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseApplyNaniteTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	// SharedFixtureMesh is placed 3 times, OrdinaryFixtureMesh once.
+	if (!TestTrue(TEXT("Create source"), CreateFixture(Fixture, Error, 0, FString(), false, false, false, false, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.bAutomated = true;
+	Options.InstanceType = EConVerseOptimizedInstanceType::HISM;
+	Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+	Options.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+	TestEqual(TEXT("Imports no longer apply Nanite by default"),
+		Options.Processing.NanitePolicy, EConVerseNanitePolicy::PreserveImported);
+
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
+	auto* Scene = Cast<UDatasmithScene>(Imported.ImportAssetPath.ResolveObject());
+	ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+	if (!TestTrue(TEXT("Default import verifies"), Imported.Status == EConVerseOptimizedImportStatus::Verified)
+		|| !TestNotNull(TEXT("Manifest"), Manifest) || !TestEqual(TEXT("One group"), Manifest->Groups.Num(), 1)) return false;
+	TestEqual(TEXT("Import enables no Nanite"), Imported.NaniteEnabledMeshes, 0);
+	TestEqual(TEXT("Import rebuilds no mesh for Nanite"), Imported.NaniteRebuiltMeshes, 0);
+	TestEqual(TEXT("Nothing applied yet"), Manifest->NaniteApplyEnabledMeshes, -1);
+
+	UStaticMesh* Shared = Cast<UStaticMesh>(Manifest->Groups[0].ImportedStaticMeshPath.ResolveObject());
+	const FConVerseImportInspectionRow* OrdinaryRow = Manifest->ImportedElements.FindByPredicate(
+		[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("Instance_Ordinary"); });
+	auto* OrdinaryComponent = OrdinaryRow ? Cast<UStaticMeshComponent>(OrdinaryRow->ComponentPath.ResolveObject()) : nullptr;
+	UStaticMesh* Ordinary = OrdinaryComponent ? OrdinaryComponent->GetStaticMesh() : nullptr;
+	if (!TestNotNull(TEXT("Shared mesh"), Shared) || !TestNotNull(TEXT("Ordinary mesh"), Ordinary)) return false;
+	TestFalse(TEXT("Shared mesh starts without Nanite"), Shared->GetNaniteSettings().bEnabled);
+	TestFalse(TEXT("Ordinary mesh starts without Nanite"), Ordinary->GetNaniteSettings().bEnabled);
+
+	const auto Apply = [&](EConVerseNanitePolicy Policy, int32 Budget)
+	{
+		FConVerseNaniteApplyOptions Apply;
+		Apply.ManifestPath = Imported.ManifestAssetPath;
+		Apply.bAutomated = true;
+		Apply.Policy = Policy;
+		Apply.MaxNaniteMeshes = Budget;
+		return FConVerseDatasmithImportService::ApplyNanite(Apply);
+	};
+	const auto StillVerifies = [&]()
+	{
+		const auto Again = FConVerseDatasmithImportService::ImportAndVerify(Options);
+		return Again.Status == EConVerseOptimizedImportStatus::AlreadyCurrent && Again.bVerificationSucceeded;
+	};
+
+	// A cancel after the first mesh changed must put that mesh back and leave the import untouched.
+	{
+		int32 Calls = 0;
+		FConVerseNaniteApplyOptions Cancelling;
+		Cancelling.ManifestPath = Imported.ManifestAssetPath;
+		Cancelling.bAutomated = true;
+		Cancelling.CancelRequested = [&Calls] { return ++Calls > 1; };
+		const auto Result = FConVerseDatasmithImportService::ApplyNanite(Cancelling);
+		TestFalse(TEXT("A cancelled apply does not succeed"), Result.bSucceeded);
+		TestTrue(TEXT("It reports cancellation"), Result.bCancelled);
+		TestFalse(TEXT("Shared mesh restored after cancel"), Shared->GetNaniteSettings().bEnabled);
+		TestFalse(TEXT("Ordinary mesh restored after cancel"), Ordinary->GetNaniteSettings().bEnabled);
+		TestEqual(TEXT("A cancelled apply records nothing"), Manifest->NaniteApplyEnabledMeshes, -1);
+		TestTrue(TEXT("The import still verifies after the restore"), StillVerifies());
+	}
+	{
+		const auto Result = Apply(EConVerseNanitePolicy::PreserveImported, 0);
+		TestFalse(TEXT("The preserve policy has nothing to apply and is refused"), Result.bSucceeded);
+		TestFalse(TEXT("A refusal changes no mesh"), Shared->GetNaniteSettings().bEnabled || Ordinary->GetNaniteSettings().bEnabled);
+	}
+	{
+		// A manual change to an owned mesh is drift: the step must refuse rather than bless it.
+		Shared->GetNaniteSettings().bEnabled = true;
+		const auto Result = Apply(EConVerseNanitePolicy::AllSupportedMeshes, 0);
+		TestFalse(TEXT("Tracked drift refuses the apply"), Result.bSucceeded);
+		TestTrue(TEXT("The refusal says why"), Result.Summary.Contains(TEXT("tracked objects changed")));
+		TestFalse(TEXT("The ordinary mesh was not touched by a refused apply"), Ordinary->GetNaniteSettings().bEnabled);
+		Shared->GetNaniteSettings().bEnabled = false;
+		TestTrue(TEXT("Undoing the manual change restores a clean baseline"), StillVerifies());
+	}
+
+	// Apply to everything: each changed mesh rebuilds exactly once, and the baseline moves with it.
+	const auto All = Apply(EConVerseNanitePolicy::AllSupportedMeshes, 0);
+	TestTrue(TEXT("Apply All succeeds"), All.bSucceeded);
+	TestTrue(TEXT("The step reports how long it took"), All.DurationSeconds > 0.0);
+	TestEqual(TEXT("Both meshes enabled"), All.NaniteEnabledMeshes, 2);
+	TestEqual(TEXT("Each mesh rebuilt once"), All.NaniteRebuiltMeshes, 2);
+	TestTrue(TEXT("Shared mesh has Nanite data"), Shared->GetNaniteSettings().bEnabled && Shared->HasValidNaniteData());
+	TestTrue(TEXT("Ordinary mesh has Nanite data"), Ordinary->GetNaniteSettings().bEnabled && Ordinary->HasValidNaniteData());
+	TestEqual(TEXT("The manifest records what was applied"), Manifest->NaniteApplyEnabledMeshes, 2);
+	TestTrue(TEXT("The applied settings are recorded"), Manifest->NaniteApplySettingsJson.Contains(TEXT("nanitePolicy")));
+	TestTrue(TEXT("Applying Nanite does not read as a manual edit"), StillVerifies());
+
+	const auto Again = Apply(EConVerseNanitePolicy::AllSupportedMeshes, 0);
+	TestTrue(TEXT("Re-applying succeeds"), Again.bSucceeded);
+	TestEqual(TEXT("Re-applying rebuilds nothing"), Again.NaniteRebuiltMeshes, 0);
+
+	// A tighter budget takes Nanite off the least-used mesh and keeps the most-used one.
+	const auto Budgeted = Apply(EConVerseNanitePolicy::AllSupportedMeshes, 1);
+	TestTrue(TEXT("Budgeted apply succeeds"), Budgeted.bSucceeded);
+	TestEqual(TEXT("One mesh left with Nanite"), Budgeted.NaniteEnabledMeshes, 1);
+	TestEqual(TEXT("One mesh left out by the budget"), Budgeted.NaniteBudgetSkippedMeshes, 1);
+	TestTrue(TEXT("Most-used mesh kept Nanite"), Shared->GetNaniteSettings().bEnabled);
+	TestFalse(TEXT("Least-used mesh lost Nanite"), Ordinary->GetNaniteSettings().bEnabled);
+	TestTrue(TEXT("The budgeted result still verifies"), StillVerifies());
+
+	// An unusable manifest reference is refused, not guessed at.
+	FConVerseNaniteApplyOptions Missing;
+	Missing.bAutomated = true;
+	TestFalse(TEXT("A missing manifest is refused"), FConVerseDatasmithImportService::ApplyNanite(Missing).bSucceeded);
+	return true;
+}
+
+// Benchmark metrics and budgets are driven through the real commandlet entry point, because the
+// budget check is only meaningful if the exit code a CI run sees is what fails. A budget that
+// cannot be evaluated (typo, missing file, metric this run never recorded) must fail closed.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseBenchmarkBudgetTest,
+	"DatasmithHISM.OptimizedImport.BenchmarkMetricsAndBudgets",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseBenchmarkBudgetTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is available"), World)) return false;
+
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("Create fixture"), CreateFixture(Fixture, Error))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	const auto WriteBudget = [&Fixture](const TCHAR* Name, const TCHAR* Json)
+	{
+		const FString Path = Fixture.RootDirectory / Name;
+		FFileHelper::SaveStringToFile(FString(Json), *Path);
+		return Path;
+	};
+	const auto ReadMetrics = [](const FString& Path) -> TSharedPtr<FJsonObject>
+	{
+		FString Text;
+		TSharedPtr<FJsonObject> Object;
+		if (FFileHelper::LoadFileToString(Text, *Path)) FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Object);
+		return Object;
+	};
+	TStrongObjectPtr<UConVerseOptimizedImportCommandlet> Commandlet(NewObject<UConVerseOptimizedImportCommandlet>());
+
+	// Real import with a satisfiable budget: exit 0, and the metrics describe the actual world.
+	{
+		TSet<UDatasmithScene*> ScenesBefore;
+		for (TObjectIterator<UDatasmithScene> It; It; ++It) ScenesBefore.Add(*It);
+		const FString Metrics = Fixture.RootDirectory / TEXT("ImportMetrics.json");
+		const FString Budget = WriteBudget(TEXT("LooseBudget.json"),
+			TEXT("{ \"MaxDurationSeconds\": 3600, \"MaxSourceMeshActors\": 1000, \"MaxActorCount\": 100000, \"MaxPeakPhysicalMB\": 1000000 }"));
+		const int32 ExitCode = Commandlet->Main(FString::Printf(
+			TEXT("-Source=\"%s\" -Destination=/Game/__ConVerseAutomation/%s -Nanite=Preserve -MetricsFile=\"%s\" -Budget=\"%s\""),
+			*Fixture.SceneFile, *FGuid::NewGuid().ToString(EGuidFormats::Digits), *Metrics, *Budget));
+
+		UDatasmithScene* Scene = nullptr;
+		for (TObjectIterator<UDatasmithScene> It; It; ++It) if (!ScenesBefore.Contains(*It)) { Scene = *It; break; }
+		UConVerseOptimizedImportManifest* Manifest = IsValid(Scene)
+			? Cast<UConVerseOptimizedImportManifest>(Scene->GetAssetUserDataOfClass(UConVerseOptimizedImportManifest::StaticClass())) : nullptr;
+		const int32 ActorsAfterImport = CountWorldActors(*World);
+		ON_SCOPE_EXIT { CleanupCommittedImport(*World, Manifest, Scene); };
+
+		TestEqual(TEXT("A satisfiable budget exits 0"), ExitCode, 0);
+		const TSharedPtr<FJsonObject> Json = ReadMetrics(Metrics);
+		if (TestTrue(TEXT("Metrics file is valid JSON"), Json.IsValid()))
+		{
+			double Number = 0.0;
+			FString Text;
+			TestTrue(TEXT("Metrics record the verified status"), Json->TryGetStringField(TEXT("Status"), Text) && Text == TEXT("Verified"));
+			TestTrue(TEXT("Metrics record the operation"), Json->TryGetStringField(TEXT("Operation"), Text) && Text == TEXT("Import"));
+			TestTrue(TEXT("Duration is positive"), Json->TryGetNumberField(TEXT("DurationSeconds"), Number) && Number > 0.0);
+			TestTrue(TEXT("Peak memory is recorded"), Json->TryGetNumberField(TEXT("PeakPhysicalMB"), Number) && Number > 0.0);
+			TestTrue(TEXT("Planned instances match the fixture"),
+				Json->TryGetNumberField(TEXT("PlannedInstances"), Number) && int32(Number) == ExpectedOptimizedInstances);
+			TestTrue(TEXT("Actor count describes the real resulting world"),
+				Json->TryGetNumberField(TEXT("ActorCount"), Number) && int32(Number) == ActorsAfterImport);
+			TestTrue(TEXT("Instance count covers the optimized instances"),
+				Json->TryGetNumberField(TEXT("InstanceCount"), Number) && int32(Number) >= ExpectedOptimizedInstances);
+			const TSharedPtr<FJsonObject>* Stages = nullptr;
+			TestTrue(TEXT("Per-stage seconds are recorded"), Json->TryGetObjectField(TEXT("StageSeconds"), Stages) && Stages && (*Stages)->Values.Num() > 0);
+		}
+	}
+
+	// Analysis never mutates the world, so the failing budgets use it. Each case must exit 1.
+	const auto RunAnalysis = [&](const FString& MetricsPath, const FString* BudgetPath) -> int32
+	{
+		return Commandlet->Main(FString::Printf(TEXT("-Source=\"%s\" -Destination=/Game/__ConVerseAutomation/%s -AnalyzeOnly -MetricsFile=\"%s\"%s"),
+			*Fixture.SceneFile, *FGuid::NewGuid().ToString(EGuidFormats::Digits), *MetricsPath,
+			BudgetPath ? *FString::Printf(TEXT(" -Budget=\"%s\""), **BudgetPath) : TEXT("")));
+	};
+
+	{
+		const FString Metrics = Fixture.RootDirectory / TEXT("TightMetrics.json");
+		const FString Budget = WriteBudget(TEXT("TightBudget.json"), TEXT("{ \"MaxSourceMeshActors\": 0 }"));
+		AddExpectedError(TEXT("Budget exceeded: SourceMeshActors"), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedError(TEXT("exceeded its benchmark budget"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestEqual(TEXT("An exceeded budget exits 1 even though the analysis itself succeeded"), RunAnalysis(Metrics, &Budget), 1);
+		TestTrue(TEXT("Metrics are still written when the budget fails"), ReadMetrics(Metrics).IsValid());
+	}
+	{
+		const FString Budget = WriteBudget(TEXT("TypoBudget.json"), TEXT("{ \"MaxDurationSecondz\": 3600 }"));
+		AddExpectedError(TEXT("Budget key 'MaxDurationSecondz'"), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedError(TEXT("exceeded its benchmark budget"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestEqual(TEXT("A typo'd budget key fails closed"), RunAnalysis(Fixture.RootDirectory / TEXT("TypoMetrics.json"), &Budget), 1);
+	}
+	{
+		const FString Budget = WriteBudget(TEXT("UnrecordedBudget.json"), TEXT("{ \"MaxActorCount\": 100000 }"));
+		AddExpectedError(TEXT("Budget key 'MaxActorCount'"), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedError(TEXT("exceeded its benchmark budget"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestEqual(TEXT("A budget for a metric this run never recorded fails closed"), RunAnalysis(Fixture.RootDirectory / TEXT("UnrecordedMetrics.json"), &Budget), 1);
+	}
+	{
+		const FString Budget = WriteBudget(TEXT("NonNumericBudget.json"), TEXT("{ \"MaxDurationSeconds\": \"fast\" }"));
+		AddExpectedError(TEXT("Budget key 'MaxDurationSeconds'"), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedError(TEXT("exceeded its benchmark budget"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestEqual(TEXT("A non-numeric limit fails closed"), RunAnalysis(Fixture.RootDirectory / TEXT("NonNumericMetrics.json"), &Budget), 1);
+	}
+	{
+		const FString Missing = Fixture.RootDirectory / TEXT("DoesNotExist.json");
+		AddExpectedError(TEXT("could not be read as JSON"), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedError(TEXT("exceeded its benchmark budget"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestEqual(TEXT("An unreadable budget file fails closed"), RunAnalysis(Fixture.RootDirectory / TEXT("MissingMetrics.json"), &Missing), 1);
+	}
+	{
+		AddExpectedError(TEXT("-Budget requires -MetricsFile"), EAutomationExpectedErrorFlags::Contains, 1);
+		const FString Budget = WriteBudget(TEXT("OrphanBudget.json"), TEXT("{ \"MaxDurationSeconds\": 3600 }"));
+		TestEqual(TEXT("A budget without a metrics file is rejected before any work"), Commandlet->Main(FString::Printf(
+			TEXT("-Source=\"%s\" -AnalyzeOnly -Budget=\"%s\""), *Fixture.SceneFile, *Budget)), 1);
+	}
 	return true;
 }
 

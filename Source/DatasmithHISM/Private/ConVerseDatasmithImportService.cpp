@@ -31,6 +31,7 @@
 #include "ExternalSourceModule.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMemory.h"
 #include "IDatasmithSceneElements.h"
 #include "Interfaces/Interface_AssetUserData.h"
@@ -44,7 +45,10 @@
 #include "Misc/MessageDialog.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Misc/SecureHash.h"
+#include "Containers/StringConv.h"
 #include "ObjectTools.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "ProfilingDebugging/MiscTrace.h"
 #include "ComponentRecreateRenderStateContext.h"
 #include "Editor/Transactor.h"
 #include "UObject/ReferencerFinder.h"
@@ -155,6 +159,7 @@ namespace ConVerseDatasmithImport
 		FConVerseOptimizedImportOptions Options;
 		TArray<FString> TextureResolutionIdentities;
 		int32 TotalMeshActors = 0;
+		int32 SourceMeshAssetCount = 0;
 		int32 EligibleLeafActors = 0;
 		TMap<EConVerseOptimizedSkipReason, int32> SkipCounts;
 		TArray<FGroupValue> Groups;
@@ -346,6 +351,24 @@ namespace ConVerseDatasmithImport
 		bool bExists = false;
 	};
 
+	struct FScopedImportTiming
+	{
+		TArray<TPair<FString, double>>* Steps;
+		const TCHAR* Name;
+		const double Started = FPlatformTime::Seconds();
+
+		FScopedImportTiming(TArray<TPair<FString, double>>* InSteps, const TCHAR* InName)
+			: Steps(InSteps), Name(InName)
+		{
+			if (Steps) UE_LOG(LogConVerseOptimizedImport, Display, TEXT("Import step started: %s"), Name);
+		}
+
+		~FScopedImportTiming()
+		{
+			if (Steps) Steps->Emplace(Name, FPlatformTime::Seconds() - Started);
+		}
+	};
+
 	/** Returns the conventional "<BaseName>_Assets" sidecar folder path for a Datasmith source. */
 	static FString GetSidecarDirectory(const FString& SourceFilePath)
 	{
@@ -365,8 +388,10 @@ namespace ConVerseDatasmithImport
 	 * an edit are all detected, as is a file being added or removed.
 	 */
 	static bool HashDirectory(const FString& DirectoryPath, FSidecarFingerprint& OutFingerprint, FString& OutError,
-		FScopedSlowTask* Progress = nullptr, const TFunction<bool()>* Cancel = nullptr, FConVerseImportProgress* Work = nullptr)
+		FScopedSlowTask* Progress = nullptr, const TFunction<bool()>* Cancel = nullptr, FConVerseImportProgress* Work = nullptr,
+		TArray<TPair<FString, double>>* Steps = nullptr)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_SidecarFingerprint);
 		OutFingerprint = FSidecarFingerprint();
 
 		if (!IFileManager::Get().DirectoryExists(*DirectoryPath))
@@ -377,33 +402,43 @@ namespace ConVerseDatasmithImport
 		OutFingerprint.bExists = true;
 
 		TArray<FString> RelativePaths;
-		IFileManager::Get().IterateDirectoryRecursively(
-			*DirectoryPath,
-			[&DirectoryPath, &RelativePaths, Progress, Cancel, Work](const TCHAR* VisitedPath, bool bIsDirectory) -> bool
-			{
-				if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) return false;
-				if (!bIsDirectory)
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_SidecarEnumerate);
+			FScopedImportTiming Timer(Steps, TEXT("Sidecar enumerate and sort"));
+			IFileManager::Get().IterateDirectoryRecursively(
+				*DirectoryPath,
+				[&DirectoryPath, &RelativePaths, Progress, Cancel, Work](const TCHAR* VisitedPath, bool bIsDirectory) -> bool
 				{
-					FString Relative = VisitedPath;
-					FPaths::MakePathRelativeTo(Relative, *(DirectoryPath / TEXT("")));
-					RelativePaths.Add(MoveTemp(Relative));
-				}
-				return true;
-			});
+					if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) return false;
+					if (!bIsDirectory)
+					{
+						FString Relative = VisitedPath;
+						FPaths::MakePathRelativeTo(Relative, *(DirectoryPath / TEXT("")));
+						RelativePaths.Add(MoveTemp(Relative));
+					}
+					return true;
+				});
 
-		if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) { OutError = TEXT("Supporting-file check cancelled."); return false; }
+			if (Work ? Work->IsCancelled() : CancellationRequested(Progress, Cancel)) { OutError = TEXT("Supporting-file check cancelled."); return false; }
 
-		// Stable ordering is what makes the aggregate reproducible.
-		RelativePaths.Sort();
+			// Stable ordering is what makes the aggregate reproducible.
+			RelativePaths.Sort();
+		}
 
 		// A stat-only pass (no reads) so the hashing loop below can report each file's position and
 		// byte offset within the whole sidecar, not just that file's own size. Without this, a small
 		// file's "bytes 0 / N" progress line is indistinguishable from overall sidecar progress.
 		int64 SidecarTotalBytes = 0;
-		for (const FString& Relative : RelativePaths)
-			SidecarTotalBytes += FMath::Max(int64(0), IFileManager::Get().FileSize(*FPaths::Combine(DirectoryPath, Relative)));
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_SidecarFileSizes);
+			FScopedImportTiming Timer(Steps, TEXT("Sidecar file sizes"));
+			for (const FString& Relative : RelativePaths)
+				SidecarTotalBytes += FMath::Max(int64(0), IFileManager::Get().FileSize(*FPaths::Combine(DirectoryPath, Relative)));
+		}
 
 		FString Aggregate;
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_SidecarFileHashes);
+		FScopedImportTiming Timer(Steps, TEXT("Sidecar file hashes"));
 		FScopedSlowTask Files(float(FMath::Max(1, RelativePaths.Num())), FText::FromString(TEXT("Checking supporting files")), Progress != nullptr);
 		int64 BytesBeforeCurrentItem = 0;
 		for (int32 Index = 0; Index < RelativePaths.Num(); ++Index)
@@ -793,6 +828,38 @@ namespace ConVerseDatasmithImport
 		}
 	}
 
+	/**
+	 * Upper bound, before material compatibility checks, on meshes the Nanite policy would enable;
+	 * INDEX_NONE when the policy preserves imported settings.
+	 */
+	static int32 ProjectNaniteMeshes(const FPlan& Plan)
+	{
+		const TSet<FString> DisabledNanite(Plan.Options.Processing.DisableNaniteMeshElements);
+		if (Plan.Options.Processing.NanitePolicy == EConVerseNanitePolicy::AllSupportedMeshes)
+		{
+			TSet<FString> ReferencedDisabled;
+			for (const auto& Source : Plan.AllMeshActors)
+				if (DisabledNanite.Contains(Source.MeshElementName)) ReferencedDisabled.Add(Source.MeshElementName);
+			return FMath::Max(0, Plan.SourceMeshAssetCount - ReferencedDisabled.Num());
+		}
+		if (Plan.Options.Processing.NanitePolicy == EConVerseNanitePolicy::ConvertedISMOnly)
+		{
+			TSet<FString> GroupMeshes;
+			for (const FGroupValue& Group : Plan.Groups)
+				if (!DisabledNanite.Contains(Group.MeshElementName)) GroupMeshes.Add(Group.MeshElementName);
+			return GroupMeshes.Num();
+		}
+		return INDEX_NONE;
+	}
+
+	/** True when MaxNaniteMeshes will actually leave meshes without Nanite, so it changes generated output. */
+	static bool NaniteBudgetBinds(const FPlan& Plan)
+	{
+		const int32 Projected = ProjectNaniteMeshes(Plan);
+		return Plan.Options.Processing.MaxNaniteMeshes > 0 && Projected != INDEX_NONE
+			&& Projected > Plan.Options.Processing.MaxNaniteMeshes;
+	}
+
 	static FString ComputePlanId(const FPlan& Plan)
 	{
 		FString Input;
@@ -806,7 +873,13 @@ namespace ConVerseDatasmithImport
 		IdentitySettings.ManyLightThreshold = 100;
 		IdentitySettings.AppearanceCatalog.Reset();
 		if (!IdentitySettings.bApplyApprovedMaterials) IdentitySettings.MaterialMappings.Reset();
-		AppendField(Input, TEXT("Processing"), ConVerseImportProcessing::SettingsJson(IdentitySettings));
+		AppendField(Input, TEXT("Processing"), ConVerseImportProcessing::IdentitySettingsJson(IdentitySettings));
+		// Amendment 15: the Nanite mesh budget changes generated output only when the policy would
+		// exceed it, so it joins identity only then. Imports under budget keep their existing PlanId.
+		if (NaniteBudgetBinds(Plan))
+		{
+			AppendField(Input, TEXT("NaniteMeshBudget"), FString::FromInt(Plan.Options.Processing.MaxNaniteMeshes));
+		}
 		FString MappingIdentity, MappingError;
 		ConVerseImportProcessing::ValidateMappings(Plan.Options.Processing, MappingIdentity, MappingError);
 		AppendField(Input, TEXT("ApprovedMappings"), MappingIdentity);
@@ -870,6 +943,7 @@ namespace ConVerseDatasmithImport
 		Plan.ExporterVersion = Scene->GetExporterVersion();
 		Plan.ExporterSdkVersion = Scene->GetExporterSDKVersion();
 		Plan.Options = Options;
+		Plan.SourceMeshAssetCount = Scene->GetMeshesCount();
 
 		TMap<FString, TSharedPtr<IDatasmithMeshElement>> MeshesByName;
 		for (int32 MeshIndex = 0; MeshIndex < Scene->GetMeshesCount(); ++MeshIndex)
@@ -942,6 +1016,7 @@ namespace ConVerseDatasmithImport
 	{
 		OutOptions = Input;
 		OutOptions.Processing.ManyLightThreshold = FMath::Max(1, Input.Processing.ManyLightThreshold);
+		OutOptions.Processing.MaxNaniteMeshes = FMath::Max(0, Input.Processing.MaxNaniteMeshes);
 		if (uint8(Input.Processing.NanitePolicy) > uint8(EConVerseNanitePolicy::PreserveImported))
 		{ OutError = TEXT("Unsupported Nanite policy."); return false; }
 		auto NormalizeNames = [](TArray<FString>& Names)
@@ -2791,6 +2866,28 @@ namespace ConVerseDatasmithImport
 		{
 			return static_cast<uint8>(Left.Reason) < static_cast<uint8>(Right.Reason);
 		});
+
+		Result.ProjectedNaniteMeshes = ProjectNaniteMeshes(Plan);
+		const int32 Budget = Plan.Options.Processing.MaxNaniteMeshes;
+		const bool bBudgetBinds = NaniteBudgetBinds(Plan);
+		// What would really be enabled: the budget caps the projection, so the advisory judges the capped count.
+		const int32 EffectiveNaniteMeshes = bBudgetBinds ? Budget : Result.ProjectedNaniteMeshes;
+		if (bBudgetBinds)
+		{
+			const FString Info = FString::Printf(
+				TEXT("Nanite budget: %d meshes would use Nanite, above the budget of %d. The %d most-used meshes keep Nanite and the rest stay ordinary. Raise the budget, set it to 0 for unlimited, or use converted-groups-only Nanite to change this."),
+				Result.ProjectedNaniteMeshes, Budget, Budget);
+			Result.Diagnostics.Add(Info);
+			UE_LOG(LogConVerseOptimizedImport, Display, TEXT("%s"), *Info);
+		}
+		if (EffectiveNaniteMeshes > FConVerseDatasmithImportService::NaniteMeshWarningThreshold)
+		{
+			const FString Warning = FString::Printf(
+				TEXT("Nanite advisory: up to %d imported meshes would use Nanite, above the %d-mesh warning level. Each needs at least one Nanite streaming root page, and the engine pool is shared with already-loaded content; exhausting it is fatal. Consider a lower Nanite budget, converted-groups-only Nanite or Nanite exceptions."),
+				EffectiveNaniteMeshes, FConVerseDatasmithImportService::NaniteMeshWarningThreshold);
+			Result.Diagnostics.Add(Warning);
+			UE_LOG(LogConVerseOptimizedImport, Warning, TEXT("%s"), *Warning);
+		}
 	}
 
 	static FString BuildReport(const FPlan* Plan, const FConVerseOptimizedImportResult& Result)
@@ -2808,9 +2905,20 @@ namespace ConVerseDatasmithImport
 		}
 		Report += FString::Printf(TEXT("Duration: %.3f seconds\nMesh policy processing (including builds): %.3f seconds\nMesh compilation wait: %.3f seconds\nProcess peak physical memory (process lifetime): %llu bytes\n"), Result.DurationSeconds, Result.MeshProcessingSeconds, Result.MeshBuildSeconds, Result.ProcessPeakPhysicalBytes);
 		Report += FString::Printf(TEXT("Meshes rebuilt for a Nanite change: %d\n"), Result.NaniteRebuiltMeshes);
+		if (Result.NaniteBudgetSkippedMeshes > 0)
+			Report += FString::Printf(TEXT("Meshes left without Nanite by the Nanite budget: %d\n"), Result.NaniteBudgetSkippedMeshes);
+		if (Result.ProjectedNaniteMeshes != INDEX_NONE)
+			Report += FString::Printf(TEXT("Projected Nanite meshes (upper bound): %d\n"), Result.ProjectedNaniteMeshes);
+		if (!Result.ProgressLogPath.IsEmpty()) Report += TEXT("Progress log: ") + Result.ProgressLogPath + TEXT("\n");
+		if (!Result.TraceFilePath.IsEmpty()) Report += TEXT("Unreal Insights trace: ") + Result.TraceFilePath + TEXT("\n");
+		Report += FString::Printf(TEXT("Supporting assets: %d files, %lld bytes\n"), Result.SidecarFileCount, Result.SidecarTotalSize);
 		for (const TPair<FString, double>& Stage : Result.StageSeconds)
 		{
 			Report += FString::Printf(TEXT("Stage %s %.3f seconds\n"), *Stage.Key, Stage.Value);
+		}
+		for (const TPair<FString, double>& Step : Result.StepSeconds)
+		{
+			Report += FString::Printf(TEXT("Step %s %.3f seconds\n"), *Step.Key, Step.Value);
 		}
 		if (!Result.OpenStage.IsEmpty())
 		{
@@ -3022,15 +3130,86 @@ namespace ConVerseDatasmithImport
 	 */
 	static constexpr float ImportProgressStepCount = 9.0f;
 
+	static void AppendProgressLine(FConVerseOptimizedImportResult& Result, const FString& Event)
+	{
+		if (Result.bProgressLogFailed) return;
+		if (Result.ProgressLogPath.IsEmpty())
+		{
+			const FString Directory = FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/ImportProgress");
+			if (!IFileManager::Get().MakeDirectory(*Directory, true))
+			{
+				Result.bProgressLogFailed = true;
+				return;
+			}
+			Result.ProgressLogPath = Directory / (FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".log"));
+		}
+		const FString Line = FDateTime::UtcNow().ToIso8601() + TEXT(" ") + Event + TEXT("\n");
+		if (!FFileHelper::SaveStringToFile(Line, *Result.ProgressLogPath,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM, &IFileManager::Get(), EFileWrite::FILEWRITE_Append))
+		{
+			UE_LOG(LogConVerseOptimizedImport, Warning, TEXT("Could not append import progress to %s."), *Result.ProgressLogPath);
+			Result.bProgressLogFailed = true;
+		}
+	}
+
+	class FConVerseProgressLogWriter
+	{
+	public:
+		explicit FConVerseProgressLogWriter(FConVerseOptimizedImportResult& InResult)
+			: Result(InResult)
+		{
+		}
+
+		void Append(const FString& Event, bool bFlush)
+		{
+			if (Result.bProgressLogFailed || Result.ProgressLogPath.IsEmpty()) return;
+			if (!FileHandle.IsValid())
+			{
+				FileHandle.Reset(FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*Result.ProgressLogPath, true));
+				if (!FileHandle.IsValid())
+				{
+					Fail();
+					return;
+				}
+			}
+
+			const FString Line = FDateTime::UtcNow().ToIso8601() + TEXT(" ") + Event + TEXT("\n");
+			FTCHARToUTF8 Utf8Line(*Line);
+			const bool bWritten = FileHandle->Write(
+				reinterpret_cast<const uint8*>(Utf8Line.Get()), Utf8Line.Length());
+			const bool bFlushed = !bFlush || FileHandle->Flush();
+			if (!bWritten || !bFlushed) Fail();
+		}
+
+	private:
+		void Fail()
+		{
+			Result.bProgressLogFailed = true;
+			UE_LOG(LogConVerseOptimizedImport, Warning,
+				TEXT("Could not append import progress to %s."), *Result.ProgressLogPath);
+			FileHandle.Reset();
+		}
+
+		FConVerseOptimizedImportResult& Result;
+		TUniquePtr<IFileHandle> FileHandle;
+	};
+
 	static void EnterStage(FScopedSlowTask& Progress, FConVerseOptimizedImportResult& Result, float Work, const FText& Label)
 	{
 		const double Now = FPlatformTime::Seconds();
 		if (!Result.OpenStage.IsEmpty())
 		{
-			Result.StageSeconds.Emplace(Result.OpenStage, Now - Result.OpenStageStartedAtSeconds);
+			const double Elapsed = Now - Result.OpenStageStartedAtSeconds;
+			Result.StageSeconds.Emplace(Result.OpenStage, Elapsed);
+			AppendProgressLine(Result, FString::Printf(TEXT("completed %s: %.3f seconds"), *Result.OpenStage, Elapsed));
 		}
 		Result.OpenStage = Label.ToString();
 		Result.OpenStageStartedAtSeconds = Now;
+		AppendProgressLine(Result, FString::Printf(
+			TEXT("started %s; groups=%d planned_instances=%d sidecar_files=%d sidecar_bytes=%lld meshes_rebuilt=%d"),
+			*Result.OpenStage, Result.PlannedGroupCount, Result.PlannedInstanceCount,
+			Result.SidecarFileCount, Result.SidecarTotalSize, Result.NaniteRebuiltMeshes));
+		TRACE_BOOKMARK(TEXT("ConVerse stage: %s"), *Result.OpenStage);
 		UE_LOG(LogConVerseOptimizedImport, Display, TEXT("%s"), *Label.ToString());
 		Progress.EnterProgressFrame(Work, Label);
 	}
@@ -3098,6 +3277,9 @@ namespace ConVerseDatasmithImport
 	static void FinishResult(const FPlan* Plan, FConVerseOptimizedImportResult& Result, bool bTerminal = true)
 	{
 		Result.DurationSeconds = FPlatformTime::Seconds() - Result.StartedAtSeconds;
+		AppendProgressLine(Result, FString::Printf(TEXT("%s %s after %.3f seconds; groups=%d instances=%d meshes rebuilt=%d"),
+			bTerminal ? TEXT("finished") : TEXT("checkpoint"), *StatusName(Result.Status), Result.DurationSeconds,
+			Result.VerifiedGroupCount, Result.VerifiedInstanceCount, Result.NaniteRebuiltMeshes));
 		Result.ProcessPeakPhysicalBytes = FPlatformMemory::GetStats().PeakUsedPhysical;
 		Result.Report = BuildReport(Plan, Result);
 		SaveAndLogReport(Result, bTerminal);
@@ -3113,9 +3295,10 @@ namespace ConVerseDatasmithImport
 		Result.PlannedGroupCount = Result.PlannedInstanceCount = 0;
 		Result.TotalSourceMeshActors = Result.EligibleSourceActors = Result.BelowThresholdActorCount = Result.SkippedActorCount = 0;
 		Result.SourceLightCount = Result.SourceMeshAssetCount = Result.EnabledLocalLights = Result.UnitlessLights = Result.IESLights = 0;
+		Result.ProjectedNaniteMeshes = INDEX_NONE;
 		Result.InspectionRows.Reset(); Result.Appearances.Reset(); Result.SkipCounts.Reset();
 		Result.SourceLightDescriptions.Reset(); Result.MaterialDecisions.Reset(); Result.Diagnostics.Reset();
-		Result.ResolvedTextures.Reset(); Result.ResolvedTextureIdentities.Reset(); Result.MissingTextures.Reset(); Result.MissingMeshFiles.Reset();
+		Result.ResolvedTextures.Reset(); Result.ResolvedTextureIdentities.Reset(); Result.MissingTextures.Reset(); Result.UnavailableIesProfiles.Reset(); Result.MissingMeshFiles.Reset();
 		if (Result.LastCompletedStage == EConVerseOptimizedImportStage::PlanBuilt)
 			Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
 		FinishResult(nullptr, Result);
@@ -3178,7 +3361,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	EnterStage(SlowTask, Result, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeAssets", "Checking supporting assets..."));
 	if (Cancelled()) return Result;
 	FSidecarFingerprint Sidecar;
-	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error, &SlowTask, &Normalized.CancelRequested, &Work))
+	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error, &SlowTask, &Normalized.CancelRequested, &Work, &Result.StepSeconds))
 	{
 		if (Cancelled()) return Result;
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
@@ -3327,6 +3510,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	Result.Operation = EConVerseOptimizedImportOperation::ImportAndVerify;
 	Result.SourceFilePath = Options.FilePath;
 	Result.DestinationPath = Options.DestinationPath;
+	Result.TraceFilePath = Options.TraceFilePath;
 	FConVerseOptimizedImportOptions Normalized;
 	FString Error;
 	if (!NormalizeAndValidateOptions(Options, true, Normalized, Error))
@@ -3378,7 +3562,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 
 	// Fingerprinted here, ahead of the manifest lookup, so the AlreadyCurrent branch can compare it.
 	FSidecarFingerprint Sidecar;
-	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error, &SlowTask, &Normalized.CancelRequested, &Work))
+	if (!HashDirectory(GetSidecarDirectory(Normalized.FilePath), Sidecar, Error, &SlowTask, &Normalized.CancelRequested, &Work, &Result.StepSeconds))
 	{
 		if (Cancelled()) return Result;
 		Result.Status = EConVerseOptimizedImportStatus::SourceLoadFailed;
@@ -3674,9 +3858,13 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		Factory->SetAutomatedAssetImportData(AutomatedImportData.Get());
 	}
 	bool bCancelled = false;
-	UObject* ImportedObject = Factory->CreateFromExternalSource(
-		Factory->ResolveSupportedClass(), Package.Get(), FName(*AssetName),
-		RF_Public | RF_Standalone | RF_Transactional, Source.ToSharedRef(), nullptr, GWarn, bCancelled);
+	UObject* ImportedObject;
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_DatasmithImport);
+		ImportedObject = Factory->CreateFromExternalSource(
+			Factory->ResolveSupportedClass(), Package.Get(), FName(*AssetName),
+			RF_Public | RF_Standalone | RF_Transactional, Source.ToSharedRef(), nullptr, GWarn, bCancelled);
+	}
 	UDatasmithScene* ImportedScene = Cast<UDatasmithScene>(ImportedObject);
 	if (ImportedScene == nullptr || bCancelled)
 	{
@@ -3713,25 +3901,38 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportConvert", "Converting instanced components..."));
 	TMap<FString, TArray<UInstancedStaticMeshComponent*>> ImportedComponents;
-	GatherSessionComponents(*World, Result.SessionId, ImportedComponents);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_GatherImportedComponents);
+		FScopedImportTiming Timer(&Result.StepSeconds, TEXT("Gather imported components"));
+		GatherSessionComponents(*World, Result.SessionId, ImportedComponents);
+	}
 	TArray<FComponentSnapshot> Snapshots;
 	bool bInventoryValid = ImportedComponents.Num() == Plan.Groups.Num();
 	EConVerseImportWorkResult MaterialResult = EConVerseImportWorkResult::Completed;
-	if (bInventoryValid) MaterialResult = ConVerseImportProcessing::ApplyMaterials(*World, *ImportedScene, Scene.ToSharedRef(),
-		AttemptFolder, Normalized.Processing, Result, Error, Work);
-	bInventoryValid = bInventoryValid && MaterialResult == EConVerseImportWorkResult::Completed;
-	for (const FGroupValue& Group : Plan.Groups)
+	if (bInventoryValid)
 	{
-		if (!bInventoryValid) break;
-		const TArray<UInstancedStaticMeshComponent*>* Components = ImportedComponents.Find(Group.GroupId);
-		if (Components == nullptr || Components->Num() != 1
-			|| (*Components)[0]->GetClass() != UHierarchicalInstancedStaticMeshComponent::StaticClass())
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_ApplyImportedMaterials);
+		FScopedImportTiming Timer(&Result.StepSeconds, TEXT("Apply imported materials"));
+		MaterialResult = ConVerseImportProcessing::ApplyMaterials(*World, *ImportedScene, Scene.ToSharedRef(),
+			AttemptFolder, Normalized.Processing, Result, Error, Work);
+	}
+	bInventoryValid = bInventoryValid && MaterialResult == EConVerseImportWorkResult::Completed;
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_CaptureImportedSnapshots);
+		FScopedImportTiming Timer(&Result.StepSeconds, TEXT("Capture imported snapshots"));
+		for (const FGroupValue& Group : Plan.Groups)
 		{
-			bInventoryValid = false;
-			break;
+			if (!bInventoryValid) break;
+			const TArray<UInstancedStaticMeshComponent*>* Components = ImportedComponents.Find(Group.GroupId);
+			if (Components == nullptr || Components->Num() != 1
+				|| (*Components)[0]->GetClass() != UHierarchicalInstancedStaticMeshComponent::StaticClass())
+			{
+				bInventoryValid = false;
+				break;
+			}
+			Snapshots.Add(CaptureSnapshot(
+				*CastChecked<UHierarchicalInstancedStaticMeshComponent>((*Components)[0]), Group.GroupId));
 		}
-		Snapshots.Add(CaptureSnapshot(
-			*CastChecked<UHierarchicalInstancedStaticMeshComponent>((*Components)[0]), Group.GroupId));
 	}
 	if (!bInventoryValid)
 	{
@@ -3744,20 +3945,33 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		else
 			Error = TEXT("The imported HISM precursor inventory did not match the immutable plan.");
 	}
-	else if (Normalized.InstanceType == EConVerseOptimizedInstanceType::ISM
-		&& !ConvertHISMsToISMsTwoStage(Snapshots, Error))
+	else if (Normalized.InstanceType == EConVerseOptimizedInstanceType::ISM)
 	{
-		bInventoryValid = false;
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_ReplaceHISMsWithISMs);
+		FScopedImportTiming Timer(&Result.StepSeconds, TEXT("Replace HISM with ISM"));
+		if (!ConvertHISMsToISMsTwoStage(Snapshots, Error)) bInventoryValid = false;
 	}
 	// Test-only seam. Injected here because the attempt now owns imported assets and world actors,
 	// which is exactly the state RollBackAttempt exists to unwind.
-	else if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::AfterDatasmithImport
-		|| Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::ObstructRollback)
+	if (bInventoryValid
+		&& (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::AfterDatasmithImport
+			|| Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::ObstructRollback))
 	{
 		bInventoryValid = false;
 		Error = TEXT("Injected failure after the Datasmith import (test-only failure injection).");
 	}
-	if (bInventoryValid) bInventoryValid = ConVerseImportProcessing::ProcessMeshes(*World, *ImportedScene, AttemptFolder, Normalized, Result, Error);
+	if (bInventoryValid)
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_ProcessImportedMeshes);
+		FScopedImportTiming Timer(&Result.StepSeconds, TEXT("Process imported meshes"));
+		FConVerseProgressLogWriter ProgressLogWriter(Result);
+		const TFunction<void(const FString&, bool)> WriteMeshProgress = [&ProgressLogWriter](const FString& Event, bool bFlush)
+		{
+			ProgressLogWriter.Append(Event, bFlush);
+		};
+		bInventoryValid = ConVerseImportProcessing::ProcessMeshes(
+			*World, *ImportedScene, AttemptFolder, Normalized, Result, Error, WriteMeshProgress);
+	}
 	if (!bInventoryValid)
 	{
 		FString RollbackDetails;
@@ -3772,7 +3986,11 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::ComponentsConverted;
-	ConVerseImportProcessing::CaptureState(*World, *ImportedScene, AttemptFolder, Inventory.ExistingActors, Result);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_CaptureImportedState);
+		FScopedImportTiming Timer(&Result.StepSeconds, TEXT("Capture imported state"));
+		ConVerseImportProcessing::CaptureState(*World, *ImportedScene, AttemptFolder, Inventory.ExistingActors, Result);
+	}
 	WriteAttemptCheckpoint(Result, false);
 
 	if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::CorruptBeforeVerification

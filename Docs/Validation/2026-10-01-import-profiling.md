@@ -1,0 +1,24 @@
+# Import profiling and Win64 plugin export, 2026-10-01
+
+**Later follow-up, same date (built and tested):** The working tree then added per-mesh Nanite setting start/return records around `PostEditChange()` with a `ConVerse_NanitePostEditChange` Insights CPU scope (Amendment 13), and the projected Nanite mesh advisory (Amendment 14). `NanitePolicyAndZeroGroupImport` checks the records, their pairing, and the projection for all three policies. With the editor closed, the UE 5.8.3 `AdvancedHISMEditor Win64 Development` build succeeded and the full `Automation RunTests DatasmithHISM` passed **45 successes, zero failures, zero controller errors, exit 0** (host `Saved/Logs/NaniteProjectionSuite.txt`). The Win64 export below predates both changes. The records identify the last callback entered, not necessarily the mesh responsible for a later Nanite compilation failure. No large-source run checked the advisory; the 16,384 warning level is a conservative fraction of the observed pool ceiling, not a measured limit.
+
+The results below describe the earlier build of this date.
+
+## Crash and recovery boundary
+
+The Crusoe editor process 45020 crashed during the Mech import with UE 5.8.3's fatal Nanite streaming error: `Cannot allocate more root pages 49152/49152. Pool resource has grown to maximum size of 2048MB.` The crash context says `bIsOOM=0`; it does not establish which imported or previously loaded mesh exhausted the root-page pool. Two other crash folders from process 40376 contain nonfatal engine ensures and are not this fatal event.
+
+Crusoe's attempt journal `f7742a544dc4bd55cbd2bf86c64ad8c8.json` names `Mech.udatasmith` and `/Game/DatasmithOptimized/Mech_ConVerse_f7742a544dc4`. It is nonterminal at stage 7, `RecoveryRequired=true`, with no committed manifest or report. The recorded attempt folder had no on-disk content packages when checked after the crash; the saved `Warrenton.umap` predates this import. Neither observation proves that every generated or autosaved object is safe to delete. The crash report, journal, and partial output were not altered; no editor was force-terminated or restarted into the large scene.
+
+## Changes and checks
+
+The service now records sidecar enumeration/sort, size-pass, and per-file hashing times for Analyze and Import. The conversion stage records gathering components, material application, snapshot capture, HISM-to-ISM replacement when requested, mesh policy, and state capture. Mesh policy separately times its world scan and imported asset pass; the existing compilation-wait time remains separate. Reports include supporting-file counts/bytes and `Step` wall times; a step interrupted by a returned failure records elapsed time, not an assertion of completion. Coarse `ConVerse_` CPU scopes appear in Unreal Insights when CPU tracing is enabled before the work starts. `Import step started` log entries preserve the current coarse substep if a fatal crash prevents a final report. No per-instance logging, hashing bypass, Nanite policy change, ownership change, or root-page-limit fix was made.
+
+The panel now labels Analyze as optional and explains that Import performs fresh source and sidecar checks. The [workflow](../IMPORT_WORKFLOW.md) reflects that behavior. No live Slate interaction was performed.
+
+- UE 5.8.3 `AdvancedHISMEditor Win64 Development` build: succeeded after the final code changes, with the editor closed.
+- `DatasmithHISM.OptimizedImport.GeneratedFixtureEndToEnd`: passed, exit 0, with one sidecar file and expected step timings for Analyze and ISM/HISM imports. Log: host project `Saved/Logs/InstrumentationFocusedFinal.txt`.
+- Full `Automation RunTests DatasmithHISM`: **45 successes, zero controller errors, exit 0**. Log: host project `Saved/Logs/InstrumentationSuiteFinal.txt`.
+- `BuildPlugin` with `-TargetPlatforms=Win64 -Rocket`: succeeded, exit 0. Output: `C:/Unreal/Packages/DatasmithHISM-2026-10-01-Win64/`, containing `DatasmithHISM.uplugin`, both editor module DLLs and their PDBs, and source. Runtime game targets compiled as part of packaging. The repository's `Config/FilterPlugin.ini` does not include extra files, so the package does not contain the repository documentation.
+
+This build and small-fixture automation do not establish a safe Mech reimport, rendered acceptance, an Insights trace of the crash, or a measured speedup. Preserve the Mech journal and inspect recovery through the application before any repeat of the large import. Profile a disposable representative run with CPU tracing enabled before it starts; do not simply raise Nanite's already-maxed pool or retry unchanged.

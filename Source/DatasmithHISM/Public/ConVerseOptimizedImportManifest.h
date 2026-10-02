@@ -402,6 +402,16 @@ public:
 	UPROPERTY()
 	int32 TrackedStateVersion = 0;
 
+	/**
+	 * Amendment 16: settings of the last explicit Apply Nanite step, empty if none. Older manifests and
+	 * results that were never applied leave this empty and NaniteApplyEnabledMeshes at -1.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Optimized Import|Nanite")
+	FString NaniteApplySettingsJson;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Optimized Import|Nanite")
+	int32 NaniteApplyEnabledMeshes = -1;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Optimized Import|Output")
 	TArray<FConVerseImportInspectionRow> ImportedElements;
 

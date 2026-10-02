@@ -14,6 +14,8 @@ namespace ConVerseImportProcessing
 	bool ApproveAppearance(const FConVerseAppearanceReviewRow& Appearance, const FString& CatalogId, UMaterialInterface* Target,
 		const FConVerseImportProcessingSettings& Settings, FString& OutError);
 	FString SettingsJson(const FConVerseImportProcessingSettings& Settings);
+	/** SettingsJson without the MaxNaniteMeshes line; plan identity adds that field only when it binds. */
+	FString IdentitySettingsJson(const FConVerseImportProcessingSettings& Settings);
 	bool ValidateMappings(const FConVerseImportProcessingSettings& Settings, FString& OutIdentity, FString& OutError);
 	EConVerseImportWorkResult AnalyzeScene(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
 		FConVerseOptimizedImportResult& Result, FConVerseImportProgress& Progress);
@@ -25,7 +27,8 @@ namespace ConVerseImportProcessing
 		const TSet<const AActor*>& ExistingActors, const FConVerseOptimizedImportOptions& Options,
 		FConVerseOptimizedImportResult& Result, int32& OutFailedLightCount, int32& OutTotalLightCount);
 	bool ProcessMeshes(UWorld& World, UDatasmithScene& Scene, const FString& AttemptFolder,
-		const FConVerseOptimizedImportOptions& Options, FConVerseOptimizedImportResult& Result, FString& OutError);
+		const FConVerseOptimizedImportOptions& Options, FConVerseOptimizedImportResult& Result, FString& OutError,
+		const TFunction<void(const FString&, bool)>& WriteProgress);
 	EConVerseImportWorkResult ApplyMaterials(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
 		const FString& AttemptFolder, const FConVerseImportProcessingSettings& Settings,
 		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress);

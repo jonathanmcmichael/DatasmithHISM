@@ -1,6 +1,6 @@
 # Current architecture
 
-Source-checked 2026-09-27 after preset/cancellation fixes; the [current tested snapshot](Validation/2026-09-27-preset-cancellation-evidence.json) contains 55 source files. See the [contract](../IMPORT_PANEL_VALIDATION.md) for guarantees and [ADRs](ADR/README.md) for decision rationale.
+Source-checked 2026-10-01. Build and test status is in the [handoff](../HANDOFF.md#current-status). See the [contract](../IMPORT_PANEL_VALIDATION.md) for guarantees and [ADRs](ADR/README.md) for decision rationale.
 
 ## Module boundaries
 
@@ -76,6 +76,18 @@ Tracked comparison records actors, scene components, meshes, and imported materi
 
 Progress stages and summary reporting are shared by service/panel/commandlet. Uninterruptible translator and mesh compilation work returns before cancellation is finalized. Attempt journals list known object paths where available; discovering an interrupted attempt does not authorize automatic deletion.
 
-Three persistence regression tests are in [ConVersePersistenceAutomation.cpp](../Source/DatasmithHISM/Private/Tests/ConVersePersistenceAutomation.cpp). The same file supplies explicitly invoked interruption/probe tests outside the normal 30-test suite. [Invoke-InterruptedRecovery.ps1](../Tests/Invoke-InterruptedRecovery.ps1) launches its own disposable process, terminates it at the recorded checkpoint, and verifies fresh-process diagnostics and unchanged files. This covers one recovery scenario, not transactional resume.
+Three persistence regression tests are in [ConVersePersistenceAutomation.cpp](../Source/DatasmithHISM/Private/Tests/ConVersePersistenceAutomation.cpp). The same file supplies explicitly invoked interruption/probe tests outside the normal suite. [Invoke-InterruptedRecovery.ps1](../Tests/Invoke-InterruptedRecovery.ps1) launches its own disposable process, terminates it at the recorded checkpoint, and verifies fresh-process diagnostics and unchanged files. This covers one recovery scenario, not transactional resume.
 
 Process peak memory is a lifetime high-water mark. Mesh processing time includes policy changes and builds; compilation wait is reported separately. Neither substitutes for a representative CPU/GPU camera-path benchmark. See [validation](VALIDATION.md).
+
+## Rendering policy and open acceptance
+
+| Area | Current behavior | Remaining acceptance |
+|---|---|---|
+| Nanite | Separate Apply Nanite step on a committed import (Amendment 16): all supported meshes or converted ISM/HISM groups only (Amendment 10), with a mesh budget (Amendment 15); imports preserve Nanite settings by default; exact mesh exceptions; effective blend-mode checks; projected-count advisory (Amendment 14); finish compilation and verify Nanite data | Root-page budget on large unique-mesh sources, broader material/platform compatibility, real compiler failure, rendered thin/mirrored geometry, LOD/culling |
+| Lights | Inventory enabled local lights and units/IES; threshold 100 advisory; observe MegaLights project setting; preserve and verify exported values | Revit numerical references, physical falloff/exposure, all supported light types, IES on/off |
+| Materials | Reviewed exact-fingerprint replacement of mesh defaults and component overrides before Nanite processing | Stock-library identity coverage, visual/physical scale checks, reviewed targets |
+| Geometry | Owned ordinary and instanced meshes are accounted for | Corrected joist payload and complete aligned models; missing diagonals cannot be reconstructed from absent source data |
+| Performance | Import duration, stage/step timings, mesh-policy/build interval, compilation wait, process-lifetime peak memory | Fixed baseline scenes/camera paths and CPU/GPU frame-time comparison |
+
+Output-changing rendering choices participate in PlanId. Advisory thresholds and observed global rendering settings do not. Headless and panel execution use the same service policy.
