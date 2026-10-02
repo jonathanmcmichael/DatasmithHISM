@@ -6,7 +6,7 @@ Unreal Engine 5.8.3 plugin for tracked Datasmith import and ISM/HISM optimizatio
 
 Reduces actor, component, and primitive overhead in AEC/BIM scenes. The primary workflow groups exact source mesh references with compatible settings under the same parent; family names and labels do not establish geometry equivalence. Legacy selection conversion remains a separate workflow.
 
-Current development workflow: [import, materials, lighting, presets, and runtime usage](../../IMPORT_WORKFLOW.md). Implementation and remaining release gates: [execution ledger](../../../ROADMAP_EXECUTION.md) and [validation evidence](../../Validation/2026-09-26.md).
+Current development workflow: [import, materials, lighting, presets, and runtime usage](../../IMPORT_WORKFLOW.md). Implementation and remaining release gates: [execution ledger](../../../ROADMAP.md) and [validation evidence](../../Validation/2026-09-26.md).
 
 > **Name note:** The plugin is named `DatasmithHISM` for historical reasons. It defaults to plain `UInstancedStaticMeshComponent` (ISM) — not `UHierarchicalInstancedStaticMeshComponent` (HISM) — because HISM's per-cluster occlusion culling is redundant and harmful for Nanite meshes. HISM is available via `bUseHISM = true` or auto-detected per-mesh with `bAutoDetectFromNanite = true`. The `ConVerse` prefix on all C++ classes is a project namespace.
 

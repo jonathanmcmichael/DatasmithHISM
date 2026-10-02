@@ -18,4 +18,4 @@ Relabeling units alone is not a brightness correction. Auto-enabling a renderer 
 
 ## Evidence and follow-up
 
-Generated physical-unit/threshold checks and the exported point-light/IES fixture pass. Calibrated Revit values, all relevant light types, IES on/off, and rendered comparison remain open. See [source evidence](../Validation/2026-09-26.md) and [rendering policy](../../IMPORT_RENDERING_PLAN.md). MegaLights navigation follows [Epic's project settings guidance](https://dev.epicgames.com/documentation/en-us/unreal-engine/megalights-in-unreal-engine).
+Generated physical-unit/threshold checks and the exported point-light/IES fixture pass. Calibrated Revit values, all relevant light types, IES on/off, and rendered comparison remain open. See [source evidence](../Validation/2026-09-26.md) and [rendering policy](../ARCHITECTURE.md#rendering-policy-and-open-acceptance). MegaLights navigation follows [Epic's project settings guidance](https://dev.epicgames.com/documentation/en-us/unreal-engine/megalights-in-unreal-engine).

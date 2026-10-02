@@ -1,6 +1,6 @@
 # DatasmithHISM — Work Journal
 
-Chronological record of decisions, discoveries, and changes. Earlier entries preserve the understanding at that time, including claims later corrected. For current status use [the execution ledger](ROADMAP_EXECUTION.md), [next steps](NEXT_STEPS.md), and [documentation index](Docs/README.md). Historical task assignments are not current instructions.
+Chronological record of decisions, discoveries, and changes. Earlier entries preserve the understanding at that time, including claims later corrected. For current status use the [handoff](../../HANDOFF.md#current-status), [roadmap](../../ROADMAP.md), and [documentation index](../README.md). Historical task assignments are not current instructions.
 
 ---
 
@@ -295,7 +295,7 @@ Phase 2 (new, only when `Cache.StoreyBoundaryPatterns` is non-empty): starting a
 
 **Goal:** Add a dockable panel that parses `.udatasmith`, offers explicit ISM or HISM output, optimizes eligible source actors before they populate the current level, and verifies the imported result.
 
-**Planning first:** [IMPORT_PANEL_PLAN.md](IMPORT_PANEL_PLAN.md) now defines five gated phases, the panel controls and states, atomic work units, file ownership, and acceptance checks. [IMPORT_PANEL_VALIDATION.md](IMPORT_PANEL_VALIDATION.md) freezes the immutable-plan, metadata-manifest, rollback, verification, and optimized-reimport contracts.
+**Planning first:** [IMPORT_PANEL_PLAN.md](2026-09-26/IMPORT_PANEL_PLAN.md) now defines five gated phases, the panel controls and states, atomic work units, file ownership, and acceptance checks. [IMPORT_PANEL_VALIDATION.md](../../IMPORT_PANEL_VALIDATION.md) freezes the immutable-plan, metadata-manifest, rollback, verification, and optimized-reimport contracts.
 
 **Baseline evidence:** UE 5.8.3, changelist 58210709. The first integrated UBT attempt reached the new scaffold and failed on two confirmed compile issues: `FSpawnTabArgs` was forward-declared as a struct, and the service used unavailable `FMD5Hash::HashBytes` and `FMD5Hash::ToString` members. No `.udatasmith`, `_Assets`, or `.ifc` fixture exists under this project, so real Revit acceptance remains pending.
 
@@ -331,7 +331,7 @@ Phase 2 (new, only when `Cache.StoreyBoundaryPatterns` is non-empty): starting a
 
 ## 2026-09-22 · Importer documentation reconciliation
 
-Updated the project-level [PLAN.md](PLAN.md), [README.md](README.md), and optimized-import plan so their status matches the implementation evidence: the UE 5.8.3 editor target builds, the generated-fixture test compiles, runtime automation remains blocked before editor startup by optional-platform SDK validation, and real Revit/Datasmith acceptance still requires a representative export and sidecar assets.
+Updated the project-level [PLAN.md](2026-09-26/PLAN.md), [README.md](../../README.md), and optimized-import plan so their status matches the implementation evidence: the UE 5.8.3 editor target builds, the generated-fixture test compiles, runtime automation remains blocked before editor startup by optional-platform SDK validation, and real Revit/Datasmith acceptance still requires a representative export and sidecar assets.
 
 ---
 
@@ -760,22 +760,22 @@ checks confirmed all 54 source hashes still match, the existing automation log h
 controller errors, and all four retained interruption evidence files remain unchanged.
 Checked local file links and Markdown anchors across host/plugin documentation, including
 historical snapshots. Exact results are in
-[closeout verification](Docs/Validation/2026-09-27-docs.json).
+[closeout verification](../Validation/2026-09-27-docs.json).
 
 This turn changed documentation and added a local documentation audit script only. No C++
 or fixture data changed, no Unreal execution was repeated, and no commit/push/release was
 made. Live UI, source-data, broader recovery, cooked/rendered and performance gates remain
-explicitly open. See the [closeout record](Docs/Validation/2026-09-27-closeout.md).
+explicitly open. See the [closeout record](../Validation/2026-09-27-closeout.md).
 
 ## 2026-09-27: preset state and Analyze cancellation
 
-Completed the authorized fixes-and-automation pass. Shared input application invalidates old inspection/material-review/save targets for preset, browser and destination changes. Shared cooperative pre-mutation progress/cancellation includes streamed texture hashes and correct import sidecar cancellation status. Three new regressions pass; UE 5.8.3 build succeeded and full suite passed 30/30, exit 0, zero controller errors. [Evidence](Docs/Validation/2026-09-27-preset-cancellation.md) records the 124-file checkpoint and current 55 source hashes. No commit, push, cook or live UI acceptance was performed. Native UI and representative-source gates remain pending.
+Completed the authorized fixes-and-automation pass. Shared input application invalidates old inspection/material-review/save targets for preset, browser and destination changes. Shared cooperative pre-mutation progress/cancellation includes streamed texture hashes and correct import sidecar cancellation status. Three new regressions pass; UE 5.8.3 build succeeded and full suite passed 30/30, exit 0, zero controller errors. [Evidence](../Validation/2026-09-27-preset-cancellation.md) records the 124-file checkpoint and current 55 source hashes. No commit, push, cook or live UI acceptance was performed. Native UI and representative-source gates remain pending.
 
 ## 2026-09-27: live native UI acceptance
 
 Drove a disposable Unreal Editor with real mouse/text input through the guarded `NativeUI.ps1` helper (Slate accepts `SendInput`; `SendKeys` accelerators do not register). Small-source Analyze/import, per-instance and light focus, typed-path and preset invalidation, review-window reuse and closure, missing-target feedback, group-removal rebuild preview, and early cancellation on the 90 MB HVAC export passed. Translator-boundary cancellation is honored after return but cannot show feedback while Slate is frozen.
 
-Found two defects. (1) Naming an untitled level through the editor's Save As also saved the manifest; UE's asset-path redirection rewrote its soft paths but left tracked-state text on `/Temp/`, so the explicit save reported false drift and a rebuild would have demanded manual-edit authorization. (2) Session restore set the effective source but left the source field empty; Analyze then read the hidden source. Fixed both (`RebaseTemporaryWorld` under GUID/session-tag proof; initial source text and restored status), clarified contract Amendment 7 and ADR 0006, and added `UnnamedMapFirstSaveStaysVerified` and `PanelSessionRestoreShowsInputs`. Both failed before the fixes, the map-and-manifest variant specifically with the rebase disabled. UE 5.8.3 build succeeded; full suite 32/32, exit 0, zero controller errors. The fixes have not been re-exercised live. No commit, push, cook or package. [Evidence](Docs/Validation/2026-09-27-live-ui.md).
+Found two defects. (1) Naming an untitled level through the editor's Save As also saved the manifest; UE's asset-path redirection rewrote its soft paths but left tracked-state text on `/Temp/`, so the explicit save reported false drift and a rebuild would have demanded manual-edit authorization. (2) Session restore set the effective source but left the source field empty; Analyze then read the hidden source. Fixed both (`RebaseTemporaryWorld` under GUID/session-tag proof; initial source text and restored status), clarified contract Amendment 7 and ADR 0006, and added `UnnamedMapFirstSaveStaysVerified` and `PanelSessionRestoreShowsInputs`. Both failed before the fixes, the map-and-manifest variant specifically with the rebase disabled. UE 5.8.3 build succeeded; full suite 32/32, exit 0, zero controller errors. The fixes have not been re-exercised live. No commit, push, cook or package. [Evidence](../Validation/2026-09-27-live-ui.md).
 
 ## 2026-09-27: texture search folders and missing-texture prompt
 
@@ -796,3 +796,46 @@ A live panel import of `ARCH.udatasmith` in HISM mode confirmed HISM output: 298
 **Still needing live re-check (none done on 2026-09-28):** both 2026-09-27 fixes (false drift; hidden source); missing-texture prompt; empty-file prompt; accepted-missing-IES warning; pre-translation message painting; ARCH accounting with camera proxy recognized; remaining Phase 2 UI rows; cosmetic items.
 
 Build: `Saved/Phase2Acceptance/20260928-Verification/08-full-suite-after-fix.txt` (37/37), then `20260928-NaniteTranslator/06-test-full-suite.log` (38/38). No commit, no live editor session.
+
+## 2026-09-29: remediation Batches A, C and D
+
+- **Batch A:** failed-verification acceptance now rolls the new attempt back when the previous session cannot be removed, and supersede path fallback requires the previous session's exact actor tag. Two real-entry regressions cover predecessor-removal failure and unrelated actor path reuse.
+- **Batch C:** recursive texture-library discovery has its own cancellation phase, deterministic cooperative traversal, streamed hashes, and per-folder bounds of 250,000 files and 100,000 directories. Import-time approved-material fingerprinting uses the same progress object after mutation; cancellation routes through attempt rollback.
+- **Batch D:** a selected texture-library resolution contributes its streamed content hash and byte size to `PlanId`. The folder list stays excluded. A same-path byte change crosses the real `ImportAndVerify` path and replaces the active result instead of reporting `AlreadyCurrent`.
+
+UE 5.8.3 build and 36/36 automation passed. A Win64 cook and `ConVerse.ValidateImportedScene 3 RequireCollision RequireIES Exit` passed ([packaging evidence](../Validation/2026-09-29-packaging.md)).
+
+## 2026-09-30: ARCH rollback timing and Amendment 12
+
+A headless ARCH HISM run took 165.0 s and ended `ImportedWithFailuresRolledBack`. Log timestamps put about 136 s in rollback's single `ObjectTools::ForceDeleteObjects` over 3,298 packages; a CPU trace showed 6,596 `GatherObjectReferencersForDeletion` calls totalling 110.7 s. Amendment 12 replaced it with one batch reference check and `DeleteObjectsUnchecked`, falling back to `ForceDeleteObjects` on any outside referencer. The same run then took 43.5 s, with verify plus rollback at 7.1 s. 45/45 automation passed, including `RollbackExternalReferencerUsesCheckedDelete`. Datasmith 5.8 `FinalizeAssets` calls `BatchBuild` with no pre-build hook, so Nanite cannot be set before the first build through a supported seam. Committed as `c8ac53c`.
+
+## 2026-10-01: Nanite crash, instrumentation and advisory
+
+The Crusoe Mech import hit UE 5.8.3's fatal Nanite root-page ceiling (49,152 pages / 2,048 MB). Added per-step timings, `ConVerse_` Insights scopes, a per-operation progress log, per-mesh Nanite transition records (Amendment 13), and a projected Nanite mesh advisory above 16,384 (Amendment 14). Build and 45/45 automation passed; see [profiling evidence](../Validation/2026-10-01-import-profiling.md).
+
+## 2026-10-01: documentation consolidation
+
+Status now lives only in `HANDOFF.md#current-status`. `PLAN.md`, `NEXT_STEPS.md`, `ROADMAP_EXECUTION.md` and `REVIEW.md` were merged into `ROADMAP.md`; their dated checkpoints are the entries above. `IMPORT_PANEL_PLAN.md`, `IMPORT_RENDERING_PLAN.md` and `VALIDATION_BASELINE.md` were removed after their tables moved into the workflow and architecture docs. `Info.md` became `Docs/ENGINE_NOTES.md`, and this journal moved to `Docs/History/`. Earlier versions remain in Git history.
+
+Resolved findings recorded in `REVIEW.md` at removal, each with regression coverage:
+
+| Finding | Resolution |
+|---|---|
+| Preset/file-picker changes kept previous inspection and save state | Shared input application clears old associations and closes stale review windows |
+| Analysis loops lacked cancellation; sidecar cancellation reported load failure | Shared cooperative checkpoints and streamed fingerprints; 17 cancellation cases |
+| Material slot IDs lost after Datasmith sanitization | Numeric IDs recovered from mesh-description polygon groups |
+| Failed-verification acceptance recorded Passed | Commit persists degraded/quarantined state |
+| Rollback had never executed | Injected and obstructed rollback exercised |
+| Automation supposedly blocked by optional SDKs | Disproved |
+| Named-map Save As reported success for an unverifiable copy | Commandlet refusal before import/copy; explicit-save ownership proof |
+| Recovery diagnostics omitted recorded object paths | Paths shown as unproven observations |
+| Legacy overrides omitted; failed instance insertion deleted its source | Effective materials copied; failed insertion keeps the actor |
+| Legacy behavior payload, below-threshold cleanup, component offsets, shared settings | Conservative eligibility, cleanup, world transforms, descriptor grouping |
+| Nanite omitted ordinary/zero-group meshes | Owned-mesh policy independent of instancing |
+| Manual edits could be silently replaced | Tracked comparison and explicit authorization |
+| Generated material expression IDs caused false drift | Canonical comparison ignores expression IDs, detects value changes |
+| Multiple active owners made replacement ambiguous | Real import dispatch blocks before mutation |
+
+## 2026-10-01: opt-in import trace capture
+
+Added the default-off **Profile next import** control. It captures one full-file Unreal Insights trace for Import/Rebuild, stops automatically, and records the path in the report; Analyze, presets, restored settings, and `PlanId` are unaffected. Existing active traces are left unchanged, and capture failures do not block import. The focused repeat-capture test and full 47-test suite passed after a UE 5.8.3 editor build. See [trace validation](../Validation/2026-10-01-trace-capture.md). Live Slate interaction and large-source capture remain unverified.

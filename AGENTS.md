@@ -1,5 +1,9 @@
 # agent guidance
 
+use ripgrep instead of grep. use 'rg'
+
+use fd when finding something
+
 tell the user when it's time to start a new thread. If the context window is close to full or token usage is getting high per entry
 
 ask if the user wants to use lower reasoning agents if the current model or effor level is determited to be excessive
@@ -118,13 +122,22 @@ When an approach could reasonably resemble malware, persistence tooling, process
 
 **Do not execute it. Use a safer application-native approach or ask the user first.**
 
+### Reviewed exceptions
+
+The user reviewed and accepted these two existing scripts on 2026-10-01. They are exceptions to the PowerShell, process-control and repository rules above. They do not authorize new scripts or changes that widen their behavior.
+
+- `Tests/Invoke-InterruptedRecovery.ps1` (tracked): launches one disposable editor process, terminates only that process at a recorded checkpoint, then checks fresh-process recovery diagnostics. Run it only when the user explicitly asks, and show the command first. Prefer moving this scenario into Unreal automation.
+- `NativeUI.ps1` (host `Saved/Phase2Acceptance/20260927-LiveUIB/`, not tracked): sends `SendInput` clicks and text only to the launched editor's foreground process for live Slate checks. Run it only after the user explicitly frees the desktop for a live session.
+
+If either script is blocked or flagged, the stop conditions above still apply.
 
 
-Updated 2026-09-27 after preset/cancellation implementation and automation. Read the project-level [AGENTS.md](../../AGENTS.md), [handoff](HANDOFF.md), [current next steps](NEXT_STEPS.md), and [execution ledger](ROADMAP_EXECUTION.md) before new work. This is a C++ UE **5.8.3** plugin, with editor and runtime modules; it is not a .NET application.
+
+Read the project-level [AGENTS.md](../../AGENTS.md), [handoff](HANDOFF.md), and [roadmap](ROADMAP.md) before new work. This is a C++ UE **5.8.3** plugin, with editor and runtime modules; it is not a .NET application.
 
 ## Scope and authority
 
-The primary tracked importer is governed by [IMPORT_PANEL_VALIDATION.md](IMPORT_PANEL_VALIDATION.md), including its numbered amendments. Read it before changing that path. Revise the contract in the same change when a guarantee changes. [ADRs](Docs/ADR/README.md) explain decisions; [PLAN.md](PLAN.md) defines accepted scope; historical plans are not an active queue.
+The primary tracked importer is governed by [IMPORT_PANEL_VALIDATION.md](IMPORT_PANEL_VALIDATION.md), including its numbered amendments. Read it before changing that path. Revise the contract in the same change when a guarantee changes. [ADRs](Docs/ADR/README.md) explain decisions; the [roadmap](ROADMAP.md) defines accepted scope and remaining work; historical plans are not an active queue.
 
 | Path | Purpose |
 |---|---|
@@ -158,11 +171,11 @@ Transactions belong at the library boundary so Dataprep can own its transaction.
 
 ## Build and evidence
 
-Run the [real build and automation commands](Docs/VALIDATION.md) with the editor closed. Do not kill the user's editor. The current recorded baseline is 33 passing automation tests, including rollback, manual edits, material invalidation, light thresholds, legacy placement/settings, persistence/recovery, first naming of an untitled level, and panel session restore. The explicit process-interruption fixture runs separately and may terminate only its own specifically launched disposable process. Optional-platform SDK noise did not block automation. IntelliSense cannot reliably resolve this Unreal project and is not build evidence.
+Run the [real build and automation commands](Docs/VALIDATION.md) with the editor closed. Do not kill the user's editor. Current build and test counts are kept only in the [handoff](HANDOFF.md#current-status); update that section after each real run instead of restating counts elsewhere. The explicit process-interruption fixture runs separately (see the reviewed exceptions above). Optional-platform SDK noise did not block automation. IntelliSense cannot reliably resolve this Unreal project and is not build evidence.
 
 Preserve existing uncommitted work. The Git root is this plugin directory; the host project root is not a Git checkout. All execution logs are under the host project's `Saved`, not this plugin's `Saved`.
 
-The latest executed build and 32-test suite are dated 2026-09-27; [current evidence](Docs/Validation/2026-09-27-live-ui.md) records live UI results and all 55 source hashes. The earlier closeout, preset/cancellation and persistence snapshots retain their dates. Native interaction works through the guarded `NativeUI.ps1` helper (see the handoff). The next task is a live re-check of the two automation-verified fixes, then the remaining checklist rows; keep pending status where interaction or inputs are unavailable. Do not repeat successful service tests as a substitute for UI evidence. Generated interrupted sessions are retained deliberately; review the handoff before cleanup.
+Dated validation records keep their own results. The next task is a live re-check of the automation-verified fixes, then the remaining checklist rows (see the handoff); keep pending status where interaction or inputs are unavailable. Do not repeat successful service tests as a substitute for UI evidence. Generated interrupted sessions are retained deliberately; review the handoff before cleanup.
 
 When adding world-scanning tests, snapshot/diff pre-existing objects because the world persists between tests. Prove safety guards can detect faults through their real entry paths. Update handoff with exact evidence and flag unbuilt/unverified code. Builds and synthetic tests never establish rendered, full-model, or packaged acceptance by themselves.
 
@@ -170,4 +183,4 @@ When adding world-scanning tests, snapshot/diff pre-existing objects because the
 
 Follow Unreal types/prefixes, tabs in C++, `TEXT()` and `LOCTEXT`, and the `LogConVerseOptimizedImport` category. Keep runtime dependencies limited to runtime modules. Prefer symbol links over fragile line counts in architecture docs.
 
-Update the [documentation index](Docs/README.md), relevant ADR/contract, [ledger](ROADMAP_EXECUTION.md), and dated evidence when behavior changes. The [journal](JOURNAL.md) is chronological history; its old claims do not override newer evidence. Do not edit user memory as part of repository documentation work.
+Update the [documentation index](Docs/README.md), relevant ADR/contract, [roadmap](ROADMAP.md), and dated evidence when behavior changes. The [journal](Docs/History/JOURNAL.md) is chronological history; add a dated entry there for significant changes. Its old claims do not override newer evidence. Do not edit user memory as part of repository documentation work.

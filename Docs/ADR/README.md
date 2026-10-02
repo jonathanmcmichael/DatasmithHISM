@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Recorded 2026-09-26 from the accepted consolidated plan and current implementation. These ADRs document existing decisions; **Accepted** means the design decision is accepted, not that release acceptance is complete. The [contract](../../IMPORT_PANEL_VALIDATION.md) remains authoritative for required behavior, and the [execution ledger](../../ROADMAP_EXECUTION.md) owns completion status.
+Recorded 2026-09-26 from the accepted consolidated plan and current implementation. These ADRs document existing decisions; **Accepted** means the design decision is accepted, not that release acceptance is complete. The [contract](../../IMPORT_PANEL_VALIDATION.md) remains authoritative for required behavior, and the [roadmap](../../ROADMAP.md) owns completion status.
 
 Evidence sections were reconciled at the [2026-09-27 closeout](../Validation/2026-09-27-closeout.md): 27 tests passed in that suite, one actual interruption/restart checkpoint is covered, named-map copy ownership remains refused, and live UI is pending. The original decision dates are retained.
 

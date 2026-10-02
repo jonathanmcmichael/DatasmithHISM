@@ -10,7 +10,7 @@ Implementation covers Analyze progress/cancellation, whole mesh accounting, manu
 
 **Open gates:** corrected joist webbing in the source export; complete structural/HVAC texture sidecars; authoritative Revit light calibration; reviewed Autodesk stock catalog/mapping coverage; broader live UI, save failure/restart, rendered, texture/UV, navigation/LOD, and CPU/GPU performance acceptance. Group/material/light rebuild previews, shared progress-stage logs, and mesh-processing timing are implemented. Do not describe Phases 1-5 or the release as complete.
 
-Current references: [ROADMAP_EXECUTION.md](../../../ROADMAP_EXECUTION.md), [workflow](../../IMPORT_WORKFLOW.md), [evidence](../../Validation/2026-09-26.md). Logs are in the **project** `Saved/Logs`, two directories above this plugin, not `Plugins/DatasmithHISM/Saved`.
+Current references: [ROADMAP.md](../../../ROADMAP.md), [workflow](../../IMPORT_WORKFLOW.md), [evidence](../../Validation/2026-09-26.md). Logs are in the **project** `Saved/Logs`, two directories above this plugin, not `Plugins/DatasmithHISM/Saved`.
 
 The original structural payload has no diagonal web members for Revit elements 610662/610663. The six ordinary/ISM/HISM/Nanite combinations retain its 88 vertices and 160 triangles exactly. The HVAC export has 1,033 lights declared Unitless. Do not manufacture geometry or relabel those values as lumens.
 

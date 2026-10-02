@@ -20,10 +20,10 @@ Save the imported result and its owning map first. Run from the project workspac
 
 ```powershell
 & 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat' BuildCookRun `
-  -project='D:\Unreal\Sandbox\AdvancedHISM\AdvancedHISM.uproject' `
+  -project='C:\Unreal\Projects\AdvancedHISM\AdvancedHISM.uproject' `
   -noP4 -platform=Win64 -clientconfig=Development -build -cook `
   -map=/Game/ConVerseValidation/SaveAsAcceptance -stage -pak -archive `
-  -archivedirectory='D:\Unreal\Sandbox\AdvancedHISM\Saved\ConVersePackagedValidationFinal' `
+  -archivedirectory='C:\Unreal\Projects\AdvancedHISM\Saved\ConVersePackagedValidationFinal' `
   -unattended -utf8output
 ```
 

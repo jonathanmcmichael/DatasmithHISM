@@ -4,7 +4,7 @@
 
 ## Current release gates, 2026-09-26
 
-The editor build, 24/24 automation tests, save/reopen, Windows cook/archive, and packaged runtime smoke checks pass. Release acceptance remains open. [ROADMAP_EXECUTION.md](../../../ROADMAP_EXECUTION.md) is the detailed current ledger; [validation evidence](../../Validation/2026-09-26.md) records the limits.
+The editor build, 24/24 automation tests, save/reopen, Windows cook/archive, and packaged runtime smoke checks pass. Release acceptance remains open. [ROADMAP.md](../../../ROADMAP.md) is the detailed current ledger; [validation evidence](../../Validation/2026-09-26.md) records the limits.
 
 1. Correct the joist export: webbing is absent from the original payload, including Revit element 610662. Keep the negative fixture and add a corrected positive fixture.
 2. Restore missing structural/HVAC textures, then validate complete scenes, reference points, dimensions, hierarchy and rendered geometry.
