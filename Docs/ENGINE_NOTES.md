@@ -10,6 +10,8 @@ Nanite's documented material support includes Opaque and Masked; unsupported mat
 
 **Project decision:** default tracked imports to ISM and independent import-wide Nanite processing, with exceptions and verification. Do not describe HISM as categorically harmful. The legacy selection Enable Nanite utility has a narrower validation contract than the tracked processing pass. See [ADR 0003](ADR/0003-geometry-and-nanite.md).
 
+**Observed 2026-10-29 (UE 5.6.1 and 5.8.4):** changing a mesh's Nanite setting and calling `PostEditChange` while its previous Nanite build is still in flight can leave the derived-data cache with render data that has no Nanite pages under the Nanite-enabled key. Every later build of identical geometry with Nanite then hits that entry, logs no `NaniteBuild`, and `HasValidNaniteData()` is false. The Apply Nanite cancel-and-restore path did this to the test fixture mesh and poisoned this machine's local cache, failing all five Nanite tests on both engines. ProcessMeshes and the Apply Nanite restore now call `FinishCompilation` before returning or re-editing a mesh. Isolate a suspected case with `-ddc=Cold` (an empty sandbox cache that leaves the normal one untouched).
+
 ## Revit export and source evidence
 
 Revit's active 3D view determines visible exported geometry; section boxes can cut it. Revit supplies mesh tessellation. Exported hierarchy and metadata can include levels, hosts, base points and survey points. Epic documents preservation of Revit light intensity units. [Epic: Datasmith with Revit](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-datasmith-with-revit-in-unreal-engine)

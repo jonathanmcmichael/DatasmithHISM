@@ -1125,7 +1125,13 @@ namespace ConVerseImportProcessing
 			{
 				Progress.EnterProgressFrame(1, FText::FromString(Pair.Key.ToString()));
 				if (Progress.ShouldCancel() || (Options.CancelRequested && Options.CancelRequested()))
-				{ OutError = TEXT("Mesh processing cancelled."); return false; }
+				{
+					// Let builds already started finish before the caller restores settings: re-editing a mesh
+					// mid-build can cache render data without Nanite under the Nanite-enabled key.
+					FStaticMeshCompilingManager::Get().FinishCompilation(Meshes);
+					OutError = TEXT("Mesh processing cancelled.");
+					return false;
+				}
 				UStaticMesh* Mesh = Pair.Value.LoadSynchronous();
 				if (!Mesh) { OutError = TEXT("Imported scene contains an unresolved static mesh."); return false; }
 				if (Seen.Contains(Mesh)) continue;

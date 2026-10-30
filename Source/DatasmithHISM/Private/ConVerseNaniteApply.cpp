@@ -132,6 +132,10 @@ static FConVerseNaniteApplyResult RunApplyNanite(const FConVerseNaniteApplyOptio
 	if (!bProcessed)
 	{
 		Result.bCancelled = Error.StartsWith(TEXT("Mesh processing cancelled"));
+		// Never re-edit a mesh while its Nanite build is in flight (see ProcessMeshes' cancel path).
+		TArray<UStaticMesh*> Touched;
+		PreviousEnabled.GetKeys(Touched);
+		FStaticMeshCompilingManager::Get().FinishCompilation(Touched);
 		TArray<UStaticMesh*> Restored;
 		for (const auto& Pair : PreviousEnabled)
 		{
