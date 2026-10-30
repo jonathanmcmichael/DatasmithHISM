@@ -4,6 +4,7 @@
 
 #include "Editor.h"
 #include "Engine/Selection.h"
+#include "Misc/App.h"
 #include "Misc/MessageDialog.h"
 #include "ObjectTools.h"
 
@@ -164,7 +165,7 @@ FConVerseStaticMeshConsolidationResult UConVerseStaticMeshConsolidationLibrary::
 	{
 		// Only show a confirmation dialog in interactive editor sessions — Dataprep pipelines
 		// and commandlets run headlessly and should proceed without prompting.
-		const bool bIsInteractive = GIsEditor && !IsRunningCommandlet();
+		const bool bIsInteractive = GIsEditor && !IsRunningCommandlet() && !FApp::IsUnattended() && !GIsRunningUnattendedScript;
 		if (bIsInteractive)
 		{
 			const FText ConfirmMessage = FText::Format(

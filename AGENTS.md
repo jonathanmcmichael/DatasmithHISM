@@ -12,6 +12,8 @@ if the user says that this thread is a orchestrator thread, delegate tasks to ot
 
 Do not use powershell scripts to do smoke tests
 
+If the user asks to clean up the project, refer to Unreal Engine Directory Cleaning Instructions.md
+
 ## Endpoint security / EDR safety
 
 This repository is developed on a corporate-managed Windows endpoint. Endpoint security restrictions are a hard constraint.

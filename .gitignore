@@ -17,3 +17,5 @@ Saved/
 .vs/
 .vsconfig
 DerivedDataCache/
+# Local third-party agent skills; not redistributed in this public repo
+.github/skills/

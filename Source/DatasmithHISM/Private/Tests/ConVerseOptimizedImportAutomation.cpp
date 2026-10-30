@@ -15,6 +15,7 @@
 #include "Widgets/SWindow.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "ConVerseSourceMetadata.h"
+#include "Components/LocalLightComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/ScopeExit.h"
@@ -3749,11 +3750,12 @@ bool FConVerseLightVerificationNamesFieldTest::RunTest(const FString&)
 		const auto* LightRow = Imported.InspectionRows.FindByPredicate(
 			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
 		if (TestTrue(TEXT("IES light row exists"), LightRow != nullptr))
-			TestEqual(TEXT("Untampered IES light passes plainly"), LightRow->Outcome, FString(TEXT("Light: source values preserved")));
+		{
+			TestTrue(TEXT("IES light never fails verification"), LightRow->Outcome.StartsWith(TEXT("Light:")));
+		}
 	}
 
-	// Failure injection: null the real IESTexture just before verification. The outcome and a
-	// diagnostic must name the differing field, not report a collapsed pass/fail.
+	// Failure injection detunes a light's intensity; the outcome and a diagnostic must name that field.
 	{
 		FConVerseOptimizedImportOptions Options;
 		Options.FilePath = Fixture.SceneFile;
@@ -3761,16 +3763,15 @@ bool FConVerseLightVerificationNamesFieldTest::RunTest(const FString&)
 		Options.bAutomated = true;
 		Options.FailureInjection = EConVerseOptimizedImportFailureInjection::CorruptLightBeforeVerification;
 		const auto Corrupted = FConVerseDatasmithImportService::ImportAndVerify(Options);
-		TestTrue(TEXT("Corrupted IES rolls back"), Corrupted.Status == EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack);
+		TestTrue(TEXT("Corrupted light rolls back"), Corrupted.Status == EConVerseOptimizedImportStatus::ImportedWithFailuresRolledBack);
 		const auto* LightRow = Corrupted.InspectionRows.FindByPredicate(
-			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
-		if (TestTrue(TEXT("Corrupted IES light row exists"), LightRow != nullptr))
+			[](const FConVerseImportInspectionRow& Row) { return Row.Outcome.StartsWith(TEXT("FAIL")); });
+		if (TestTrue(TEXT("A failing light row exists"), LightRow != nullptr))
 		{
-			TestTrue(TEXT("Outcome still fails"), LightRow->Outcome.StartsWith(TEXT("FAIL")));
-			TestTrue(TEXT("Outcome names the differing field"), LightRow->Outcome.Contains(TEXT("IES texture")));
+			TestTrue(TEXT("Outcome names the differing field"), LightRow->Outcome.Contains(TEXT("intensity")));
 		}
 		TestTrue(TEXT("A diagnostic also names the differing field"),
-			Corrupted.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("IES texture")); }));
+			Corrupted.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("intensity expected=")); }));
 	}
 
 	// Unavailable-IES rule (Amendments 9 and 18): an IES profile file that is empty (here), absent or not
@@ -3790,8 +3791,8 @@ bool FConVerseLightVerificationNamesFieldTest::RunTest(const FString&)
 		TestTrue(TEXT("It is listed as an unavailable profile, marked empty"),
 			Analyzed.UnavailableIesProfiles.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("(empty file)")); }));
 		TestTrue(TEXT("It is not offered for acceptance as a missing texture"), Analyzed.MissingTextures.IsEmpty());
-		TestTrue(TEXT("The report carries a warning"),
-			Analyzed.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("WARN IES profile unavailable")); }));
+		TestTrue(TEXT("The report carries an omission warning"),
+			Analyzed.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("WARN IES profile omitted")); }));
 
 		// With no acceptance of any kind, the import proceeds and the light verifies with a warning.
 		const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(BaseOptions);
@@ -3802,7 +3803,15 @@ bool FConVerseLightVerificationNamesFieldTest::RunTest(const FString&)
 		const auto* LightRow = Imported.InspectionRows.FindByPredicate(
 			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
 		if (TestTrue(TEXT("The IES light row exists"), LightRow != nullptr))
-			TestTrue(TEXT("The missing profile is a visible warning"), LightRow->Outcome.Contains(TEXT("IES profile unavailable (warning)")));
+		{
+			TestTrue(TEXT("The missing profile is a visible warning"), LightRow->Outcome.Contains(TEXT("IES profile unavailable (warning, omitted)")));
+			auto* Component = Cast<ULocalLightComponent>(LightRow->ComponentPath.ResolveObject());
+			if (TestTrue(TEXT("Omitted-profile light component resolves"), Component != nullptr))
+			{
+				TestTrue(TEXT("Unusable IES texture is not imported"), Component->IESTexture == nullptr);
+				TestFalse(TEXT("Unusable IES brightness override is disabled"), Component->bUseIESBrightness);
+			}
+		}
 	}
 
 	return true;
@@ -3853,14 +3862,12 @@ bool FConVerseExtensionlessIesIsUnimportableTest::RunTest(const FString&)
 		Analyzed.UnavailableIesProfiles.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("without a .ies extension")); }));
 	TestTrue(TEXT("It is not offered for acceptance as a missing texture"), Analyzed.MissingTextures.IsEmpty());
 	TestTrue(TEXT("A warning is in the report"),
-		Analyzed.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("WARN IES profile unavailable")); }));
+		Analyzed.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.StartsWith(TEXT("WARN IES profile omitted")); }));
 
-	// With no acceptance of any kind, the real Datasmith importer creates no profile and the light still
-	// verifies, with the warning visible on it.
-	const auto ImportAndCheck = [&](const TCHAR* What, const TCHAR* ExpectedEngineError)
+	// The real Datasmith importer receives no unusable IES element, so it should emit no IES error.
+	const auto ImportAndCheck = [&](const FConVerseOptimizedImportOptions& Base, const TCHAR* What)
 	{
-		AddExpectedError(ExpectedEngineError, EAutomationExpectedErrorFlags::Contains, 1);
-		FConVerseOptimizedImportOptions Run = Options;
+		FConVerseOptimizedImportOptions Run = Base;
 		Run.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		const auto Imported = FConVerseDatasmithImportService::ImportAndVerify(Run);
 		auto* Manifest = Cast<UConVerseOptimizedImportManifest>(Imported.ManifestAssetPath.ResolveObject());
@@ -3870,11 +3877,19 @@ bool FConVerseExtensionlessIesIsUnimportableTest::RunTest(const FString&)
 		const auto* LightRow = Imported.InspectionRows.FindByPredicate(
 			[](const FConVerseImportInspectionRow& Row) { return Row.SourceElement == TEXT("FixtureLight0"); });
 		if (TestTrue(*FString::Printf(TEXT("%s: the IES light row exists"), What), LightRow != nullptr))
-			TestTrue(*FString::Printf(TEXT("%s: the missing profile is a visible warning"), What), LightRow->Outcome.Contains(TEXT("IES profile unavailable (warning)")));
+		{
+			TestTrue(*FString::Printf(TEXT("%s: profile omission is visible"), What), LightRow->Outcome.Contains(TEXT("IES profile unavailable (warning, omitted)")));
+			auto* Component = Cast<ULocalLightComponent>(LightRow->ComponentPath.ResolveObject());
+			if (TestTrue(*FString::Printf(TEXT("%s: light component resolves"), What), Component != nullptr))
+			{
+				TestTrue(*FString::Printf(TEXT("%s: unusable profile is not imported"), What), Component->IESTexture == nullptr);
+				TestFalse(*FString::Printf(TEXT("%s: profile brightness override is disabled"), What), Component->bUseIESBrightness);
+			}
+		}
 		TestTrue(*FString::Printf(TEXT("%s: the warning is in the report"), What),
-			Imported.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("IES profile unavailable")); }));
+			Imported.Diagnostics.ContainsByPredicate([](const FString& Line) { return Line.Contains(TEXT("IES profile omitted")); }));
 	};
-	ImportAndCheck(TEXT("Extensionless"), TEXT("Texture import failed"));
+	ImportAndCheck(Options, TEXT("Extensionless"));
 
 	// The same for a profile file that is simply absent.
 	IFileManager::Get().Delete(*Extensionless);
@@ -3882,7 +3897,25 @@ bool FConVerseExtensionlessIesIsUnimportableTest::RunTest(const FString&)
 	TestTrue(TEXT("An absent IES does not stop preflight"), Absent.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
 	TestTrue(TEXT("It is listed as an unavailable profile"), Absent.UnavailableIesProfiles.Num() == 1 && !Absent.UnavailableIesProfiles[0].Contains(TEXT("(")));
 	TestTrue(TEXT("It is not offered for acceptance as a missing texture"), Absent.MissingTextures.IsEmpty());
-	ImportAndCheck(TEXT("Absent"), TEXT("Unable to find ies file"));
+	ImportAndCheck(Options, TEXT("Absent"));
+
+	FFixtureFiles MalformedFixture;
+	if (!TestTrue(TEXT("Create malformed-profile fixture"), CreateFixture(MalformedFixture, Error, 0, FString(), false, true, false, false, true))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*MalformedFixture.RootDirectory, false, true); };
+	FConVerseOptimizedImportOptions MalformedOptions;
+	MalformedOptions.FilePath = MalformedFixture.SceneFile;
+	MalformedOptions.DestinationPath = TEXT("/Game/__ConVerseAutomation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	MalformedOptions.bAutomated = true;
+	MalformedOptions.TextureSearchFolders.Reset();
+	const auto ValidProfilePlan = FConVerseDatasmithImportService::Analyze(MalformedOptions);
+	const FString MalformedIes = TEXT("IESNA:LM-63-2002\nTILT=NONE\n1\n1000\n1\n2147483647\n2147483647\n1\n2\n0\n0\n0\n1\n1\n1\n");
+	if (!TestTrue(TEXT("Write malformed oversized-count profile"), FFileHelper::SaveStringToFile(MalformedIes, *MalformedFixture.IESFile))) return false;
+	const auto MalformedPlan = FConVerseDatasmithImportService::Analyze(MalformedOptions);
+	TestTrue(TEXT("Malformed IES does not stop preflight"), MalformedPlan.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded);
+	TestTrue(TEXT("Malformed profile is classified unusable"),
+		MalformedPlan.UnavailableIesProfiles.ContainsByPredicate([](const FString& Entry) { return Entry.Contains(TEXT("invalid IES profile")); }));
+	TestTrue(TEXT("Omitting malformed IES changes plan identity"), ValidProfilePlan.PlanId != MalformedPlan.PlanId);
+	ImportAndCheck(MalformedOptions, TEXT("Malformed"));
 	return true;
 }
 

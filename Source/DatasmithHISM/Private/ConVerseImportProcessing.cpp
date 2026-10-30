@@ -10,6 +10,7 @@
 #include "DatasmithAssetUserData.h"
 #include "Engine/TextureLightProfile.h"
 #include "Engine/StaticMesh.h"
+#include "IESConverter.h"
 #include "MeshDescription.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/UObjectIterator.h"
@@ -19,6 +20,8 @@
 #include "IDatasmithSceneElements.h"
 #include "JsonObjectConverter.h"
 #include "Internationalization/Regex.h"
+#include "Misc/DefaultValueHelper.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/ScopedSlowTask.h"
@@ -331,25 +334,171 @@ namespace ConVerseImportProcessing
 		return Progress.IsCancelled() ? EConVerseImportWorkResult::Cancelled : EConVerseImportWorkResult::Completed;
 	}
 
-	// A 0-byte dependency file is exactly as unusable as an absent one: FPaths::FileExists is true for
-	// an empty file, so a truncated/zero-length export (observed for a Revit IES sidecar) would
-	// otherwise sail through preflight and produce content with a silently missing dependency.
-	// IFileManager::FileSize returns -1 when the path does not exist at all, so both cases collapse here.
+	// Appended to a missing-dependency entry when the file exists but is 0 bytes.
+	static const TCHAR* const EmptyDependencyFileSuffix = TEXT(" (empty file)");
+	static const TCHAR* const UnimportableIesSuffix = TEXT(" (IES file without a .ies extension)");
 	static bool IsDependencyFileUnusable(const FString& Path)
 	{
 		return IFileManager::Get().FileSize(*Path) <= 0;
 	}
 
-	// Appended to a missing-dependency entry when the file exists but is 0 bytes, so the report
-	// distinguishes "never there" from "present but empty" without changing the exact-string
-	// acceptance matching in ValidateDependencies: both entry shapes are still compared verbatim.
-	static const TCHAR* const EmptyDependencyFileSuffix = TEXT(" (empty file)");
+	static constexpr int64 MaximumIesProfileBytes = 16 * 1024 * 1024;
+	static constexpr int32 MaximumIesAngleCount = 4096;
+	static constexpr int64 MaximumIesCandelaSamples = 1000000;
 
-	// Amendment 18: Datasmith creates an IES profile by handing the texture factory the file's extension
-	// (FDatasmithTextureImporter::CreateIESTexture), and the factory only builds a light profile from
-	// "ies". An IES file with no such extension is present and non-empty yet imports to nothing, which
-	// is how a Revit export's extensionless "Generic" profile silently left 67 lights without one.
-	static const TCHAR* const UnimportableIesSuffix = TEXT(" (IES file without a .ies extension)");
+	static bool IsUsableIesProfileFile(const FString& Path, FString& OutReason)
+	{
+		OutReason.Reset();
+		const int64 FileSize = IFileManager::Get().FileSize(*Path);
+		if (FileSize <= 0)
+		{
+			OutReason = FileSize == 0 ? TEXT("empty file") : TEXT("file is absent");
+			return false;
+		}
+		if (FileSize > MaximumIesProfileBytes)
+		{
+			OutReason = TEXT("file exceeds the 16 MiB validation limit");
+			return false;
+		}
+
+		TArray<uint8> Bytes;
+		if (!FFileHelper::LoadFileToArray(Bytes, *Path) || Bytes.Num() != FileSize)
+		{
+			OutReason = TEXT("file could not be read completely");
+			return false;
+		}
+		for (int32 Index = 0; Index < Bytes.Num(); ++Index)
+		{
+			const uint8 Byte = Bytes[Index];
+			const bool bUtf8BomByte = Index < 3 && Bytes.Num() >= 3
+				&& Bytes[0] == 0xef && Bytes[1] == 0xbb && Bytes[2] == 0xbf;
+			if (bUtf8BomByte) continue;
+			if (Byte == 0 || Byte > 0x7e || (Byte < 0x20 && Byte != '\r' && Byte != '\n' && Byte != '\t'))
+			{
+				OutReason = TEXT("file is not plain-text LM-63 data");
+				return false;
+			}
+		}
+
+		Bytes.Add(0);
+		const FString Text(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Bytes.GetData())));
+		TArray<FString> Lines;
+		Text.ParseIntoArrayLines(Lines, false);
+		int32 TiltLine = INDEX_NONE;
+		for (int32 Index = 0; Index < Lines.Num(); ++Index)
+		{
+			FString Line = Lines[Index];
+			Line.TrimStartAndEndInline();
+			if (Line == TEXT("TILT=NONE"))
+			{
+				TiltLine = Index;
+				break;
+			}
+			if (Line.StartsWith(TEXT("TILT="), ESearchCase::CaseSensitive))
+			{
+				OutReason = TEXT("UE supports only TILT=NONE profiles");
+				return false;
+			}
+		}
+		if (TiltLine == INDEX_NONE)
+		{
+			OutReason = TEXT("LM-63 TILT=NONE section is missing");
+			return false;
+		}
+
+		FString NumericData;
+		for (int32 Index = TiltLine + 1; Index < Lines.Num(); ++Index)
+		{
+			NumericData += Lines[Index];
+			NumericData += TEXT("\n");
+		}
+		TArray<FString> Tokens;
+		NumericData.ParseIntoArrayWS(Tokens);
+		int32 TokenIndex = 0;
+		const auto ParseInt = [&Tokens, &TokenIndex](int32& Value)
+		{
+			return TokenIndex < Tokens.Num() && FDefaultValueHelper::ParseInt(Tokens[TokenIndex++], Value);
+		};
+		const auto ParseFloat = [&Tokens, &TokenIndex](float& Value)
+		{
+			return TokenIndex < Tokens.Num() && FDefaultValueHelper::ParseFloat(Tokens[TokenIndex++], Value) && FMath::IsFinite(Value);
+		};
+
+		int32 LightCount = 0;
+		float LumensPerLamp = 0.0f;
+		float CandelaMultiplier = 0.0f;
+		int32 VerticalCount = 0;
+		int32 HorizontalCount = 0;
+		int32 PhotometricType = 0;
+		int32 UnitType = 0;
+		if (!ParseInt(LightCount) || !ParseFloat(LumensPerLamp) || !ParseFloat(CandelaMultiplier)
+			|| !ParseInt(VerticalCount) || !ParseInt(HorizontalCount) || !ParseInt(PhotometricType) || !ParseInt(UnitType))
+		{
+			OutReason = TEXT("LM-63 header values are incomplete or malformed");
+			return false;
+		}
+		float HeaderValues[6] = {};
+		for (float& Value : HeaderValues)
+		{
+			if (!ParseFloat(Value))
+			{
+				OutReason = TEXT("LM-63 header values are incomplete or malformed");
+				return false;
+			}
+		}
+		if (LightCount < 1 || CandelaMultiplier < 0.0f || PhotometricType < 1 || PhotometricType > 3
+			|| UnitType < 1 || UnitType > 2 || VerticalCount < 1 || VerticalCount > MaximumIesAngleCount
+			|| HorizontalCount < 1 || HorizontalCount > MaximumIesAngleCount)
+		{
+			OutReason = TEXT("LM-63 header contains unsupported values or excessive angle counts");
+			return false;
+		}
+		const int64 SampleCount = int64(VerticalCount) * int64(HorizontalCount);
+		if (SampleCount <= 0 || SampleCount > MaximumIesCandelaSamples)
+		{
+			OutReason = TEXT("LM-63 candela sample count exceeds the validation limit");
+			return false;
+		}
+
+		const auto ParseAngles = [&ParseFloat, &OutReason](int32 Count)
+		{
+			float Previous = -FLT_MAX;
+			for (int32 Index = 0; Index < Count; ++Index)
+			{
+				float Angle = 0.0f;
+				if (!ParseFloat(Angle) || Angle < Previous)
+				{
+					OutReason = TEXT("LM-63 angles are incomplete or not ordered");
+					return false;
+				}
+				Previous = Angle;
+			}
+			return true;
+		};
+		if (!ParseAngles(VerticalCount) || !ParseAngles(HorizontalCount)) return false;
+		for (int64 Index = 0; Index < SampleCount; ++Index)
+		{
+			float Candela = 0.0f;
+			if (!ParseFloat(Candela) || !FMath::IsFinite(Candela * CandelaMultiplier))
+			{
+				OutReason = TEXT("LM-63 candela samples are incomplete or malformed");
+				return false;
+			}
+		}
+		if (TokenIndex < Tokens.Num() && !(TokenIndex + 1 == Tokens.Num() && Tokens[TokenIndex] == TEXT("END")))
+		{
+			OutReason = TEXT("LM-63 profile has unexpected trailing data");
+			return false;
+		}
+
+		FIESConverter Converter(Bytes.GetData(), uint32(Bytes.Num() - 1));
+		if (!Converter.IsValid())
+		{
+			OutReason = TEXT("UE rejected the LM-63 profile");
+			return false;
+		}
+		return true;
+	}
 
 	// Exporters sometimes reference library textures (for example Autodesk's shared material images)
 	// without copying them beside the source. Only the in-memory element is repointed; nothing is copied.
@@ -485,19 +634,59 @@ namespace ConVerseImportProcessing
 	{
 		Result.MissingTextures.Reset();
 		Result.UnavailableIesProfiles.Reset();
+		Result.UnavailableIesProfileReasons.Reset();
+		Result.UnavailableIesLightReasons.Reset();
+		Result.IesOmissionPlanIdentity.Reset();
 		Result.MissingMeshFiles.Reset();
+		TMap<FString, FString> IesValidationCache;
 		auto Check = [&](const TCHAR* File, const TCHAR* Element, TArray<FString>& Missing, bool bIesProfile = false)
 		{
 			FString Path(File);
 			if (Path.IsEmpty() || Path.StartsWith(TEXT("/Game/")) || Path.StartsWith(TEXT("/Engine/"))) return;
 			if (FPaths::IsRelative(Path)) Path = FPaths::ConvertRelativePathToFull(FPaths::GetPath(Options.FilePath), Path);
 			const int64 Size = IFileManager::Get().FileSize(*Path);
-			if (Size < 0) Missing.Add(FString(Element) + TEXT(": ") + Path);
-			// Present but 0 bytes: still unusable, but named distinctly from "absent" in the report.
-			else if (Size == 0) Missing.Add(FString(Element) + TEXT(": ") + Path + EmptyDependencyFileSuffix);
-			// Present and non-empty, but Datasmith cannot turn it into an IES profile.
+			FString Reason;
+			FString Suffix;
+			if (Size < 0)
+			{
+				Reason = TEXT("profile file is absent");
+			}
+			else if (Size == 0)
+			{
+				Reason = TEXT("profile file is empty");
+				Suffix = EmptyDependencyFileSuffix;
+			}
 			else if (bIesProfile && !FPaths::GetExtension(Path).Equals(TEXT("ies"), ESearchCase::IgnoreCase))
-				Missing.Add(FString(Element) + TEXT(": ") + Path + UnimportableIesSuffix);
+			{
+				Reason = TEXT("profile file extension is not .ies");
+				Suffix = UnimportableIesSuffix;
+			}
+			else if (bIesProfile)
+			{
+				FString CacheKey = Path;
+				FPaths::NormalizeFilename(CacheKey);
+#if PLATFORM_WINDOWS
+				CacheKey.ToLowerInline();
+#endif
+				if (!IesValidationCache.Contains(CacheKey))
+				{
+					FString ValidationReason;
+					IsUsableIesProfileFile(Path, ValidationReason);
+					IesValidationCache.Add(CacheKey, MoveTemp(ValidationReason));
+				}
+				Reason = IesValidationCache.FindRef(CacheKey);
+				if (!Reason.IsEmpty())
+					Suffix = FString::Printf(TEXT(" (invalid IES profile: %s)"), *Reason);
+			}
+
+			if (Reason.IsEmpty()) return;
+			const FString Entry = FString(Element) + TEXT(": ") + Path + Suffix;
+			Missing.Add(Entry);
+			if (bIesProfile)
+			{
+				Result.UnavailableIesProfileReasons.Add(Element, Reason);
+				Result.IesOmissionPlanIdentity.Add(FString(Element) + TEXT("|") + Reason);
+			}
 		};
 		const int64 Total = int64(Scene->GetMeshesCount()) + Scene->GetTexturesCount();
 		int64 Completed = 0;
@@ -519,7 +708,31 @@ namespace ConVerseImportProcessing
 			if (!Progress.Update(EConVerseImportWorkPhase::Dependencies, ++Completed, Total)) return EConVerseImportWorkResult::Cancelled;
 		}
 		for (const FString& Profile : Result.UnavailableIesProfiles)
-			Result.Diagnostics.Add(TEXT("WARN IES profile unavailable, the light imports without it: ") + Profile);
+			Result.Diagnostics.Add(TEXT("WARN IES profile omitted before import: ") + Profile);
+		TFunction<void(const TSharedPtr<IDatasmithActorElement>&)> RecordOmittedLights;
+		RecordOmittedLights = [&](const TSharedPtr<IDatasmithActorElement>& Actor)
+		{
+			if (!Actor.IsValid()) return;
+			if (Actor->IsA(EDatasmithElementType::PointLight) || Actor->IsA(EDatasmithElementType::DirectionalLight))
+			{
+				const auto Light = StaticCastSharedPtr<IDatasmithLightActorElement>(Actor);
+				if (Light->GetUseIes())
+				{
+					if (const FString* ProfileReason = Result.UnavailableIesProfileReasons.Find(Light->GetIesTexturePathName()))
+					{
+						FString LightReason = *ProfileReason;
+						if (Light->GetUseIesBrightness())
+							LightReason += TEXT("; profile brightness override disabled, source light intensity retained");
+					Result.UnavailableIesLightReasons.Add(Actor->GetName(), LightReason);
+						Result.Diagnostics.Add(FString::Printf(TEXT("WARN light %s | IES profile omitted: %s; profile light distribution unavailable"),
+							Actor->GetName(), *LightReason));
+					}
+				}
+			}
+			for (int32 Index = 0; Index < Actor->GetChildrenCount(); ++Index) RecordOmittedLights(Actor->GetChild(Index));
+		};
+		for (int32 Index = 0; Index < Scene->GetActorsCount(); ++Index) RecordOmittedLights(Scene->GetActor(Index));
+		Result.IesOmissionPlanIdentity.Sort();
 		// Missing geometry always fails. A missing texture proceeds only when the user explicitly accepted
 		// that exact file, so the decision never silently extends to textures they were not shown.
 		TArray<FString> Unaccepted;
@@ -538,23 +751,33 @@ namespace ConVerseImportProcessing
 		return EConVerseImportWorkResult::Completed;
 	}
 
-	// Resolves a light's GetIesTexturePathName() to the absolute source file it names, the same way
-	// FDatasmithImporterUtils::FindAsset resolves it at import time: as the name of a scene texture
-	// element. Returns an empty string when the name does not match any scene texture, which fails
-	// closed - an unresolved reference is never treated as accepted.
-	static FString ResolveIesTextureFilePath(const TSharedRef<IDatasmithScene>& Source, const FString& IesTexturePathName, const FString& SourceFilePath)
+	void StripUnavailableIesProfiles(const TSharedRef<IDatasmithScene>& Scene, FConVerseOptimizedImportResult& Result)
 	{
-		if (IesTexturePathName.IsEmpty()) return FString();
-		for (int32 Index = 0; Index < Source->GetTexturesCount(); ++Index)
+		if (Result.UnavailableIesProfileReasons.IsEmpty()) return;
+		TFunction<void(const TSharedPtr<IDatasmithActorElement>&)> StripLightReference;
+		StripLightReference = [&](const TSharedPtr<IDatasmithActorElement>& Actor)
 		{
-			const auto& Texture = Source->GetTexture(Index);
-			if (!Texture.IsValid() || FString(Texture->GetName()) != IesTexturePathName) continue;
-			FString Path(Texture->GetFile());
-			if (Path.IsEmpty()) return FString();
-			if (FPaths::IsRelative(Path)) Path = FPaths::ConvertRelativePathToFull(FPaths::GetPath(SourceFilePath), Path);
-			return Path;
+			if (!Actor.IsValid()) return;
+			if (Actor->IsA(EDatasmithElementType::PointLight) || Actor->IsA(EDatasmithElementType::DirectionalLight))
+			{
+				const auto Light = StaticCastSharedPtr<IDatasmithLightActorElement>(Actor);
+				if (Result.UnavailableIesProfileReasons.Contains(Light->GetIesTexturePathName()))
+				{
+					Light->SetIesTexturePathName(TEXT(""));
+					Light->SetUseIes(false);
+					Light->SetUseIesBrightness(false);
+				}
+			}
+			for (int32 Index = 0; Index < Actor->GetChildrenCount(); ++Index) StripLightReference(Actor->GetChild(Index));
+		};
+		for (int32 Index = 0; Index < Scene->GetActorsCount(); ++Index) StripLightReference(Scene->GetActor(Index));
+
+		for (int32 Index = Scene->GetTexturesCount() - 1; Index >= 0; --Index)
+		{
+			const TSharedPtr<IDatasmithTextureElement> Texture = Scene->GetTexture(Index);
+			if (Texture.IsValid() && Result.UnavailableIesProfileReasons.Contains(Texture->GetName()))
+				Scene->RemoveTexture(Texture);
 		}
-		return FString();
 	}
 
 	bool VerifyLights(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
@@ -572,21 +795,8 @@ namespace ConVerseImportProcessing
 			}
 		}
 
-		// Amendments 9 and 18: a light whose IES profile file is absent, empty or not importable does not
-		// fail verification over that one field; it is reported as a warning. No acceptance is needed.
-		// Entries are exact "<Element>: <Path>[ suffix]" strings as ValidateDependencies records them, so
-		// the path is recovered by stripping the known prefix and suffixes rather than re-deriving
-		// unavailability here.
-		TSet<FString> AcceptedMissingTexturePaths;
-		for (const FString& Entry : Result.UnavailableIesProfiles)
-		{
-			const int32 SeparatorIndex = Entry.Find(TEXT(": "));
-			if (SeparatorIndex == INDEX_NONE) continue;
-			FString Path = Entry.Mid(SeparatorIndex + 2);
-			Path.RemoveFromEnd(EmptyDependencyFileSuffix);
-			Path.RemoveFromEnd(UnimportableIesSuffix);
-			AcceptedMissingTexturePaths.Add(Path);
-		}
+		// Intentionally omitted profiles are keyed by source light identity. A valid profile that
+		// disappears during Datasmith import remains a verification failure.
 
 		TMap<FString, ULightComponent*> ByElement;
 		for (TActorIterator<AActor> It(&World); It; ++It)
@@ -612,11 +822,14 @@ namespace ConVerseImportProcessing
 			{
 				++OutTotalLightCount;
 				const auto Light = StaticCastSharedPtr<IDatasmithLightActorElement>(Actor);
+				const FString* OmittedIesReason = Result.UnavailableIesLightReasons.Find(Actor->GetName());
+				const bool bIesProfileOmitted = OmittedIesReason != nullptr;
 				ULightComponent* const* Found = ByElement.Find(Actor->GetName());
 				ULightComponent* Component = Found ? *Found : nullptr;
 
 				TArray<FString> Fragments;
-				bool bIESMissingAccepted = false;
+				// IES is best effort: profile discrepancies warn but never fail or roll back the import.
+				TArray<FString> IesWarnings;
 				if (!Component)
 				{
 					Fragments.Add(TEXT("component missing"));
@@ -648,20 +861,21 @@ namespace ConVerseImportProcessing
 							Fragments.Add(FString::Printf(TEXT("units expected=%d actual=%d"), int32(Expected), int32(Component->GetLightUnits())));
 					}
 
-					if (Light->GetUseIes())
+					if (bIesProfileOmitted)
+					{
+						if (Component->IESTexture)
+							IesWarnings.Add(TEXT("omitted IES profile unexpectedly imported"));
+						if (Component->bUseIESBrightness)
+							IesWarnings.Add(TEXT("omitted IES profile brightness override is still enabled"));
+					}
+					else if (Light->GetUseIes())
 					{
 						if (!Component->IESTexture)
-						{
-							const FString IesPath = ResolveIesTextureFilePath(Source, Light->GetIesTexturePathName(), Result.SourceFilePath);
-							if (!IesPath.IsEmpty() && AcceptedMissingTexturePaths.Contains(IesPath))
-								bIESMissingAccepted = true;
-							else
-								Fragments.Add(TEXT("IES texture expected=present actual=missing"));
-						}
+							IesWarnings.Add(TEXT("IES texture expected=present actual=missing"));
 						if (Component->bUseIESBrightness != Light->GetUseIesBrightness())
-							Fragments.Add(FString::Printf(TEXT("bUseIESBrightness expected=%d actual=%d"), Light->GetUseIesBrightness() ? 1 : 0, Component->bUseIESBrightness ? 1 : 0));
+							IesWarnings.Add(FString::Printf(TEXT("bUseIESBrightness expected=%d actual=%d"), Light->GetUseIesBrightness() ? 1 : 0, Component->bUseIESBrightness ? 1 : 0));
 						if (!FMath::IsNearlyEqual(double(Component->IESBrightnessScale), Light->GetIesBrightnessScale(), 0.0001))
-							Fragments.Add(FString::Printf(TEXT("IES brightness scale expected=%.9g actual=%.9g"), Light->GetIesBrightnessScale(), double(Component->IESBrightnessScale)));
+							IesWarnings.Add(FString::Printf(TEXT("IES brightness scale expected=%.9g actual=%.9g"), Light->GetIesBrightnessScale(), double(Component->IESBrightnessScale)));
 					}
 				}
 
@@ -670,8 +884,10 @@ namespace ConVerseImportProcessing
 				Inspection.SourceElement = Actor->GetName(); Inspection.Label = Actor->GetLabel();
 				if (!bMatch)
 					Inspection.Outcome = TEXT("FAIL: light settings differ from source: ") + FString::Join(Fragments, TEXT("; "));
-				else if (bIESMissingAccepted)
-					Inspection.Outcome = TEXT("Light: source values preserved; IES profile unavailable (warning)");
+				else if (bIesProfileOmitted)
+					Inspection.Outcome = TEXT("Light: non-IES source values preserved; IES profile unavailable (warning, omitted): ") + *OmittedIesReason;
+				else if (!IesWarnings.IsEmpty())
+					Inspection.Outcome = TEXT("Light: non-IES source values preserved; IES profile differs (warning): ") + FString::Join(IesWarnings, TEXT("; "));
 				else
 					Inspection.Outcome = TEXT("Light: source values preserved");
 				Inspection.ComponentPath = FSoftObjectPath(Component);
@@ -703,10 +919,12 @@ namespace ConVerseImportProcessing
 				}
 				const FString FragmentSuffix = bMatch ? FString() : (TEXT(" | ") + FString::Join(Fragments, TEXT("; ")));
 				Result.Diagnostics.Add(FString::Printf(TEXT("%s light %s | source intensity=%.9g | source IES=%d | applied=%s%s"),
-					bMatch ? TEXT("PASS") : TEXT("FAIL"), Actor->GetName(), Light->GetIntensity(), Light->GetUseIes(), *GetPathNameSafe(Component),
+					bMatch ? TEXT("PASS") : TEXT("FAIL"), Actor->GetName(), Light->GetIntensity(), (Light->GetUseIes() || bIesProfileOmitted) ? 1 : 0, *GetPathNameSafe(Component),
 					*FragmentSuffix));
-				if (bIESMissingAccepted)
-					Result.Diagnostics.Add(FString::Printf(TEXT("WARN light %s | IES profile unavailable (warning)"), Actor->GetName()));
+				if (bIesProfileOmitted)
+						Result.Diagnostics.Add(FString::Printf(TEXT("WARN light %s | IES profile omitted: %s"), Actor->GetName(), **OmittedIesReason));
+				if (!IesWarnings.IsEmpty())
+					Result.Diagnostics.Add(FString::Printf(TEXT("WARN light %s | IES profile differs: %s"), Actor->GetName(), *FString::Join(IesWarnings, TEXT("; "))));
 				if (!bMatch) ++OutFailedLightCount;
 				bPassed &= bMatch;
 			}
@@ -765,12 +983,31 @@ namespace ConVerseImportProcessing
 				*Imported = Replacement;
 			}
 		}
+		// UStaticMesh::SetMaterial rebuilds per call; edit all slots, then post one change per mesh.
+		FProperty* StaticMaterialsProperty = FindFProperty<FProperty>(UStaticMesh::StaticClass(), UStaticMesh::GetStaticMaterialsName());
+		check(StaticMaterialsProperty);
 		for (auto& Pair : ImportedScene.StaticMeshes)
 		{
 			UStaticMesh* Mesh = Pair.Value.LoadSynchronous();
 			if (!Mesh || !Mesh->GetOutermost()->GetName().StartsWith(AttemptFolder + TEXT("/"))) continue;
-			for (int32 Slot = 0; Slot < Mesh->GetStaticMaterials().Num(); ++Slot)
-				if (UMaterialInterface** Target = Replacements.Find(Mesh->GetMaterial(Slot))) Mesh->SetMaterial(Slot, *Target);
+			bool bMeshChanged = false;
+			for (FStaticMaterial& StaticMaterial : Mesh->GetStaticMaterials())
+			{
+				UMaterialInterface** Target = Replacements.Find(StaticMaterial.MaterialInterface);
+				if (!Target) continue;
+				if (!bMeshChanged)
+				{
+					Mesh->Modify();
+					Mesh->PreEditChange(StaticMaterialsProperty);
+					bMeshChanged = true;
+				}
+				StaticMaterial.MaterialInterface = *Target;
+			}
+			if (bMeshChanged)
+			{
+				FPropertyChangedEvent ChangedEvent(StaticMaterialsProperty);
+				Mesh->PostEditChangeProperty(ChangedEvent);
+			}
 		}
 		for (TActorIterator<AActor> It(&World); It; ++It)
 		{
@@ -779,8 +1016,18 @@ namespace ConVerseImportProcessing
 			{
 				UStaticMesh* Mesh = Component->GetStaticMesh();
 				if (!Mesh || !Mesh->GetOutermost()->GetName().StartsWith(AttemptFolder + TEXT("/"))) continue;
+				bool bComponentModified = false;
 				for (int32 Slot = 0; Slot < Component->GetNumMaterials(); ++Slot)
-					if (UMaterialInterface** Target = Replacements.Find(Component->GetMaterial(Slot))) Component->SetMaterial(Slot, *Target);
+				{
+					UMaterialInterface** Target = Replacements.Find(Component->GetMaterial(Slot));
+					if (!Target) continue;
+					if (!bComponentModified)
+					{
+						Component->Modify();
+						bComponentModified = true;
+					}
+					Component->SetMaterial(Slot, *Target);
+				}
 			}
 		}
 		return Progress.IsCancelled() ? EConVerseImportWorkResult::Cancelled : EConVerseImportWorkResult::Completed;

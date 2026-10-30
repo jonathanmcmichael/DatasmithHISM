@@ -149,7 +149,7 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 	DetailsArgs.NameAreaSettings = FDetailsViewArgs::HideNameArea;
 	TSharedRef<IDetailsView> ProcessingDetails = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor")).CreateDetailView(DetailsArgs);
 	ProcessingDetails->SetObject(ProcessingRecipe.Get());
-	ProcessingDetails->OnFinishedChangingProperties().AddLambda([this](const FPropertyChangedEvent&) { MarkInputsChanged(); });
+	ProcessingDetails->OnFinishedChangingProperties().AddSPLambda(this, [this](const FPropertyChangedEvent&) { MarkInputsChanged(); });
 
 	ChildSlot
 	[

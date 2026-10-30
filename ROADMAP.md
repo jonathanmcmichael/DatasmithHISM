@@ -1,85 +1,41 @@
 # DatasmithHISM roadmap
 
-Accepted scope, priorities, gates and risks. Current build, test and live-check status is in the [handoff](HANDOFF.md#current-status). Required behavior is in the [import contract](IMPORT_PANEL_VALIDATION.md); decision rationale is in the [ADRs](Docs/ADR/README.md). The dated history is in the [journal](Docs/History/JOURNAL.md).
+This roadmap orders work by the plugin's purpose. The [handoff](HANDOFF.md#current-status) owns current build/test status and the ordered live UI checklist; the [import contract](IMPORT_PANEL_VALIDATION.md) owns required behavior. Dated results live in [validation evidence](Docs/VALIDATION.md), and design decisions in the [ADRs](Docs/ADR/README.md). Historical plans are not an active queue.
 
-## Core goal
+## Product goal and release test
 
-Import Revit Datasmith exports into the **fastest, most performant Unreal scene**, with **materials matched** to curated Unreal targets, without losing data or weakening the safety contract.
+Make large Revit Datasmith models usable in Unreal when thousands of individual mesh actors/components hurt performance. The primary workflow imports a source, groups compatible repeated objects into **ISM or HISM components**, and keeps non-groupable objects as ordinary meshes. The result must preserve source identity, placement, and inspectability without silently losing data or tracked edits. Nanite is an optional, separate optimization for suitable meshes; it does not replace instancing. Materials are not the reason to ship this plugin: use Datasmith's imported materials by default, with explicit reviewed replacements available but no curated library requirement.
 
-Everything below is ordered by that goal. Work that does not serve speed, material matching, or no-data-loss safety is deferred.
+**Success is not just fewer actors or a passing import.** Compare ordinary, ISM, and HISM versions of the same large source in a packaged runtime at the same camera views and settings. Record actor/component counts, CPU and GPU frame time, draw calls, memory, visual/geometry fidelity, and import/build time separately. Determine when ISM or HISM actually helps, when it does not, and whether Nanite changes that result before claiming a performance gain.
 
-## Core vs deferred
+## Feature closure
 
-| Core (in scope now) | Deferred (needs a scope decision first) |
-|---|---|
-| Measured import and runtime performance | Phase 6 extensions (relinking, cleanup, cross-asset dedupe, visualization, material pack) |
-| Nanite and instancing policy that cannot hit engine limits | New persistence/recovery stages beyond the proven ones |
-| Curated material matching | Tracked lifecycle for legacy tools |
-| The existing safety contract and its real-dispatch tests | Named-copy ownership migration |
-| Fidelity of what is imported (alignment, identity) | Automatic cleanup of retained interrupted sessions |
-
-## Release decisions
-
-- Support Unreal Editor import and already imported output in packaged Windows applications.
-- Keep tracked import primary and preserve separate guarantees for legacy selection conversion.
-- Preserve source geometry, alignment, identity, hierarchy, and meaningful scene-component roots.
-- Warn about tracked manual changes and require explicit replacement authorization. Keep material approvals and mesh exceptions as persistent settings.
-- Preserve failed-verification acceptance as an explicit whole-session decision that quarantines degraded output.
-- Keep unknown ownership/future schemas blocked, stock reimport refused, and automatic cleanup deferred.
-
-## Priorities
-
-| # | Workstream | Status | Done when |
+| Feature / purpose | Implemented and demonstrated | Still open for this feature | Future state / priority |
 |---|---|---|---|
-| 1 | **Benchmark harness** | Mechanism done 2026-10-01: commandlet `-MetricsFile` / `-Budget` (import-side metrics) with automation coverage. No baselines yet. Status in the [handoff](HANDOFF.md#current-status). | Three representative Revit exports (ARCH, HVAC, one large unique-mesh model) have recorded baselines and budgets; a regression fails the headless run. Rendered metrics (draw calls, frame time on a fixed camera path) are a separate follow-up and are not implied by import-side budgets. |
-| 2 | **Budget-aware Nanite policy** | Partly done: mesh-count budget by placements (Amendment 15) and Nanite as a separate Apply step on a committed import (Amendment 16, 2026-10-02; service, commandlet and automation; imports no longer apply Nanite by default). Not yet run on a large source. The panel's Apply Nanite control and a read-only Nanite analysis with a recommended selection (Amendment 17) are built and automation-covered, not yet seen live. First real source run 2026-10-02 ([record](Docs/Validation/2026-10-02-cwm-source.md)): 2,970 meshes, Nanite apply 5.4 s for all and 0.94 s for the 98 recommended; the budget did not bind. Open: tune the analysis thresholds against rendered results, say what Nanite actually costs or saves per mesh at runtime, and try a source with tens of thousands of unique meshes to prove the budget. The double build itself cannot be removed (Datasmith constraint); the step isolates it instead. | Default policy stays under the pool ceiling on the large source by capping or skipping low-value meshes; avoidable double mesh builds are removed or shown to be unavoidable; scenes with no instancing opportunity have an explicit documented policy. Any option that changes output enters `ComputePlanId`. |
-| 3 | **Material matching** | Review/approve/revoke machinery and 245 observed entries exist. No curated coverage. | The most-used materials (ranked by surface area and instance count, first 20-30) map to parameter-driven Unreal master materials with texture scale and orientation, reviewed and approved. Observed entries are not stock coverage. |
-| 4 | **Fidelity on real models** | Fixtures pass; full-model alignment unproven while textures are missing. | Dimensions, elevations, reference points, nested links, mirrors and thin members agree on the structural/HVAC exports. |
-| 5 | **Packaged and rendered acceptance** | Windows cook and runtime smoke pass. | Textures/UVs, lights, collision/navigation/LOD/culling and lookup work in a cooked build; camera-path CPU/GPU baselines recorded against the workstream 1 budgets. |
-| 6 | **Release decision** | Open. | Contract scenarios and the [acceptance matrix](Docs/VALIDATION.md) have explicit results. |
+| **1. Revit Datasmith import to ISM/HISM**: reduce costly individual objects | Tracked importer analyzes groups by compatible mesh/material/settings, supports a minimum group size and ISM/HISM output, preserves ordinary leftovers and source metadata, and verifies counts, transforms, placement, and settings. The [CWM source run](Docs/Validation/2026-10-02-cwm-source.md) verified both modes: 379 groups / 2,561 instances, with 4,540 ordinary meshes out of 7,101 source mesh actors. | Prove conversion and fidelity across representative complete large Revit models, including cases with little repetition. Decide and document a policy for sources with no useful instancing opportunity; do not imply every mesh can become an instance or that zero groups is an error. | **Release-critical**: reliable, explainable actor/component reduction without losing geometry, identity, or editability guarantees. No promise that instancing alone improves every view. |
+| **2. Runtime performance**: make the converted scene usable | Import-side stage timings, peak memory, `-MetricsFile` and `-Budget` are implemented and automation-covered. [Ordinary, ISM, and HISM CWM maps](Docs/Validation/2026-10-02-runtime-comparison.md) were verified, saved, and cooked in one Win64 package; their import counts are recorded. A smaller Windows packaged smoke test passed. | No packaged CWM frame-time, draw-call, or memory comparison has been captured. With desktop access, verify a repeatable camera route and profile comparable views, warm/steady-state runs and target hardware. Establish baselines/budgets for representative ARCH, HVAC, and large unique-mesh sources; distinguish cold sidecar hashing from conversion time. Do not label import timings as runtime speedups. | **Release-critical**: show when ordinary vs ISM vs HISM wins or regresses, with repeatable measurements and acceptance criteria. If the improvement is insufficient, diagnose grouping/culling/scene costs before adding secondary features. |
+| **3. Tracked lifecycle and safety**: keep optimized scenes trustworthy | Analyze/import/verify, source accounting, rebuild and tracked-edit refusal, explicit replacement, rollback, save/reopen, named-map copy refusal, diagnostic recovery, presets, progress/cancellation, dependency checks, and stock reimport refusal are implemented. Real-dispatch and automation coverage exists; one interrupted-attempt/restart scenario was exercised. | Complete the [live UI re-check](HANDOFF.md#next-agent-assignment), real-source fidelity gates, and release acceptance matrix. More interruption stages and full-volume behavior have not been accepted as new work. Preserve quarantined and ambiguous ownership rules. | **Release-critical existing contract**, not an invitation to expand recovery or silently clean retained sessions. Keep ownership/commit/supersede decisions in the service. |
+| **4. Optional Nanite**: help suitable geometry without overwhelming mesh budgets | Default import preserves Datasmith's mesh state and builds once. A separate Apply step, panel/commandlet scopes, mesh exceptions, budget, rollback/cancel, and read-only recommendation analysis have automation coverage. CWM applied Nanite to 2,920 eligible meshes or 98 recommended meshes in separate runs; the budget did not bind on that source. See [CWM evidence](Docs/Validation/2026-10-02-cwm-source.md). | Check the panel live, test the budget on a sufficiently large unique-mesh source, and measure runtime benefit/cost of all vs recommended vs off. Recommendation thresholds are heuristics, not measured optima. Changing Nanite after import rebuilds affected meshes; measure that cost before pursuing an unsupported engine hook. | **Secondary optimization**: ship as opt-in, with documented limits and a policy for scenes without instancing opportunities. Do not block the core performance comparison on Nanite tuning. |
+| **5. Source and rendered fidelity**: ensure the saved scene is useful | Joist and light/IES fixtures, source-derived comparisons, instance/ordinary lookup, non-IES light-object checks, best-effort IES warnings, and Windows cook/runtime smoke exist. Missing image textures remain explicit accept decisions; unavailable IES profiles warn rather than invalidate geometry. | Check full-model alignment, dimensions, reference points, mirrors, nested links, thin members, textures/UVs, collision, navigation, LOD/culling, and lights in rendered and packaged views. Structural/HVAC texture dependencies and coordinate information are incomplete; Revit photometric calibration needs authoritative inputs. | **Release gate where it affects usable geometry/runtime**. Do not claim complete visual or photometric equivalence from headless verification or the small package smoke test. |
+| **6. Materials**: maintain usable imported appearances | Datasmith assignments are preserved; linked catalogs and exact fingerprint review/approve/revoke can apply explicit mappings before mesh compatibility checks. The observed inventory is not a curated material library. | No material-library expansion is scheduled. Keep the explicit replacement workflow and check missing-texture effects in rendered acceptance, without treating appearance curation as an instancing blocker. | **Later feature** if prioritized: choose reviewed Unreal targets with the user, then curate frequent appearances against real source evidence. Do not promise automatic stock-material matching or a preset count of curated materials. |
+| **7. Legacy selection tools**: convert already placed selections | Separate selection conversion, managed grouping, Dataprep wrappers, and deletion-obstruction coverage exist; these tools do not own tracked import manifests or rollback. | Separately validate Dedupe confirmation/dry-run/external references, Explode staged failure/success/undo, BIM hierarchy/storey grouping, partial-selection reruns, and Nanite auto-detection. | **Separate workflow**, not proof of the tracked Datasmith import performance goal; adding tracked lifecycle here requires a scope decision. |
 
-Live editor checks (the ordered list in the handoff) run as a batched session when the user frees the desktop. Move checks that do not need a person into automation.
+## Next decisions, in order
 
-Source-data gaps block only the affected checks. Light calibration needs authoritative Revit photometrics, IES and reference exposure; the 1,033 Unitless HVAC lights must not be relabeled as a shortcut. Structural/HVAC fidelity needs the complete texture dependencies and shared reference-point information.
+1. **Measure the core claim.** Finish the packaged CWM ordinary/ISM/HISM comparison when desktop access is available. Preserve raw traces, camera/settings, per-view frame times, draw calls, memory, and a clear conclusion, including any regression. Expand to representative ARCH/HVAC and a large unique-mesh export when complete source inputs are available.
+2. **Close real-editor and fidelity gates.** Work through the handoff's ordered UI checklist; verify saved/packaged geometry and identify which missing source assets prevent a conclusion. Automation passing does not substitute for the UI or rendered result.
+3. **Set the release boundary.** Use the [acceptance matrix](Docs/VALIDATION.md) and measured results to decide supported source sizes and instancing policies. Keep a failed or input-blocked row pending, not implicitly passed. Refresh the stale Win64 plugin export only after the release gates pass.
+4. **Then tune optional Nanite.** Compare off/recommended/all on the same runtime views and validate the mesh budget on a source that can bind it. Defer material curation until explicitly reprioritized.
 
-## Remediation batches (from the 2026-09-29 review)
+## Deferred and nice to have
 
-| Batch | Status |
-|---|---|
-| A. Supersede and quarantine safety | Done: predecessor-removal failure and actor path reuse regressions pass. |
-| B. Unattended legacy and Dataprep | Done: dialog-free wrappers and actual deletion counts with explicit partial-failure diagnostics; real-wrapper deletion-obstruction automation passes (`DataprepWrappersAreDialogFree`). |
-| C. Cancellable dependency and material processing | Done. |
-| D. Resolved-texture plan identity | Done. |
-| E. Evidence and document reconciliation | Done 2026-10-01: [current-tree machine-readable evidence](Docs/Validation/2026-10-01-current-tree-evidence.json) records source hashes, the test list, commands, exits, and logs. |
+- Material-library coverage, parameter-driven target materials, and expanded appearance catalog review; the existing reviewed mapping workflow stays intact.
+- Phase 6 ideas (source relinking, automated cleanup, cross-asset deduplication, visualization, material packs), new recovery stages, named-copy ownership migration, and tracked lifecycle for legacy tools. Each needs a separate scope decision.
+- Cosmetic panel polish noted in the handoff after behavioral live checks, unless it blocks a core workflow.
 
-## Phase status (implemented vs remaining)
+## Limits to keep visible
 
-| Phase | Implemented | Remaining gate |
-|---|---|---|
-| 1. Geometry fidelity | Source-derived joist and light/IES fixtures; version provenance; direct payload inspection; six ordinary/ISM/HISM and Nanite comparisons | Workstream 4. |
-| 2. Integrity and recovery | Source accounting; tracked edits and replace/cancel; explicit rebuild; Analyze progress and cancellation; dependency preflight; preset/destination invalidation; save/reopen; save failure handling; named-map copy refusal; one actual interruption/restart; rollback batch delete (Amendment 12) | Other interruption stages and full-volume behavior stay deferred unless a scope decision pulls them in. |
-| 3. Nanite, lighting, presets | Import-wide Nanite policy; converted ISM/HISM groups option (Amendment 10); exact mesh exceptions; per-mesh Nanite records and projected-count advisory (Amendments 13, 14); light/IES source verification; presets | Workstream 2; calibrated Revit photometrics; broader material compatibility. |
-| 4. Materials | Linked DataTables with CSV; review/approve/revoke UI; exact appearance fingerprints; replacement before Nanite | Workstream 3. |
-| 5. Inspection and release | Search, source identities, focus, rebuild previews, runtime lookup, Windows cook and runtime smoke, stage/step timing and peak memory | Workstreams 1 and 5. |
-| 6. Later extensions | Not started | Deferred. |
-
-### Legacy acceptance
-
-Separately validate Dedupe confirmation/dry-run/external references, Explode staged failure/success/undo, BIM hierarchy/storey grouping, partial-selection reruns, and Nanite auto-detection. Giving legacy tools tracked lifecycle guarantees is a separate scope decision.
-
-## Known risks and limits
-
-- **Nanite budget:** applying Nanite to all meshes can exhaust UE 5.8.3's fatal root-page pool on large unique-mesh sources. Nanite is set after Datasmith's first build, so each changed mesh builds twice. Checked against the engine source 2026-10-01: Datasmith has no Nanite handling, and creates, finalizes and builds meshes inside one stock factory call (`FinalizeAssets` then `BatchBuild`), so no supported pre-build hook exists. `UStaticMesh::OnPreMeshBuild()` fires before each build but is a per-instance delegate and the meshes are not reachable before the build. The only seams found are unsupported: temporarily setting the `UStaticMesh` class-default Nanite flag (global, and it would also enable Nanite on meshes the budget or exceptions exclude, causing rebuilds to turn it off), or an object-creation listener. **The cost of the extra build is unmeasured**; the first build has no Nanite data, so it may be small next to the Nanite rebuild. Measure it on a heavy synthetic source before adopting either workaround.
-- **Source fidelity:** full-model alignment is unproven while textures are missing.
-- **Photometrics:** source preservation is tested; physical equivalence with Revit is uncalibrated.
-- **Persistence/recovery:** named-map copies are refused rather than migrated. Journals diagnose known state; they do not resume or delete output.
-- **Runtime/rendering:** cooked lookup, references and a collision trace pass. Visual quality, texture/UV breadth, navigation/LOD/culling and performance are unproven.
-- **Maintenance:** the import service is about 4,000 lines. Keep lifecycle decisions centralized and test real dispatch before refactoring.
-- **Legacy boundary:** descriptor grouping and origin checks do not prove separate assets match in every collision/LOD/rendering attribute. Legacy tools have no session rollback.
-
-## Agent rules
-
-- The lifecycle owner decides commit/supersede/rollback ordering; helpers must not duplicate those decisions.
-- A new destructive-safety or ownership defect blocks its batch from being called complete; record the reproducer.
-- Do not begin Phase 6, clean retained interrupted sessions, change manifest schema, or extend legacy tools into tracked lifecycle behavior without a scope decision.
-- Hand off one bounded change at a time with changed files, tests run, failures, artifacts and limits. Do not mix cosmetic cleanup with safety fixes.
+- Instancing groups compatible repeated meshes; unique objects stay ordinary. HISM's hierarchy can help spatial culling but also costs build time and memory. Nanite's own culling changes the tradeoff; only measured views can decide.
+- Applying Nanite to too many unique meshes can hit UE 5.8.3's root-page pool. Datasmith builds meshes inside its stock factory before this plugin can apply Nanite, so the separate step rebuilds changed meshes. No supported pre-build hook has been established; do not adopt global or object-creation workarounds without evidence and a scope decision.
+- The CWM comparison has seven accepted missing image textures; rendered/material conclusions remain limited. Light physical equivalence is uncalibrated, and IES attachment is best effort.
+- Named-map copies are refused rather than migrated; attempt journals diagnose uncertainty but do not resume or automatically delete output. Current build/test status and evidence belong in the handoff, not duplicated as release claims here.

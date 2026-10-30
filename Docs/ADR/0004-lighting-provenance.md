@@ -8,7 +8,7 @@ The supplied HVAC source declares 1,033 point lights as Unitless. Replacing that
 
 ## Decision
 
-Inventory source light types, enabled local count, units, intensity and IES evidence. Verify imported source values together. Keep ambiguous Unitless values and issue an unresolved calibration diagnostic until authoritative Revit values support a tested conversion, including falloff/exposure and IES behavior.
+Inventory source light types, enabled local count, units, intensity and IES evidence. Verify light object presence and non-IES source values. Treat IES profile attachment and profile-brightness differences as best-effort warnings; they must not roll back otherwise verified scene objects. Keep ambiguous Unitless values and issue an unresolved calibration diagnostic until authoritative Revit values support a tested conversion, including falloff and exposure.
 
 Warn at 100 enabled local lights by default; make the threshold configurable. Report the observed project MegaLights setting and provide navigation. Never change global rendering settings automatically, and exclude advisory thresholds/settings from destructive plan identity.
 
@@ -18,4 +18,4 @@ Relabeling units alone is not a brightness correction. Auto-enabling a renderer 
 
 ## Evidence and follow-up
 
-Generated physical-unit/threshold checks and the exported point-light/IES fixture pass. Calibrated Revit values, all relevant light types, IES on/off, and rendered comparison remain open. See [source evidence](../Validation/2026-09-26.md) and [rendering policy](../ARCHITECTURE.md#rendering-policy-and-open-acceptance). MegaLights navigation follows [Epic's project settings guidance](https://dev.epicgames.com/documentation/en-us/unreal-engine/megalights-in-unreal-engine).
+Generated physical-unit/threshold checks and the exported point-light fixture pass. The CWM import verifies its objects when 67 unavailable IES profiles are omitted; it exits 0 without Datasmith IES errors. This does not establish photometric equivalence: calibrated Revit values and rendered comparison remain open. See [source evidence](../Validation/2026-10-02-cwm-source.md), [earlier light evidence](../Validation/2026-09-26.md), and [rendering policy](../ARCHITECTURE.md#rendering-policy-and-open-acceptance). MegaLights navigation follows [Epic's project settings guidance](https://dev.epicgames.com/documentation/en-us/unreal-engine/megalights-in-unreal-engine).

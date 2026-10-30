@@ -839,3 +839,11 @@ Resolved findings recorded in `REVIEW.md` at removal, each with regression cover
 ## 2026-10-01: opt-in import trace capture
 
 Added the default-off **Profile next import** control. It captures one full-file Unreal Insights trace for Import/Rebuild, stops automatically, and records the path in the report; Analyze, presets, restored settings, and `PlanId` are unaffected. Existing active traces are left unchanged, and capture failures do not block import. The focused repeat-capture test and full 47-test suite passed after a UE 5.8.3 editor build. See [trace validation](../Validation/2026-10-01-trace-capture.md). Live Slate interaction and large-source capture remain unverified.
+
+## 2026-10-02: IES best effort and Win64 plugin modules
+
+IES profile presence and profile-brightness differences no longer fail light verification. Preflight classifies unusable IES files, then removes only those profile elements from the translated in-memory scene before Datasmith import; affected lights retain their scene objects and non-IES source settings. Ordinary missing image textures still require explicit acceptance. This closes the CWM process-exit failure: a fresh run verified 379 groups and 2,561 instances, warned on 67 unique lights, logged no IES import errors, and exited 0. Build passed and the full 53-test suite passed with zero automation errors. Both plugin modules are restricted to Win64; engine-wide optional-platform SDK validation still runs at commandlet startup. See [Amendment 18](../../IMPORT_PANEL_VALIDATION.md) and [CWM evidence](../Validation/2026-10-02-cwm-source.md).
+
+## 2026-10-06: skills and code review
+
+Reviewed the agent skills and pruned nine with low relevance to this plugin. A source review, checked against UE 5.8.3 engine source, found that per-slot `UStaticMesh::SetMaterial` rebuilt each mesh once per replaced slot during approved material replacement; slots are now edited with one post-edit per mesh. Also added `Modify()` on changed components, suppressed the dedupe dialog in unattended runs, and bound the panel details callback to the widget's lifetime. Build passed; after an interrupted first run, the full 53-test suite passed with zero automation errors. Not checked live or timed on a large source. See the [review record](../Validation/2026-10-06-review.md).

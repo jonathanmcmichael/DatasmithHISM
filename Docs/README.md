@@ -20,9 +20,12 @@ Current build, test and live-check status is kept only in [HANDOFF.md](../HANDOF
 | [Architecture](ARCHITECTURE.md) | Current module/helper boundaries and execution sequence |
 | [ADRs](ADR/README.md) | Accepted decision rationale, alternatives, consequences, and evidence |
 | [Roadmap](../ROADMAP.md) | Accepted scope, phase gates, remaining work in order, known risks |
+| [Core instancing and source-data plan](../PLAN.md) | Bounded steps and gates for runtime comparison, ordinary leftovers, and Datasmith data auditing |
 | [Validation procedure](VALIDATION.md) | Repeatable build/test/package commands and acceptance matrix |
+| [Skills and code review, 2026-10-06](Validation/2026-10-06-review.md) | Skill pruning, review findings and fixes; 53-test suite passed |
 | [Import profiling and Win64 export, 2026-10-01](Validation/2026-10-01-import-profiling.md) | Nanite crash boundary, per-step diagnostics, Nanite advisory, earlier 45-test runs, and packaged plugin |
-| [CWM source, 2026-10-02](Validation/2026-10-02-cwm-source.md) | First real large-source runs: the unimportable-IES finding (Amendment 18), import and Nanite apply timings, and the Nanite analysis of 2,970 meshes |
+| [CWM source, 2026-10-02](Validation/2026-10-02-cwm-source.md) | Large-source object counts, Nanite analysis/timings, and the post-filter IES-warning-only import with exit 0 |
+| [CWM runtime comparison preparation, 2026-10-02](Validation/2026-10-02-runtime-comparison.md) | Saved and cooked ordinary/ISM/HISM maps; manual runtime capture is pending |
 | [Opt-in trace capture, 2026-10-01](Validation/2026-10-01-trace-capture.md) | One-shot full-file import tracing, repeat capture, and current 47-test suite evidence |
 | [Current-tree machine evidence, 2026-10-01](Validation/2026-10-01-current-tree-evidence.json) | Source SHA-256 hashes, build and automation commands/results, and all 47 suite test paths |
 | [Packaging, 2026-09-29](Validation/2026-09-29-packaging.md) | Win64 cook and runtime smoke check for the 36-test tree |

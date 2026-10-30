@@ -23,6 +23,7 @@ namespace ConVerseImportProcessing
 		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress);
 	EConVerseImportWorkResult ValidateDependencies(const TSharedRef<IDatasmithScene>& Scene, const FConVerseOptimizedImportOptions& Options,
 		FConVerseOptimizedImportResult& Result, FString& OutError, FConVerseImportProgress& Progress);
+	void StripUnavailableIesProfiles(const TSharedRef<IDatasmithScene>& Scene, FConVerseOptimizedImportResult& Result);
 	bool VerifyLights(UWorld& World, UDatasmithScene& ImportedScene, const TSharedRef<IDatasmithScene>& Source,
 		const TSet<const AActor*>& ExistingActors, const FConVerseOptimizedImportOptions& Options,
 		FConVerseOptimizedImportResult& Result, int32& OutFailedLightCount, int32& OutTotalLightCount);

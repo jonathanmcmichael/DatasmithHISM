@@ -286,11 +286,11 @@ struct FConVerseOptimizedImportResult
 	/** Referenced texture/mesh files absent from disk, as "<element>: <path>". */
 	TArray<FString> MissingTextures;
 	TArray<FString> MissingMeshFiles;
-	/**
-	 * IES profiles whose file is absent, empty or not importable, as "<element>: <path>[ suffix]". A warning,
-	 * never a blocker and never needing acceptance (Amendment 18): the light imports without the profile.
-	 */
+	/** IES texture elements omitted before Datasmith import because their profile is unusable. */
 	TArray<FString> UnavailableIesProfiles;
+	TMap<FString, FString> UnavailableIesProfileReasons;
+	TMap<FString, FString> UnavailableIesLightReasons;
+	TArray<FString> IesOmissionPlanIdentity;
 	/** Textures found in TextureSearchFolders, as "<element>: <referenced path> -> <resolved path>". */
 	TArray<FString> ResolvedTextures;
 	/** Canonical resolution evidence used by PlanId; includes resolved content size and hash. */

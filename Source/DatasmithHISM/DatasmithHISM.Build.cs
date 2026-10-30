@@ -30,6 +30,7 @@ public class DatasmithHISM : ModuleRules
 				"DesktopPlatform",
 				"EditorFramework",
 				"ExternalSource",
+				"IESFile",
 				"InputCore",
 				"Json",
 				"JsonUtilities",

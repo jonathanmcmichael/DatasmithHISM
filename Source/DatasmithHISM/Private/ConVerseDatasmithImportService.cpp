@@ -158,6 +158,7 @@ namespace ConVerseDatasmithImport
 		FString ExporterSdkVersion;
 		FConVerseOptimizedImportOptions Options;
 		TArray<FString> TextureResolutionIdentities;
+		TArray<FString> IesOmissionIdentities;
 		int32 TotalMeshActors = 0;
 		int32 SourceMeshAssetCount = 0;
 		int32 EligibleLeafActors = 0;
@@ -874,6 +875,12 @@ namespace ConVerseDatasmithImport
 		IdentitySettings.AppearanceCatalog.Reset();
 		if (!IdentitySettings.bApplyApprovedMaterials) IdentitySettings.MaterialMappings.Reset();
 		AppendField(Input, TEXT("Processing"), ConVerseImportProcessing::IdentitySettingsJson(IdentitySettings));
+		if (!Plan.IesOmissionIdentities.IsEmpty())
+		{
+			AppendField(Input, TEXT("IesOmissionPolicy"), TEXT("1"));
+			for (const FString& Identity : Plan.IesOmissionIdentities)
+				AppendField(Input, TEXT("OmittedIesProfile"), Identity);
+		}
 		// Amendment 15: the Nanite mesh budget changes generated output only when the policy would
 		// exceed it, so it joins identity only then. Imports under budget keep their existing PlanId.
 		if (NaniteBudgetBinds(Plan))
@@ -925,11 +932,14 @@ namespace ConVerseDatasmithImport
 		const TSharedRef<IDatasmithScene>& Scene,
 		const FConVerseOptimizedImportOptions& Options,
 		const FString& SourceHash,
-		int64 SourceSize, const TArray<FString>& TextureResolutionIdentities, FConVerseImportProgress& Work)
+		int64 SourceSize, const TArray<FString>& TextureResolutionIdentities,
+		const TArray<FString>& IesOmissionIdentities, FConVerseImportProgress& Work)
 	{
 		FPlan Plan;
 		Plan.TextureResolutionIdentities = TextureResolutionIdentities;
 		Plan.TextureResolutionIdentities.Sort();
+		Plan.IesOmissionIdentities = IesOmissionIdentities;
+		Plan.IesOmissionIdentities.Sort();
 		Plan.SourceFilePath = Options.FilePath;
 		Plan.SourceUri = FSourceUri::FromFilePath(Options.FilePath).ToString();
 		Plan.SourceFileHash = SourceHash;
@@ -3299,6 +3309,7 @@ namespace ConVerseDatasmithImport
 		Result.InspectionRows.Reset(); Result.Appearances.Reset(); Result.SkipCounts.Reset();
 		Result.SourceLightDescriptions.Reset(); Result.MaterialDecisions.Reset(); Result.Diagnostics.Reset();
 		Result.ResolvedTextures.Reset(); Result.ResolvedTextureIdentities.Reset(); Result.MissingTextures.Reset(); Result.UnavailableIesProfiles.Reset(); Result.MissingMeshFiles.Reset();
+		Result.UnavailableIesProfileReasons.Reset(); Result.UnavailableIesLightReasons.Reset(); Result.IesOmissionPlanIdentity.Reset();
 		if (Result.LastCompletedStage == EConVerseOptimizedImportStage::PlanBuilt)
 			Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
 		FinishResult(nullptr, Result);
@@ -3432,7 +3443,8 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FC
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SourceLoaded;
 	if (Cancelled()) return Result;
 	EnterStage(SlowTask, Result, 1.0f, NSLOCTEXT("ConVerseHISM", "AnalyzeGroups", "Analyzing meshes and groups..."));
-	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, SourceHash, SourceSize, Result.ResolvedTextureIdentities, Work);
+		const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, SourceHash, SourceSize,
+			Result.ResolvedTextureIdentities, Result.IesOmissionPlanIdentity, Work);
 	if (Cancelled()) return Result;
 
 	PopulatePlanResult(Plan, Result);
@@ -3625,7 +3637,8 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 
 	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportPlanning", "Traversing the scene and planning groups..."));
-	const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, InitialHash, InitialSize, Result.ResolvedTextureIdentities, Work);
+		const FPlan Plan = BuildPlan(Scene.ToSharedRef(), Normalized, InitialHash, InitialSize,
+			Result.ResolvedTextureIdentities, Result.IesOmissionPlanIdentity, Work);
 	if (Cancelled()) return Result;
 	const auto SceneAnalysis = ConVerseImportProcessing::AnalyzeScene(Scene.ToSharedRef(), Normalized, Result, Work);
 	if (Cancelled()) return Result;
@@ -3838,6 +3851,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportTransform", "Rewriting the scene into instanced groups..."));
 	ApplyResolvedPlan(Scene.ToSharedRef(), Plan, ResolvedGroups, Result.SessionId);
+	ConVerseImportProcessing::StripUnavailableIesProfiles(Scene.ToSharedRef(), Result);
 	Result.LastCompletedStage = EConVerseOptimizedImportStage::SceneTransformed;
 	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportDatasmith", "Running the Datasmith import..."));
@@ -4011,24 +4025,15 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 	}
 	else if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::CorruptLightBeforeVerification)
 	{
-		// Test-only seam, shared by the light-verification and failed-verification-summary tests.
-		// Deliberately damages one real imported light component so VerifyLights fails on its own
-		// terms. Prefers nulling an IES texture found anywhere in the session; only falls back to
-		// detuning intensity when the session has no IES light to corrupt.
-		ULightComponent* IESLight = nullptr;
+		// Test-only seam: detunes intensity, because IES discrepancies are warnings and cannot fail verification.
 		ULightComponent* AnyLight = nullptr;
-		for (TActorIterator<AActor> It(World); It && !IESLight; ++It)
+		for (TActorIterator<AActor> It(World); It && !AnyLight; ++It)
 		{
 			if (Inventory.ExistingActors.Contains(*It)) continue;
 			TInlineComponentArray<ULightComponent*> Lights(*It);
-			for (ULightComponent* LightComponent : Lights)
-			{
-				if (!AnyLight) AnyLight = LightComponent;
-				if (LightComponent->IESTexture) { IESLight = LightComponent; break; }
-			}
+			if (!Lights.IsEmpty()) AnyLight = Lights[0];
 		}
-		if (IESLight) IESLight->IESTexture = nullptr;
-		else if (AnyLight) AnyLight->Intensity += 100000.0f;
+		if (AnyLight) AnyLight->Intensity += 100000.0f;
 	}
 
 	EnterStage(SlowTask, Result, 1.0f,
