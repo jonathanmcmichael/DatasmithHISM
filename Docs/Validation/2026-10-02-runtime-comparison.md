@@ -1,6 +1,6 @@
 # CWM runtime comparison preparation, 2026-10-02
 
-**Status: maps and Win64 package prepared; runtime profiling is pending.** No packaged map was launched for capture because the user did not free the shared desktop. No frame-time, GPU, draw-call, or runtime-memory result is claimed here.
+**Preparation status, 2026-10-02: maps and Win64 package prepared.** No packaged map was launched for capture on that date because the user did not free the shared desktop. The first runtime measurements were subsequently recorded in the [2026-10-15 comparison](2026-10-15-runtime-comparison.md); they remain preliminary and do not pass release acceptance. The import results below are not runtime measurements.
 
 ## Purpose and controls
 
@@ -42,8 +42,8 @@ Host project artifacts:
 
 Package command: UE 5.8 `RunUAT.bat BuildCookRun`, Win64 Development, `-build -cook -stage -pak -archive`, with the three maps above in one `+`-separated `-map` argument. The archive directory was the new `Saved/CWMRuntimeComparison`.
 
-## Pending runtime capture
+## Original runtime capture plan
 
 After the shared desktop is explicitly freed, launch each packaged map under identical display resolution, graphics settings, power mode, and camera path. Confirm the imported CWM camera is usable; otherwise establish a repeatable camera route before recording data. Capture comparable warm and steady-state windows with Unreal Insights and runtime stats. Keep CPU/game/render/RHI/GPU frame times, draw calls, and memory separate from import/build measurements. Repeat each variant enough to distinguish run-to-run noise and record the raw traces and exact settings.
 
-These maps and the package establish preparation only. The CWM missing textures limit visual/material conclusions, and a fixed-camera runtime comparison on this one machine does not establish full-model fidelity or shipping performance across target hardware.
+These maps and the package establish preparation only; executed runtime results and their limitations belong to the [2026-10-15 comparison](2026-10-15-runtime-comparison.md). The CWM missing textures limit visual/material conclusions, and a fixed-camera runtime comparison on this one machine does not establish full-model fidelity or shipping performance across target hardware.

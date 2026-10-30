@@ -47,11 +47,12 @@ public:
 			}
 		}
 
-		if (!ChannelsToEnable.IsEmpty())
-		{
-			FTraceAuxiliary::EnableChannels(*FString::Join(ChannelsToEnable, TEXT(",")));
-		}
-
+		FTraceAuxiliary::FOptions TraceOptions;
+		TraceOptions.bExcludeTail = true;
+		const FString ChannelsToEnableString = FString::Join(ChannelsToEnable, TEXT(","));
+		const TCHAR* Channels = ChannelsToEnableString.IsEmpty() ? nullptr : *ChannelsToEnableString;
+		const bool bTraceStarted = FTraceAuxiliary::Start(
+			FTraceAuxiliary::EConnectionType::File, *TraceFilePath, Channels, &TraceOptions);
 		const TArray<FString> ActiveAfter = GetActiveChannels();
 		TArray<FString> EnabledByCapture;
 		for (const FString& Channel : ChannelsToEnable)
@@ -61,19 +62,7 @@ public:
 				EnabledByCapture.Add(Channel);
 			}
 		}
-		for (const TCHAR* Channel : RequiredChannels)
-		{
-			if (!ContainsChannel(ActiveAfter, Channel))
-			{
-				RestoreChannels(EnabledByCapture);
-				TraceFilePath.Reset();
-				OutError = FString::Printf(TEXT("Unreal Insights could not enable the %s channel."), Channel);
-				return false;
-			}
-		}
-		FTraceAuxiliary::FOptions TraceOptions;
-		TraceOptions.bExcludeTail = true;
-		if (!FTraceAuxiliary::Start(FTraceAuxiliary::EConnectionType::File, *TraceFilePath, nullptr, &TraceOptions))
+		if (!bTraceStarted)
 		{
 			RestoreChannels(EnabledByCapture);
 			TraceFilePath.Reset();
@@ -87,6 +76,17 @@ public:
 			TraceFilePath.Reset();
 			OutError = TEXT("Unreal Insights did not establish the requested trace file.");
 			return false;
+		}
+		for (const TCHAR* Channel : RequiredChannels)
+		{
+			if (!ContainsChannel(ActiveAfter, Channel))
+			{
+				FTraceAuxiliary::Stop();
+				RestoreChannels(EnabledByCapture);
+				TraceFilePath.Reset();
+				OutError = FString::Printf(TEXT("Unreal Insights could not enable the %s channel."), Channel);
+				return false;
+			}
 		}
 		ChannelsToDisable = MoveTemp(EnabledByCapture);
 		bStarted = true;

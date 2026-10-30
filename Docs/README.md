@@ -1,6 +1,6 @@
 # Documentation index
 
-Current build, test and live-check status is kept only in [HANDOFF.md](../HANDOFF.md#current-status). Import orchestration targets UE 5.8.3 Editor; runtime output targets packaged Windows applications.
+Current build, test and live-check status is kept only in [HANDOFF.md](../HANDOFF.md#current-status). Win64 editor-target source builds are verified with UE 5.6.1 and 5.8.3; runtime output targets packaged Windows applications.
 
 ## Using the plugin
 
@@ -21,11 +21,16 @@ Current build, test and live-check status is kept only in [HANDOFF.md](../HANDOF
 | [ADRs](ADR/README.md) | Accepted decision rationale, alternatives, consequences, and evidence |
 | [Roadmap](../ROADMAP.md) | Accepted scope, phase gates, remaining work in order, known risks |
 | [Core instancing and source-data plan](../PLAN.md) | Bounded steps and gates for runtime comparison, ordinary leftovers, and Datasmith data auditing |
+| [Grouping compression plan](GROUPING_PLAN.md) | Proposed phases: ordinary-leftover breakdown, spatial cells, cross-parent grouping, payload dedupe, merging leftovers |
 | [Validation procedure](VALIDATION.md) | Repeatable build/test/package commands and acceptance matrix |
 | [Skills and code review, 2026-10-06](Validation/2026-10-06-review.md) | Skill pruning, review findings and fixes; 53-test suite passed |
+| [Engine compatibility and packaging, 2026-10-06](Validation/2026-10-06-engine-compatibility.md) | UE 5.6.1 and 5.8.3 source builds, UE 5.6 package, and blocked UE 5.8 package attempt |
 | [Import profiling and Win64 export, 2026-10-01](Validation/2026-10-01-import-profiling.md) | Nanite crash boundary, per-step diagnostics, Nanite advisory, earlier 45-test runs, and packaged plugin |
 | [CWM source, 2026-10-02](Validation/2026-10-02-cwm-source.md) | Large-source object counts, Nanite analysis/timings, and the post-filter IES-warning-only import with exit 0 |
-| [CWM runtime comparison preparation, 2026-10-02](Validation/2026-10-02-runtime-comparison.md) | Saved and cooked ordinary/ISM/HISM maps; manual runtime capture is pending |
+| [Grouping breakdown, 2026-10-29](Validation/2026-10-29-grouping-breakdown.md) | Phase 0 ordinary-leftover classes and group spread on three Warrenton exports (UE 5.6, Analyze only) |
+| [Geometry survey, 2026-10-29](Validation/2026-10-29-geometry-survey.md) | Most "unique" meshes are translated copies (curtain wall groupable 3,938 to 7,921); mirrored-instance culling in UE 5.6 source |
+| [CWM runtime comparison, 2026-10-15](Validation/2026-10-15-runtime-comparison.md) | Nine packaged runs and three fixed views; timings, draw calls, memory, screenshots, trace diagnostics and open performance/fidelity gates |
+| [CWM runtime comparison preparation, 2026-10-02](Validation/2026-10-02-runtime-comparison.md) | Saved/cooked ordinary/ISM/HISM maps and import counts used by the later runtime comparison |
 | [Opt-in trace capture, 2026-10-01](Validation/2026-10-01-trace-capture.md) | One-shot full-file import tracing, repeat capture, and current 47-test suite evidence |
 | [Current-tree machine evidence, 2026-10-01](Validation/2026-10-01-current-tree-evidence.json) | Source SHA-256 hashes, build and automation commands/results, and all 47 suite test paths |
 | [Packaging, 2026-09-29](Validation/2026-09-29-packaging.md) | Win64 cook and runtime smoke check for the 36-test tree |

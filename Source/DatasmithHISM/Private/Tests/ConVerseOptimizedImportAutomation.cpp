@@ -1,4 +1,5 @@
 #include "ConVerseDatasmithImportService.h"
+#include "ConVerseNaniteSettings.h"
 
 #include "ConVerseOptimizedImportManifest.h"
 #include "ConVerseOptimizedImportCommandlet.h"
@@ -2132,6 +2133,91 @@ bool FConVerseOptimizedImportAcceptFailedVerificationTest::RunTest(const FString
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConVerseOptimizedImportAcceptMissingMeshTest,
+	"DatasmithHISM.OptimizedImport.ImportWithFailedMeshCanBeAccepted",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * A mesh Datasmith could not create must not prevent keeping the rest of the import. Before
+ * Amendment 19 the accept path re-resolved every group's assets at commit and rolled the whole
+ * session back on the first missing mesh, so "keep the result" discarded it anyway.
+ */
+bool FConVerseOptimizedImportAcceptMissingMeshTest::RunTest(const FString& Parameters)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	(void)Parameters;
+
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is available"), World))
+	{
+		return false;
+	}
+
+	FFixtureFiles Fixture;
+	FString FixtureError;
+	if (!TestTrue(TEXT("A valid temporary Datasmith fixture is exported"), CreateFixture(Fixture, FixtureError)))
+	{
+		AddError(FixtureError);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+
+	const FString TestRunId = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = FString::Printf(TEXT("/Game/__ConVerseAutomation/%s/AcceptMissingMesh"), *TestRunId);
+	Options.InstanceType = EConVerseOptimizedInstanceType::HISM;
+	Options.MinimumInstanceCount = ExpectedOptimizedInstances;
+	Options.bAutomated = true;
+	Options.FailureInjection = EConVerseOptimizedImportFailureInjection::DropMeshBeforeVerification;
+	Options.bDeferRollbackOnVerificationFailure = true;
+
+	const FConVerseOptimizedImportResult Parked = FConVerseDatasmithImportService::ImportAndVerify(Options);
+	TestTrue(TEXT("A missing mesh parks the attempt for a decision"),
+		Parked.Status == EConVerseOptimizedImportStatus::AwaitingFailedVerificationDecision);
+	TestEqual(TEXT("The attempt folder does not repeat the source name"),
+		Parked.AttemptFolder, Options.DestinationPath + TEXT("/_ConVerse_") + Parked.SessionId.Left(12));
+
+	const FConVerseOptimizedImportResult Accepted =
+		FConVerseDatasmithImportService::AcceptFailedVerification(Parked.SessionId);
+	if (!TestTrue(TEXT("An import with a missing mesh can be accepted"),
+		Accepted.Status == EConVerseOptimizedImportStatus::AcceptedWithFailedVerification))
+	{
+		AddInfo(Accepted.Summary);
+	}
+	TestFalse(TEXT("Accepting never claims verification succeeded"), Accepted.bVerificationSucceeded);
+
+	UDatasmithScene* AcceptedScene = Cast<UDatasmithScene>(Accepted.ImportAssetPath.ResolveObject());
+	UConVerseOptimizedImportManifest* AcceptedManifest = AcceptedScene != nullptr
+		? Cast<UConVerseOptimizedImportManifest>(
+			AcceptedScene->GetAssetUserDataOfClass(UConVerseOptimizedImportManifest::StaticClass()))
+		: nullptr;
+	if (TestNotNull(TEXT("The accepted session commits a manifest"), AcceptedManifest))
+	{
+		TestTrue(TEXT("The accepted manifest is quarantined"),
+			AcceptedManifest->Verification.bAcceptedWithFailedVerification);
+		TestEqual(TEXT("Every planned group keeps a record"),
+			AcceptedManifest->Groups.Num(), Accepted.PlannedGroupCount);
+		int32 MissingMeshRecords = 0;
+		for (const FConVerseOptimizedImportGroupRecord& Group : AcceptedManifest->Groups)
+		{
+			if (Group.ImportedStaticMeshPath.IsNull()) ++MissingMeshRecords;
+		}
+		TestEqual(TEXT("Only the dropped group lacks a mesh"), MissingMeshRecords, 1);
+		TestTrue(TEXT("The manifest names the incomplete group"),
+			AcceptedManifest->Diagnostics.ContainsByPredicate([](const FString& Line)
+			{
+				return Line.Contains(TEXT("accepted with incomplete assets"));
+			}));
+	}
+
+	CleanupCommittedImport(*World, AcceptedManifest, AcceptedScene);
+	IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FConVerseOptimizedImportDiscardFailedVerificationTest,
 	"DatasmithHISM.OptimizedImport.FailedVerificationCanBeDiscarded",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -2563,7 +2649,7 @@ bool FConVerseConvertedGroupNaniteCoversHISMTest::RunTest(const FString&)
 				if (TestNotNull(*FString::Printf(TEXT("%s converted group mesh resolves"), ModeName), GroupedMesh))
 				{
 					TestTrue(*FString::Printf(TEXT("%s converted group mesh has Nanite enabled"), ModeName),
-						GroupedMesh->GetNaniteSettings().bEnabled);
+						ConVerseGetNaniteSettings(*GroupedMesh).bEnabled);
 				}
 			}
 
@@ -2577,7 +2663,7 @@ bool FConVerseConvertedGroupNaniteCoversHISMTest::RunTest(const FString&)
 					&& TestNotNull(*FString::Printf(TEXT("%s ordinary component has a mesh"), ModeName), OrdinaryMesh))
 				{
 					TestFalse(*FString::Printf(TEXT("%s ordinary retained mesh does not receive Nanite"), ModeName),
-						OrdinaryMesh->GetNaniteSettings().bEnabled);
+						ConVerseGetNaniteSettings(*OrdinaryMesh).bEnabled);
 				}
 			}
 
@@ -4066,8 +4152,8 @@ bool FConVerseNaniteBudgetTest::RunTest(const FString&)
 		auto* OrdinaryComponent = OrdinaryRow ? Cast<UStaticMeshComponent>(OrdinaryRow->ComponentPath.ResolveObject()) : nullptr;
 		UStaticMesh* Ordinary = OrdinaryComponent ? OrdinaryComponent->GetStaticMesh() : nullptr;
 		if (!TestNotNull(TEXT("Shared mesh"), Shared) || !TestNotNull(TEXT("Ordinary mesh"), Ordinary)) return;
-		TestEqual(*FString::Printf(TEXT("%s most-used mesh Nanite"), Name), Shared->GetNaniteSettings().bEnabled, bExpectSharedKept);
-		TestEqual(*FString::Printf(TEXT("%s least-used mesh Nanite"), Name), Ordinary->GetNaniteSettings().bEnabled, ExpectedSkipped == 0);
+		TestEqual(*FString::Printf(TEXT("%s most-used mesh Nanite"), Name), ConVerseGetNaniteSettings(*Shared).bEnabled, bExpectSharedKept);
+		TestEqual(*FString::Printf(TEXT("%s least-used mesh Nanite"), Name), ConVerseGetNaniteSettings(*Ordinary).bEnabled, ExpectedSkipped == 0);
 		if (ExpectedSkipped > 0)
 		{
 			TestTrue(TEXT("Import reports the budget"),
@@ -4211,7 +4297,7 @@ bool FConVersePanelApplyNaniteTest::RunTest(const FString&)
 	UStaticMesh* Mesh = nullptr;
 	for (const auto& Pair : Scene->StaticMeshes) if (!Mesh) Mesh = Pair.Value.LoadSynchronous();
 	if (!TestNotNull(TEXT("Imported mesh"), Mesh)) return false;
-	TestFalse(TEXT("The default import left Nanite off"), Mesh->GetNaniteSettings().bEnabled);
+	TestFalse(TEXT("The default import left Nanite off"), ConVerseGetNaniteSettings(*Mesh).bEnabled);
 
 	const auto Panel = SNew(SConVerseDatasmithImportPanel);
 	Panel->SetResult(Result, true);
@@ -4226,23 +4312,23 @@ bool FConVersePanelApplyNaniteTest::RunTest(const FString&)
 	const FString MeshElement = Panel->InspectionRows[0].MeshElement;
 	Panel->ProcessingRecipe->Processing.DisableNaniteMeshElements.Add(MeshElement);
 	Panel->HandleApplyNanite();
-	TestFalse(TEXT("A disabled mesh element does not receive Nanite"), Mesh->GetNaniteSettings().bEnabled);
+	TestFalse(TEXT("A disabled mesh element does not receive Nanite"), ConVerseGetNaniteSettings(*Mesh).bEnabled);
 	TestTrue(TEXT("The outcome is shown in the report"), Panel->GetReportText().ToString().Contains(TEXT("Nanite applied")));
 	TestEqual(TEXT("Applying does not change the import's status"), Panel->PanelStatus, StatusBefore);
 	TestFalse(TEXT("The panel is not left busy"), Panel->bOperationInProgress);
 
 	Panel->ProcessingRecipe->Processing.DisableNaniteMeshElements.Reset();
 	Panel->HandleApplyNanite();
-	TestTrue(TEXT("The click applied Nanite to the last import"), Mesh->GetNaniteSettings().bEnabled && Mesh->HasValidNaniteData());
+	TestTrue(TEXT("The click applied Nanite to the last import"), ConVerseGetNaniteSettings(*Mesh).bEnabled && Mesh->HasValidNaniteData());
 	TestTrue(TEXT("The status line reports it"), Panel->StatusDetail.ToString().Contains(TEXT("Nanite applied")));
 	TestEqual(TEXT("The manifest recorded it"), Manifest->NaniteApplyEnabledMeshes, 1);
 
 	// A manual edit is refused, and the panel says so instead of staying silent.
-	Mesh->GetNaniteSettings().bEnabled = false;
+	ConVerseGetNaniteSettings(*Mesh).bEnabled = false;
 	Panel->HandleApplyNanite();
 	TestTrue(TEXT("A refusal reaches the report"), Panel->GetReportText().ToString().Contains(TEXT("tracked objects changed")));
 	TestEqual(TEXT("A refusal keeps the import's status"), Panel->PanelStatus, StatusBefore);
-	Mesh->GetNaniteSettings().bEnabled = true;
+	ConVerseGetNaniteSettings(*Mesh).bEnabled = true;
 
 	// The recommended-meshes scope. With no recommendation it refuses: an empty selection would mean every mesh.
 	Panel->bApplyRecommendedOnly = true;
@@ -4250,7 +4336,7 @@ bool FConVersePanelApplyNaniteTest::RunTest(const FString&)
 	Panel->NaniteRecommended.Reset();
 	Panel->HandleApplyNanite();
 	TestTrue(TEXT("Applying with no recommendation is refused with a reason"), Panel->GetReportText().ToString().Contains(TEXT("no recommendation")));
-	TestTrue(TEXT("Nothing changed on that refusal"), Mesh->GetNaniteSettings().bEnabled && Manifest->NaniteApplyEnabledMeshes == 1);
+	TestTrue(TEXT("Nothing changed on that refusal"), ConVerseGetNaniteSettings(*Mesh).bEnabled && Manifest->NaniteApplyEnabledMeshes == 1);
 	Panel->NaniteMinTriangles = 0;
 	Panel->HandleAnalyzeNanite();
 	TestTrue(TEXT("Analyze Nanite reports in the panel"), Panel->GetReportText().ToString().Contains(TEXT("Nanite analysis")));
@@ -4261,10 +4347,10 @@ bool FConVersePanelApplyNaniteTest::RunTest(const FString&)
 	TurnOff.bAutomated = true;
 	TurnOff.DisableNaniteMeshElements = { MeshElement };
 	TestTrue(TEXT("Turning the mesh off succeeds"), FConVerseDatasmithImportService::ApplyNanite(TurnOff).bSucceeded);
-	TestFalse(TEXT("The mesh is off before the recommendation applies"), Mesh->GetNaniteSettings().bEnabled);
+	TestFalse(TEXT("The mesh is off before the recommendation applies"), ConVerseGetNaniteSettings(*Mesh).bEnabled);
 	Panel->HandleApplyNanite();
 	TestTrue(TEXT("Applying the recommendation reports success"), Panel->StatusDetail.ToString().Contains(TEXT("Nanite applied")));
-	TestTrue(TEXT("The recommended mesh has Nanite"), Mesh->GetNaniteSettings().bEnabled);
+	TestTrue(TEXT("The recommended mesh has Nanite"), ConVerseGetNaniteSettings(*Mesh).bEnabled);
 	Panel->SetResult(Result, true);
 	TestTrue(TEXT("A new result clears the recommendation"), Panel->NaniteRecommended.IsEmpty());
 	Panel->bApplyRecommendedOnly = false;
@@ -4318,8 +4404,8 @@ bool FConVerseApplyNaniteTest::RunTest(const FString&)
 	auto* OrdinaryComponent = OrdinaryRow ? Cast<UStaticMeshComponent>(OrdinaryRow->ComponentPath.ResolveObject()) : nullptr;
 	UStaticMesh* Ordinary = OrdinaryComponent ? OrdinaryComponent->GetStaticMesh() : nullptr;
 	if (!TestNotNull(TEXT("Shared mesh"), Shared) || !TestNotNull(TEXT("Ordinary mesh"), Ordinary)) return false;
-	TestFalse(TEXT("Shared mesh starts without Nanite"), Shared->GetNaniteSettings().bEnabled);
-	TestFalse(TEXT("Ordinary mesh starts without Nanite"), Ordinary->GetNaniteSettings().bEnabled);
+	TestFalse(TEXT("Shared mesh starts without Nanite"), ConVerseGetNaniteSettings(*Shared).bEnabled);
+	TestFalse(TEXT("Ordinary mesh starts without Nanite"), ConVerseGetNaniteSettings(*Ordinary).bEnabled);
 
 	const auto Apply = [&](EConVerseNanitePolicy Policy, int32 Budget)
 	{
@@ -4346,24 +4432,24 @@ bool FConVerseApplyNaniteTest::RunTest(const FString&)
 		const auto Result = FConVerseDatasmithImportService::ApplyNanite(Cancelling);
 		TestFalse(TEXT("A cancelled apply does not succeed"), Result.bSucceeded);
 		TestTrue(TEXT("It reports cancellation"), Result.bCancelled);
-		TestFalse(TEXT("Shared mesh restored after cancel"), Shared->GetNaniteSettings().bEnabled);
-		TestFalse(TEXT("Ordinary mesh restored after cancel"), Ordinary->GetNaniteSettings().bEnabled);
+		TestFalse(TEXT("Shared mesh restored after cancel"), ConVerseGetNaniteSettings(*Shared).bEnabled);
+		TestFalse(TEXT("Ordinary mesh restored after cancel"), ConVerseGetNaniteSettings(*Ordinary).bEnabled);
 		TestEqual(TEXT("A cancelled apply records nothing"), Manifest->NaniteApplyEnabledMeshes, -1);
 		TestTrue(TEXT("The import still verifies after the restore"), StillVerifies());
 	}
 	{
 		const auto Result = Apply(EConVerseNanitePolicy::PreserveImported, 0);
 		TestFalse(TEXT("The preserve policy has nothing to apply and is refused"), Result.bSucceeded);
-		TestFalse(TEXT("A refusal changes no mesh"), Shared->GetNaniteSettings().bEnabled || Ordinary->GetNaniteSettings().bEnabled);
+		TestFalse(TEXT("A refusal changes no mesh"), ConVerseGetNaniteSettings(*Shared).bEnabled || ConVerseGetNaniteSettings(*Ordinary).bEnabled);
 	}
 	{
 		// A manual change to an owned mesh is drift: the step must refuse rather than bless it.
-		Shared->GetNaniteSettings().bEnabled = true;
+		ConVerseGetNaniteSettings(*Shared).bEnabled = true;
 		const auto Result = Apply(EConVerseNanitePolicy::AllSupportedMeshes, 0);
 		TestFalse(TEXT("Tracked drift refuses the apply"), Result.bSucceeded);
 		TestTrue(TEXT("The refusal says why"), Result.Summary.Contains(TEXT("tracked objects changed")));
-		TestFalse(TEXT("The ordinary mesh was not touched by a refused apply"), Ordinary->GetNaniteSettings().bEnabled);
-		Shared->GetNaniteSettings().bEnabled = false;
+		TestFalse(TEXT("The ordinary mesh was not touched by a refused apply"), ConVerseGetNaniteSettings(*Ordinary).bEnabled);
+		ConVerseGetNaniteSettings(*Shared).bEnabled = false;
 		TestTrue(TEXT("Undoing the manual change restores a clean baseline"), StillVerifies());
 	}
 
@@ -4373,8 +4459,8 @@ bool FConVerseApplyNaniteTest::RunTest(const FString&)
 	TestTrue(TEXT("The step reports how long it took"), All.DurationSeconds > 0.0);
 	TestEqual(TEXT("Both meshes enabled"), All.NaniteEnabledMeshes, 2);
 	TestEqual(TEXT("Each mesh rebuilt once"), All.NaniteRebuiltMeshes, 2);
-	TestTrue(TEXT("Shared mesh has Nanite data"), Shared->GetNaniteSettings().bEnabled && Shared->HasValidNaniteData());
-	TestTrue(TEXT("Ordinary mesh has Nanite data"), Ordinary->GetNaniteSettings().bEnabled && Ordinary->HasValidNaniteData());
+	TestTrue(TEXT("Shared mesh has Nanite data"), ConVerseGetNaniteSettings(*Shared).bEnabled && Shared->HasValidNaniteData());
+	TestTrue(TEXT("Ordinary mesh has Nanite data"), ConVerseGetNaniteSettings(*Ordinary).bEnabled && Ordinary->HasValidNaniteData());
 	TestEqual(TEXT("The manifest records what was applied"), Manifest->NaniteApplyEnabledMeshes, 2);
 	TestTrue(TEXT("The applied settings are recorded"), Manifest->NaniteApplySettingsJson.Contains(TEXT("nanitePolicy")));
 	TestTrue(TEXT("Applying Nanite does not read as a manual edit"), StillVerifies());
@@ -4388,8 +4474,8 @@ bool FConVerseApplyNaniteTest::RunTest(const FString&)
 	TestTrue(TEXT("Budgeted apply succeeds"), Budgeted.bSucceeded);
 	TestEqual(TEXT("One mesh left with Nanite"), Budgeted.NaniteEnabledMeshes, 1);
 	TestEqual(TEXT("One mesh left out by the budget"), Budgeted.NaniteBudgetSkippedMeshes, 1);
-	TestTrue(TEXT("Most-used mesh kept Nanite"), Shared->GetNaniteSettings().bEnabled);
-	TestFalse(TEXT("Least-used mesh lost Nanite"), Ordinary->GetNaniteSettings().bEnabled);
+	TestTrue(TEXT("Most-used mesh kept Nanite"), ConVerseGetNaniteSettings(*Shared).bEnabled);
+	TestFalse(TEXT("Least-used mesh lost Nanite"), ConVerseGetNaniteSettings(*Ordinary).bEnabled);
 	TestTrue(TEXT("The budgeted result still verifies"), StillVerifies());
 
 	// An unusable manifest reference is refused, not guessed at.
@@ -4516,6 +4602,391 @@ bool FConVerseBenchmarkBudgetTest::RunTest(const FString&)
 		TestEqual(TEXT("A budget without a metrics file is rejected before any work"), Commandlet->Main(FString::Printf(
 			TEXT("-Source=\"%s\" -AnalyzeOnly -Budget=\"%s\""), *Fixture.SceneFile, *Budget)), 1);
 	}
+	return true;
+}
+
+namespace ConVerseOptimizedImportAutomation
+{
+	/**
+	 * One scene that puts at least one actor in every grouping-breakdown class, with a minimum of 3:
+	 * a 3-instance group, a settings split, a parent split, a payload duplicate, a unique mesh, a
+	 * no-single-lever pair, and a child-bearing, a mirrored and an explicitly kept actor.
+	 */
+	static bool CreateBreakdownFixture(FFixtureFiles& OutFixture, FString& OutKeptMesh, FString& OutError)
+	{
+		OutFixture.RootDirectory = FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Automation") / FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		if (!IFileManager::Get().MakeDirectory(*OutFixture.RootDirectory, true))
+		{
+			OutError = TEXT("Could not create the temporary fixture directory.");
+			return false;
+		}
+		FDatasmithExporterManager::Initialize();
+		const FString SceneName = TEXT("ConVerseBreakdownFixture");
+		FDatasmithSceneExporter SceneExporter;
+		SceneExporter.SetName(*SceneName);
+		SceneExporter.SetOutputPath(*OutFixture.RootDirectory);
+		SceneExporter.PreExport();
+		IFileManager::Get().MakeDirectory(SceneExporter.GetAssetsOutputPath(), true);
+
+		const TSharedRef<IDatasmithUEPbrMaterialElement> Material = FDatasmithSceneFactory::CreateUEPbrMaterial(TEXT("BreakdownMaterial"));
+		IDatasmithMaterialExpressionColor* BaseColor = Material->AddMaterialExpression<IDatasmithMaterialExpressionColor>();
+		if (BaseColor == nullptr)
+		{
+			OutError = TEXT("Could not create the fixture material expression.");
+			return false;
+		}
+		BaseColor->GetColor() = FLinearColor(0.4f, 0.4f, 0.4f, 1.0f);
+		BaseColor->ConnectExpression(Material->GetBaseColor());
+
+		const TSharedRef<IDatasmithScene> Scene = FDatasmithSceneFactory::CreateScene(*SceneName);
+		Scene->SetHost(TEXT("DatasmithHISM Automation"));
+		Scene->SetResourcePath(*OutFixture.RootDirectory);
+		Scene->AddMaterial(Material);
+
+		FDatasmithMeshExporter MeshExporter;
+		TMap<FString, TSharedPtr<IDatasmithMeshElement>> Meshes;
+		for (const TCHAR* Name : {TEXT("GroupMesh"), TEXT("PayloadTwinMesh"), TEXT("UniqueMesh"), TEXT("ParentSplitMesh"), TEXT("NoLeverMesh"), TEXT("KeptMesh")})
+		{
+			// Sizes differ so each export is a genuinely different payload; the twin's hash is set below.
+			const float Half = 10.0f + 5.0f * Meshes.Num();
+			FDatasmithMesh Mesh;
+			Mesh.SetName(Name);
+			Mesh.SetVerticesCount(4);
+			Mesh.SetVertex(0, -Half, -Half, 0.0f);
+			Mesh.SetVertex(1,  Half, -Half, 0.0f);
+			Mesh.SetVertex(2,  Half,  Half, 0.0f);
+			Mesh.SetVertex(3, -Half,  Half, 0.0f);
+			Mesh.SetFacesCount(2);
+			Mesh.SetFace(0, 0, 1, 2, 0);
+			Mesh.SetFace(1, 0, 2, 3, 0);
+			for (int32 CornerIndex = 0; CornerIndex < 6; ++CornerIndex) Mesh.SetNormal(CornerIndex, 0.0f, 0.0f, 1.0f);
+			Mesh.SetUVChannelsCount(1);
+			Mesh.SetUVCount(0, 4);
+			Mesh.SetUV(0, 0, 0.0, 0.0);
+			Mesh.SetUV(0, 1, 1.0, 0.0);
+			Mesh.SetUV(0, 2, 1.0, 1.0);
+			Mesh.SetUV(0, 3, 0.0, 1.0);
+			Mesh.SetFaceUV(0, 0, 0, 1, 2);
+			Mesh.SetFaceUV(1, 0, 0, 2, 3);
+			TSharedPtr<IDatasmithMeshElement> Element = MeshExporter.ExportToUObject(
+				SceneExporter.GetAssetsOutputPath(), Mesh.GetName(), Mesh, nullptr, EDSExportLightmapUV::Never);
+			if (!Element.IsValid())
+			{
+				OutError = FString::Printf(TEXT("Could not export fixture mesh %s: %s"), Name, *MeshExporter.GetLastError());
+				return false;
+			}
+			Element->SetMaterial(Material->GetName(), 0);
+			Scene->AddMesh(Element);
+			Meshes.Add(Name, Element);
+		}
+		// Declare the twin's payload identical to GroupMesh, as an exporter does for byte-identical meshes.
+		const FMD5Hash SharedPayload = FMD5Hash::HashFile(Meshes[TEXT("GroupMesh")]->GetFile());
+		Meshes[TEXT("GroupMesh")]->SetFileHash(SharedPayload);
+		Meshes[TEXT("PayloadTwinMesh")]->SetFileHash(SharedPayload);
+		OutKeptMesh = Meshes[TEXT("KeptMesh")]->GetName();
+
+		const TSharedRef<IDatasmithActorElement> ParentA = FDatasmithSceneFactory::CreateActor(TEXT("ParentA"));
+		const TSharedRef<IDatasmithActorElement> ParentB = FDatasmithSceneFactory::CreateActor(TEXT("ParentB"));
+		Scene->AddActor(ParentA);
+		Scene->AddActor(ParentB);
+
+		int32 Ordinal = 0;
+		auto Place = [&](const TSharedRef<IDatasmithActorElement>& Parent, const TCHAR* Name, const TCHAR* MeshName, double X, const FVector& Scale = FVector(1.0))
+		{
+			return MakeMeshActor(Scene, Parent, Name, Name, Meshes[MeshName]->GetName(), Material->GetName(),
+				*FString::Printf(TEXT("%d"), 5000 + Ordinal++), FTransform(FRotator::ZeroRotator, FVector(X, 0.0, 0.0), Scale));
+		};
+		Place(ParentA, TEXT("Group_0"), TEXT("GroupMesh"), 0.0);
+		Place(ParentA, TEXT("Group_1"), TEXT("GroupMesh"), 100.0);
+		Place(ParentA, TEXT("Group_2"), TEXT("GroupMesh"), 200.0);
+		Place(ParentA, TEXT("NoShadow"), TEXT("GroupMesh"), 300.0)->SetCastShadow(false);
+		Place(ParentA, TEXT("Mirrored"), TEXT("GroupMesh"), 400.0, FVector(-1.0, 1.0, 1.0));
+		const TSharedRef<IDatasmithMeshActorElement> WithChild = Place(ParentA, TEXT("WithChild"), TEXT("GroupMesh"), 500.0);
+		WithChild->AddChild(FDatasmithSceneFactory::CreateActor(TEXT("ChildOfMesh")), EDatasmithActorAttachmentRule::KeepWorldTransform);
+		Place(ParentA, TEXT("Twin"), TEXT("PayloadTwinMesh"), 600.0);
+		Place(ParentA, TEXT("Unique"), TEXT("UniqueMesh"), 700.0);
+		Place(ParentA, TEXT("Split_A"), TEXT("ParentSplitMesh"), 800.0);
+		Place(ParentB, TEXT("Split_B0"), TEXT("ParentSplitMesh"), 900.0);
+		Place(ParentB, TEXT("Split_B1"), TEXT("ParentSplitMesh"), 1000.0);
+		Place(ParentA, TEXT("NoLever_A"), TEXT("NoLeverMesh"), 1100.0);
+		Place(ParentB, TEXT("NoLever_B"), TEXT("NoLeverMesh"), 2000.0)->SetLayer(TEXT("OtherLayer"));
+		Place(ParentA, TEXT("Kept"), TEXT("KeptMesh"), 1200.0);
+
+		SceneExporter.Export(Scene, false);
+		OutFixture.SceneFile = OutFixture.RootDirectory / (SceneName + TEXT(".udatasmith"));
+		if (!FPaths::FileExists(OutFixture.SceneFile))
+		{
+			OutError = TEXT("The Datasmith exporter did not produce the scene file.");
+			return false;
+		}
+		return true;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseGroupingBreakdownTest,
+	"DatasmithHISM.OptimizedImport.GroupingBreakdownPartitionsLeftovers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseGroupingBreakdownTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	UWorld* World = GEditor != nullptr ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!TestNotNull(TEXT("An editor world is available"), World)) return false;
+
+	FFixtureFiles Fixture;
+	FString Error, KeptMesh;
+	if (!TestTrue(TEXT("Create breakdown fixture"), CreateBreakdownFixture(Fixture, KeptMesh, Error)))
+	{
+		AddError(Error);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	FConVerseOptimizedImportOptions Options;
+	Options.FilePath = Fixture.SceneFile;
+	Options.DestinationPath = FString::Printf(TEXT("/Game/__ConVerseAutomation/%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12));
+	Options.MinimumInstanceCount = 3;
+	Options.bAutomated = true;
+	Options.Processing.KeepOrdinaryMeshElements.Add(KeptMesh);
+
+	const int32 ActorsBefore = CountWorldActors(*World);
+	const bool bDirtyBefore = World->GetOutermost()->IsDirty();
+	const FConVerseOptimizedImportResult Result = FConVerseDatasmithImportService::Analyze(Options);
+	if (!TestTrue(TEXT("Analysis succeeds"), Result.Status == EConVerseOptimizedImportStatus::AnalysisSucceeded))
+	{
+		AddError(Result.Summary);
+		return false;
+	}
+	TestTrue(TEXT("Analyze does not mutate the world"), CountWorldActors(*World) == ActorsBefore && World->GetOutermost()->IsDirty() == bDirtyBefore);
+	TArray<FAssetData> Assets;
+	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get().GetAssetsByPath(FName(*Options.DestinationPath), Assets, true, false);
+	TestEqual(TEXT("Analyze creates no assets"), Assets.Num(), 0);
+
+	TestEqual(TEXT("All source mesh actors are counted"), Result.TotalSourceMeshActors, 14);
+	TestEqual(TEXT("One group is planned"), Result.PlannedGroupCount, 1);
+	TestEqual(TEXT("The group has three instances"), Result.PlannedInstanceCount, 3);
+	TestTrue(TEXT("The child-bearing actor is HasChildren"), HasSkipCount(Result, EConVerseOptimizedSkipReason::HasChildren, 1));
+	TestTrue(TEXT("The kept mesh is an explicit exception, not HasChildren"), HasSkipCount(Result, EConVerseOptimizedSkipReason::ExplicitKeepOrdinary, 1));
+	TestTrue(TEXT("The mirrored actor is UnsupportedNegativeScale"), HasSkipCount(Result, EConVerseOptimizedSkipReason::UnsupportedNegativeScale, 1));
+	TestTrue(TEXT("Eight eligible actors are below the minimum"), HasSkipCount(Result, EConVerseOptimizedSkipReason::BelowMinimumInstanceCount, 8));
+
+	const FConVerseGroupingBreakdown& Breakdown = Result.GroupingBreakdown;
+	TestEqual(TEXT("Instances plus skips partition the source"), Result.PlannedInstanceCount + Result.SkippedActorCount, Result.TotalSourceMeshActors);
+	TestEqual(TEXT("Lever classes partition the below-minimum actors"),
+		Breakdown.ParentSplitActors + Breakdown.SettingsSplitActors + Breakdown.PayloadDuplicateActors + Breakdown.UniqueMeshActors + Breakdown.NoSingleLeverActors,
+		Result.BelowThresholdActorCount);
+	TestEqual(TEXT("Parent split"), Breakdown.ParentSplitActors, 3);
+	TestEqual(TEXT("Settings split"), Breakdown.SettingsSplitActors, 1);
+	TestEqual(TEXT("Payload duplicate"), Breakdown.PayloadDuplicateActors, 1);
+	TestEqual(TEXT("Unique mesh"), Breakdown.UniqueMeshActors, 1);
+	TestEqual(TEXT("No single lever"), Breakdown.NoSingleLeverActors, 2);
+	TestEqual(TEXT("Only the shadow flag splits settings"), Breakdown.SettingsSplitFields.Num(), 1);
+	TestEqual(TEXT("Shadow split count"), Breakdown.SettingsSplitFields.FindRef(TEXT("CastShadow")), 1);
+	TestEqual(TEXT("The child-bearing actor could group"), Breakdown.HasChildrenCouldGroup, 1);
+	TestEqual(TEXT("The mirrored actor could group"), Breakdown.NegativeScaleCouldGroup, 1);
+	TestTrue(TEXT("Payload hashes are read from the source"), Breakdown.MeshesWithPayloadHash >= 2);
+
+	TestTrue(TEXT("Scene spread is the X extent"), FMath::IsNearlyEqual(Breakdown.SceneSpreadCm, 2000.0, 1.0));
+	if (TestEqual(TEXT("One group spread row"), Breakdown.WidestGroups.Num(), 1))
+	{
+		TestEqual(TEXT("Spread row instance count"), Breakdown.WidestGroups[0].Instances, 3);
+		TestTrue(TEXT("Group spread is its pivot extent"), FMath::IsNearlyEqual(Breakdown.WidestGroups[0].SpreadCm, 200.0, 1.0));
+	}
+	TestEqual(TEXT("The group does not span the scene"), Breakdown.SceneSpanningGroups, 0);
+
+	auto OutcomeOf = [&Result](const TCHAR* Element)
+	{
+		const FConVerseImportInspectionRow* Row = Result.InspectionRows.FindByPredicate(
+			[Element](const FConVerseImportInspectionRow& Candidate) { return Candidate.SourceElement == Element; });
+		return Row ? Row->Outcome : FString();
+	};
+	TestEqual(TEXT("Grouped row"), OutcomeOf(TEXT("Group_0")), FString(TEXT("Planned instance")));
+	TestEqual(TEXT("Unique row"), OutcomeOf(TEXT("Unique")), FString(TEXT("Ordinary: below minimum (unique mesh)")));
+	TestEqual(TEXT("Parent split row"), OutcomeOf(TEXT("Split_B0")), FString(TEXT("Ordinary: below minimum (parent split)")));
+	TestEqual(TEXT("Kept row"), OutcomeOf(TEXT("Kept")), FString(TEXT("Ordinary: explicit exception")));
+	TestEqual(TEXT("Child-bearing row"), OutcomeOf(TEXT("WithChild")), FString(TEXT("Ordinary: HasChildren")));
+	TestTrue(TEXT("Report states the lever counts"), Result.Report.Contains(TEXT("Below-minimum actors by lever: parent split 3, settings split 1, payload duplicate 1, unique mesh 1, no single lever 2")));
+
+	const FConVerseConversionSummary Summary = FConVerseDatasmithImportService::SummarizeConversion(Result);
+	TestTrue(TEXT("A successful analysis has a planned summary"), Summary.bValid && !Summary.bImported);
+	TestEqual(TEXT("Summary converted"), Summary.ConvertedActors, 3);
+	TestEqual(TEXT("Summary recoverable"), Summary.RecoverableActors, 7);
+	TestEqual(TEXT("Summary remaining"), Summary.RemainingActors, 4);
+	TestEqual(TEXT("Summary parts sum to the source"), Summary.ConvertedActors + Summary.RecoverableActors + Summary.RemainingActors, Summary.TotalSourceMeshActors);
+	TestEqual(TEXT("Summary unique meshes"), Summary.UniqueMeshes, 1);
+	FConVerseOptimizedImportResult RolledBack = Result;
+	RolledBack.Status = EConVerseOptimizedImportStatus::FailedRolledBack;
+	TestFalse(TEXT("A rolled-back result has no summary"), FConVerseDatasmithImportService::SummarizeConversion(RolledBack).bValid);
+
+	const auto Panel = SNew(SConVerseDatasmithImportPanel);
+	Panel->SetResult(Result, false);
+	const FString Headline = Panel->GetConversionHeadlineText().ToString();
+	TestTrue(TEXT("Advanced tab states the planned share"), Headline.Contains(TEXT("3 of 14 source mesh actors (21.4%)")));
+	TestTrue(TEXT("Advanced tab states the unique meshes left"), Headline.Contains(TEXT("Unique meshes left: 1.")));
+	TestTrue(TEXT("Advanced tab legend counts the recoverable part"), Panel->GetConversionLegendText(1).ToString().Contains(TEXT(": 7 (50.0%)")));
+	TestTrue(TEXT("Advanced tab lists the mirrored step"), Panel->GetNextStepsText().ToString().Contains(TEXT("Mirrored instances: 1 actors")));
+
+	// The breakdown does not change plan identity: the same source analyzes to the same PlanId.
+	TestEqual(TEXT("PlanId is deterministic"), FConVerseDatasmithImportService::Analyze(Options).PlanId, Result.PlanId);
+
+	TStrongObjectPtr<UConVerseOptimizedImportCommandlet> Commandlet(NewObject<UConVerseOptimizedImportCommandlet>());
+	const FString MetricsPath = Fixture.RootDirectory / TEXT("BreakdownMetrics.json");
+	TestEqual(TEXT("Commandlet analysis exits 0"), Commandlet->Main(FString::Printf(
+		TEXT("-Source=\"%s\" -Destination=%s -AnalyzeOnly -MinInstances=3 -KeepOrdinary=%s -MetricsFile=\"%s\""),
+		*Fixture.SceneFile, *Options.DestinationPath, *KeptMesh, *MetricsPath)), 0);
+	FString Text;
+	TSharedPtr<FJsonObject> Metrics;
+	if (FFileHelper::LoadFileToString(Text, *MetricsPath)) FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Metrics);
+	const TSharedPtr<FJsonObject>* MetricsBreakdown = nullptr;
+	if (TestTrue(TEXT("Metrics carry the breakdown"), Metrics.IsValid() && Metrics->TryGetObjectField(TEXT("GroupingBreakdown"), MetricsBreakdown) && MetricsBreakdown))
+	{
+		double Number = 0.0;
+		TestTrue(TEXT("Metrics parent split"), (*MetricsBreakdown)->TryGetNumberField(TEXT("ParentSplitActors"), Number) && int32(Number) == 3);
+		TestTrue(TEXT("Metrics unique mesh"), (*MetricsBreakdown)->TryGetNumberField(TEXT("UniqueMeshActors"), Number) && int32(Number) == 1);
+	}
+	return true;
+}
+
+namespace ConVerseOptimizedImportAutomation
+{
+	/**
+	 * Placed-once quads for each geometry-survey class: a renamed copy (Exact), a copy with its
+	 * position baked in (ShapeAndUV), a baked copy with shifted UVs (Shape only), an unrelated size,
+	 * plus one mesh placed twice as the mesh-element baseline.
+	 */
+	static bool CreateGeometrySurveyFixture(FFixtureFiles& OutFixture, FString& OutError)
+	{
+		OutFixture.RootDirectory = FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Automation") / FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		if (!IFileManager::Get().MakeDirectory(*OutFixture.RootDirectory, true))
+		{
+			OutError = TEXT("Could not create the temporary fixture directory.");
+			return false;
+		}
+		FDatasmithExporterManager::Initialize();
+		const FString SceneName = TEXT("ConVerseGeometrySurveyFixture");
+		FDatasmithSceneExporter SceneExporter;
+		SceneExporter.SetName(*SceneName);
+		SceneExporter.SetOutputPath(*OutFixture.RootDirectory);
+		SceneExporter.PreExport();
+		IFileManager::Get().MakeDirectory(SceneExporter.GetAssetsOutputPath(), true);
+
+		const TSharedRef<IDatasmithUEPbrMaterialElement> Material = FDatasmithSceneFactory::CreateUEPbrMaterial(TEXT("SurveyMaterial"));
+		const TSharedRef<IDatasmithScene> Scene = FDatasmithSceneFactory::CreateScene(*SceneName);
+		Scene->SetHost(TEXT("DatasmithHISM Automation"));
+		Scene->SetResourcePath(*OutFixture.RootDirectory);
+		Scene->AddMaterial(Material);
+		const TSharedRef<IDatasmithActorElement> Root = FDatasmithSceneFactory::CreateActor(TEXT("SurveyRoot"));
+		Scene->AddActor(Root);
+
+		struct FQuad { const TCHAR* Name; float Half; float OffsetX; float UVOffset; int32 Placements; };
+		const FQuad Quads[] = {
+			{ TEXT("Base"), 10.0f, 0.0f, 0.0f, 1 },
+			{ TEXT("Renamed"), 10.0f, 0.0f, 0.0f, 1 },
+			{ TEXT("Baked"), 10.0f, 5000.0f, 0.0f, 1 },
+			{ TEXT("BakedWorldUV"), 10.0f, 7000.0f, 0.5f, 1 },
+			{ TEXT("Different"), 20.0f, 0.0f, 0.0f, 1 },
+			{ TEXT("Shared"), 30.0f, 0.0f, 0.0f, 2 },
+		};
+		FDatasmithMeshExporter MeshExporter;
+		int32 Ordinal = 0;
+		for (const FQuad& Quad : Quads)
+		{
+			FDatasmithMesh Mesh;
+			Mesh.SetName(Quad.Name);
+			Mesh.SetVerticesCount(4);
+			Mesh.SetVertex(0, Quad.OffsetX - Quad.Half, -Quad.Half, 0.0f);
+			Mesh.SetVertex(1, Quad.OffsetX + Quad.Half, -Quad.Half, 0.0f);
+			Mesh.SetVertex(2, Quad.OffsetX + Quad.Half,  Quad.Half, 0.0f);
+			Mesh.SetVertex(3, Quad.OffsetX - Quad.Half,  Quad.Half, 0.0f);
+			Mesh.SetFacesCount(2);
+			Mesh.SetFace(0, 0, 1, 2, 0);
+			Mesh.SetFace(1, 0, 2, 3, 0);
+			for (int32 CornerIndex = 0; CornerIndex < 6; ++CornerIndex) Mesh.SetNormal(CornerIndex, 0.0f, 0.0f, 1.0f);
+			Mesh.SetUVChannelsCount(1);
+			Mesh.SetUVCount(0, 4);
+			Mesh.SetUV(0, 0, Quad.UVOffset + 0.0, 0.0);
+			Mesh.SetUV(0, 1, Quad.UVOffset + 1.0, 0.0);
+			Mesh.SetUV(0, 2, Quad.UVOffset + 1.0, 1.0);
+			Mesh.SetUV(0, 3, Quad.UVOffset + 0.0, 1.0);
+			Mesh.SetFaceUV(0, 0, 0, 1, 2);
+			Mesh.SetFaceUV(1, 0, 0, 2, 3);
+			TSharedPtr<IDatasmithMeshElement> Element = MeshExporter.ExportToUObject(
+				SceneExporter.GetAssetsOutputPath(), Mesh.GetName(), Mesh, nullptr, EDSExportLightmapUV::Never);
+			if (!Element.IsValid())
+			{
+				OutError = FString::Printf(TEXT("Could not export fixture mesh %s: %s"), Quad.Name, *MeshExporter.GetLastError());
+				return false;
+			}
+			Element->SetMaterial(Material->GetName(), 0);
+			Scene->AddMesh(Element);
+			for (int32 Placement = 0; Placement < Quad.Placements; ++Placement)
+			{
+				const FString ActorName = FString::Printf(TEXT("%s_%d"), Quad.Name, Placement);
+				MakeMeshActor(Scene, Root, *ActorName, *ActorName, Element->GetName(), Material->GetName(),
+					*FString::Printf(TEXT("%d"), 7000 + Ordinal), FTransform(FVector(100.0 * Ordinal, 0.0, 0.0)));
+				++Ordinal;
+			}
+		}
+
+		SceneExporter.Export(Scene, false);
+		OutFixture.SceneFile = OutFixture.RootDirectory / (SceneName + TEXT(".udatasmith"));
+		if (!FPaths::FileExists(OutFixture.SceneFile))
+		{
+			OutError = TEXT("The Datasmith exporter did not produce the scene file.");
+			return false;
+		}
+		return true;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConVerseGeometrySurveyTest,
+	"DatasmithHISM.OptimizedImport.GeometrySurveyFindsTranslatedCopies",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConVerseGeometrySurveyTest::RunTest(const FString&)
+{
+	using namespace ConVerseOptimizedImportAutomation;
+	FFixtureFiles Fixture;
+	FString Error;
+	if (!TestTrue(TEXT("Create geometry survey fixture"), CreateGeometrySurveyFixture(Fixture, Error)))
+	{
+		AddError(Error);
+		IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true);
+		return false;
+	}
+	ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Fixture.RootDirectory, false, true); };
+
+	TStrongObjectPtr<UConVerseOptimizedImportCommandlet> Commandlet(NewObject<UConVerseOptimizedImportCommandlet>());
+	const FString SurveyPath = Fixture.RootDirectory / TEXT("Survey.json");
+	if (!TestEqual(TEXT("The survey succeeds"), Commandlet->Main(FString::Printf(
+		TEXT("-GeometrySurvey=\"%s\" -SurveyFile=\"%s\""), *Fixture.SceneFile, *SurveyPath)), 0))
+	{
+		return false;
+	}
+	FString Text;
+	TSharedPtr<FJsonObject> Survey;
+	if (FFileHelper::LoadFileToString(Text, *SurveyPath)) FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Survey);
+	if (!TestTrue(TEXT("The survey file is JSON"), Survey.IsValid())) return false;
+
+	TestEqual(TEXT("Mesh actors"), int32(Survey->GetNumberField(TEXT("MeshActors"))), 7);
+	TestEqual(TEXT("Placed mesh elements"), int32(Survey->GetNumberField(TEXT("PlacedMeshElements"))), 6);
+	TestEqual(TEXT("Placed-once mesh elements"), int32(Survey->GetNumberField(TEXT("PlacedOnceMeshElements"))), 5);
+	TestEqual(TEXT("No unreadable payloads"), int32(Survey->GetNumberField(TEXT("UnreadablePayloads"))), 0);
+	TestEqual(TEXT("Baseline groups only the shared mesh"), int32(Survey->GetNumberField(TEXT("ActorsGroupableByMeshElement"))), 2);
+
+	struct FExpected { const TCHAR* Kind; int32 Signatures; int32 Groupable; int32 Rescued; };
+	// Exact joins the renamed copy; ShapeAndUV adds the baked copy; Shape also adds the copy with shifted UVs.
+	for (const FExpected& Expected : { FExpected{ TEXT("Exact"), 5, 4, 2 }, FExpected{ TEXT("ShapeAndUV"), 4, 5, 3 }, FExpected{ TEXT("Shape"), 3, 6, 4 } })
+	{
+		const TSharedPtr<FJsonObject>* Section = nullptr;
+		if (!TestTrue(*FString::Printf(TEXT("%s section present"), Expected.Kind), Survey->TryGetObjectField(Expected.Kind, Section))) continue;
+		TestEqual(*FString::Printf(TEXT("%s distinct signatures"), Expected.Kind), int32((*Section)->GetNumberField(TEXT("DistinctSignatures"))), Expected.Signatures);
+		TestEqual(*FString::Printf(TEXT("%s actors groupable"), Expected.Kind), int32((*Section)->GetNumberField(TEXT("ActorsGroupable"))), Expected.Groupable);
+		TestEqual(*FString::Printf(TEXT("%s placed-once meshes rescued"), Expected.Kind), int32((*Section)->GetNumberField(TEXT("PlacedOnceMeshesRescued"))), Expected.Rescued);
+	}
+
+	AddExpectedError(TEXT("Could not parse"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestEqual(TEXT("A missing scene fails"), Commandlet->Main(FString::Printf(
+		TEXT("-GeometrySurvey=\"%s\" -SurveyFile=\"%s\""), *(Fixture.RootDirectory / TEXT("Missing.udatasmith")), *SurveyPath)), 1);
 	return true;
 }
 

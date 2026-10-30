@@ -1,6 +1,6 @@
 # DatasmithHISM
 
-Tracked Datasmith import and ISM/HISM optimization for **Unreal Engine 5.8.3**. Import runs in the editor; imported scenes and source metadata can be cooked into Windows applications.
+Tracked Datasmith import and ISM/HISM optimization. Win64 editor-target source builds are verified with **Unreal Engine 5.6.1 and 5.8.3**. Import runs in the editor; imported scenes and source metadata can be cooked into Windows applications.
 
 **Status:** in development; release acceptance is incomplete. Build, test, and live-check status is kept in one place: [the handoff](HANDOFF.md#current-status).
 
@@ -49,7 +49,7 @@ All 1,033 lights in the supplied HVAC export explicitly declare Unitless intensi
 
 ## Install, build, and package
 
-Place this folder under a project's `Plugins/DatasmithHISM` directory. Build against the tested engine version with the editor closed. DatasmithImporter and DataprepEditor dependencies are declared by the plugin; additional source formats depend on enabled translators. Compatibility with other engine versions is not established by this baseline.
+Place this folder under a project's `Plugins/DatasmithHISM` directory. Build with the editor closed. The plugin descriptor is not pinned to an engine version; choose UE 5.6 or 5.8 explicitly when the host project's engine association selects a different version. DatasmithImporter and DataprepEditor dependencies are declared by the plugin; additional source formats depend on enabled translators. Compilation is verified on UE 5.6.1 and 5.8.3; full UE 5.6 automation and runtime behavior remain unverified. The plugin is Win64-only.
 
 - [Build and automation commands](Docs/VALIDATION.md)
 - [Runtime source lookup and Windows packaging](Docs/RUNTIME_AND_PACKAGING.md)

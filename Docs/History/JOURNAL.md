@@ -847,3 +847,31 @@ IES profile presence and profile-brightness differences no longer fail light ver
 ## 2026-10-06: skills and code review
 
 Reviewed the agent skills and pruned nine with low relevance to this plugin. A source review, checked against UE 5.8.3 engine source, found that per-slot `UStaticMesh::SetMaterial` rebuilt each mesh once per replaced slot during approved material replacement; slots are now edited with one post-edit per mesh. Also added `Modify()` on changed components, suppressed the dedupe dialog in unattended runs, and bound the panel details callback to the widget's lifetime. Build passed; after an interrupted first run, the full 53-test suite passed with zero automation errors. Not checked live or timed on a large source. See the [review record](../Validation/2026-10-06-review.md).
+
+## 2026-10-06: UE 5.6 source-build compatibility
+
+Added version-aware access for Nanite settings, mesh-description identity, and package object enumeration, and switched import trace setup to the channel-string `FTraceAuxiliary::Start` overload available in UE 5.6 and 5.8. The Win64 editor target builds on UE 5.6.1 and 5.8.3. The focused UE 5.6.1 trace automation imported and verified its fixture but reported failure after a handled engine ensure in the ISM bounds cache. The descriptor remains unpinned; full 5.6 automation, interactive workflows, packaging, and runtime behavior are not yet verified. See the [compatibility record](../Validation/2026-10-06-engine-compatibility.md).
+
+## 2026-10-27: accept imports with failed meshes
+
+A Warrenton Revit import lost every mesh to Datasmith's path-length truncation (`name too short`), and accepting the failed verification still rolled it back because commit re-resolved every group's mesh. Accepted (degraded) commits now keep groups with missing assets and record them as diagnostics; the attempt folder no longer repeats the source name; failed-group lists in summaries are capped at 20. Amendment 19. Not built or tested at the time of writing (editor open).
+
+## 2026-10-29: grouping breakdown (Phase 0)
+
+Added a read-only explanation of ordinary leftovers to Analyze and Import (Amendment 20, [grouping plan](../GROUPING_PLAN.md)): each below-minimum actor is classed as parent split, settings split, payload duplicate, unique mesh or no single lever; child-bearing and mirrored actors that could otherwise group are counted; explicit keep-ordinary exceptions get their own skip reason; group spread is reported. PlanId and output are unchanged. Built and tested on UE 5.6.1 only (UE 5.8 is not on this machine): the new test and the Amendment 19 test pass; the full suite is 49/55, with five Nanite tests and one ISM-bounds ensure failing on UE 5.6. On three Warrenton exports, unique meshes are 78-99.8% of the leftovers, mirrored instances are the largest instancing lever on architecture models, and byte-identical payload duplicates are absent. See the [breakdown evidence](../Validation/2026-10-29-grouping-breakdown.md).
+
+## 2026-10-29: Advanced import tab
+
+Split the panel into Import and Advanced import tabs. Advanced reports the last result's converted share, unique meshes left, a green/yellow/red bar (converted, could group with a further step, stays ordinary) and the further grouping steps that would apply. Built and tested on UE 5.6.1; full suite unchanged at 49/55 (the same six UE 5.6 Nanite/ensure failures). Not yet seen in a live editor.
+
+## 2026-10-29: geometry survey and mirrored-instance check
+
+Added a read-only `-GeometrySurvey` commandlet mode that hashes each placed mesh payload as stored, without its centroid offset (with UVs), and as a sorted shape. On the Warrenton exports most placed-once meshes are translated copies: groupable actors rise from 3,938 to 7,921 on the curtain wall, 6,341 to 7,714 on Arch3 and 2,464 to 2,846 on HKS_A. UE 5.6 source shows Nanite reverses culling per mirrored instance, while non-Nanite ISM/HISM uses one cull mode per component. Grouping plan reordered: geometry dedupe first. Build passed on UE 5.6.1; `GeometrySurveyFindsTranslatedCopies` passes. Normals added to the signatures afterwards; the real-source re-run was blocked by an open UE 5.6 editor. Drafted ADR 0010 (Proposed): opt-in equivalent-mesh sharing and mirrored groups with a mirrored component transform.
+
+## 2026-10-29: installed in Hyperscale
+
+Packaged the plugin with UE 5.6 `RunUAT BuildPlugin` (host `Saved/Pkg`, log `Saved/Logs/BuildPlugin-UE56-20261029.txt`) and replaced Hyperscale's Oct 6 copy; the old copy is in `Hyperscale/Saved/PluginBackups/DatasmithHISM-2026-10-29`. Hyperscale loaded it headless and `GeometrySurveyFindsTranslatedCopies` passed there. Not opened in the interactive editor; nothing committed in Lore.
+
+## 2026-10-29: Nanite cancel fix, UE 5.8.4 suite
+
+The five Nanite test failures came from Apply Nanite's cancel path re-editing a mesh mid-build, which poisoned the local derived-data cache with Nanite-less render data. ProcessMeshes and the restore path now finish compilation first. Survey re-run with normals changed nothing material. UE 5.8.4 full suite with `-ddc=Cold`: 56/56.

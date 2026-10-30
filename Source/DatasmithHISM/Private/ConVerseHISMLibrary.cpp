@@ -1,6 +1,7 @@
 #include "ConVerseHISMLibrary.h"
 
 #include "ConVerseHISMUtils.h"
+#include "ConVerseNaniteSettings.h"
 #include "ConVerseStaticMeshConsolidationUtils.h"
 
 #include "Components/ActorComponent.h"
@@ -403,7 +404,7 @@ FConVerseEnableNaniteResult UConVerseHISMLibrary::EnableNaniteOnSelection()
 			continue;
 		}
 
-		if (Mesh->GetNaniteSettings().bEnabled)
+		if (ConVerseGetNaniteSettings(*Mesh).bEnabled)
 		{
 			++Result.MeshesAlreadyEnabled;
 			continue;

@@ -1,4 +1,5 @@
 #include "ConVerseImportProcessing.h"
+#include "ConVerseNaniteSettings.h"
 #include "ConVerseOptimizedImportManifest.h"
 #include "ConVerseSourceMetadata.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -26,12 +27,22 @@
 #include "Misc/ScopeExit.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Misc/SecureHash.h"
+#include "Misc/EngineVersionComparison.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "StaticMeshCompiler.h"
 #include "UObject/UnrealType.h"
 
 namespace ConVerseImportProcessing
 {
+	static FString GetMeshDescriptionBulkDataId(const FMeshDescriptionBulkData& Bulk)
+	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		return Bulk.GetIdString();
+#else
+		return Bulk.GetUnversionedIdString();
+#endif
+	}
+
 	static FString Hash(const FString& Value)
 	{
 		FTCHARToUTF8 Utf8(*Value);
@@ -1163,7 +1174,7 @@ namespace ConVerseImportProcessing
 					++Result.NaniteBudgetSkippedMeshes;
 				}
 				if (bDisable) bEnable = false;
-				if ((bEnable || bDisable) && Mesh->GetNaniteSettings().bEnabled != bEnable)
+				if ((bEnable || bDisable) && ConVerseGetNaniteSettings(*Mesh).bEnabled != bEnable)
 				{
 					const TCHAR* PolicyName = Options.Processing.NanitePolicy == EConVerseNanitePolicy::AllSupportedMeshes
 						? TEXT("AllSupportedMeshes")
@@ -1172,12 +1183,12 @@ namespace ConVerseImportProcessing
 					const FString ChangeDetails = FString::Printf(
 						TEXT("source_element=\"%s\" mesh_asset=\"%s\" policy=%s previous_enabled=%s requested_enabled=%s"),
 						*Pair.Key.ToString(), *Mesh->GetPathName(), PolicyName,
-						Mesh->GetNaniteSettings().bEnabled ? TEXT("true") : TEXT("false"),
+						ConVerseGetNaniteSettings(*Mesh).bEnabled ? TEXT("true") : TEXT("false"),
 						bEnable ? TEXT("true") : TEXT("false"));
 					WriteProgress(FString::Printf(TEXT("Nanite setting change started %s"), *ChangeDetails), true);
 					double PostEditChangeSeconds = 0.0;
 					Mesh->Modify();
-					Mesh->GetNaniteSettings().bEnabled = bEnable;
+					ConVerseGetNaniteSettings(*Mesh).bEnabled = bEnable;
 					const double PostEditChangeStartedAt = FPlatformTime::Seconds();
 					{
 						TRACE_CPUPROFILER_EVENT_SCOPE(ConVerse_NanitePostEditChange);
@@ -1203,7 +1214,7 @@ namespace ConVerseImportProcessing
 		{ OutError = TEXT("Mesh processing cancelled after compilation completed."); return false; }
 		for (UStaticMesh* Mesh : Meshes)
 		{
-			if (Mesh->GetNaniteSettings().bEnabled)
+			if (ConVerseGetNaniteSettings(*Mesh).bEnabled)
 			{
 				if (!Mesh->HasValidNaniteData()) { OutError = TEXT("Nanite build produced no valid data: ") + Mesh->GetPathName(); return false; }
 				++Result.NaniteEnabledMeshes;
@@ -1295,9 +1306,9 @@ namespace ConVerseImportProcessing
 		}
 		if (auto* Mesh = Cast<UStaticMesh>(&Object))
 		{
-			State += FString::Printf(TEXT("\nNanite=%d"), Mesh->GetNaniteSettings().bEnabled);
+			State += FString::Printf(TEXT("\nNanite=%d"), ConVerseGetNaniteSettings(*Mesh).bEnabled);
 			for (int32 LOD = 0; LOD < Mesh->GetNumSourceModels(); ++LOD)
-				if (const auto* Bulk = Mesh->GetSourceModel(LOD).GetMeshDescriptionBulkData()) State += TEXT("\nGeometry=") + Bulk->GetUnversionedIdString();
+				if (const auto* Bulk = Mesh->GetSourceModel(LOD).GetMeshDescriptionBulkData()) State += TEXT("\nGeometry=") + GetMeshDescriptionBulkDataId(*Bulk);
 			for (const auto& Slot : Mesh->GetStaticMaterials()) State += TEXT("\nMaterial=") + GetPathNameSafe(Slot.MaterialInterface);
 		}
 		return CanonicalState(State);

@@ -1,6 +1,7 @@
 #include "ConVerseDatasmithImportService.h"
 
 #include "ConVerseImportProcessing.h"
+#include "ConVerseNaniteSettings.h"
 #include "ConVerseOptimizedImportManifest.h"
 
 #include "DatasmithScene.h"
@@ -22,7 +23,8 @@
 namespace ConVerseNaniteApply
 {
 	// The attempt folder is not stored on older manifests, but every owned package carries it as
-	// "<Destination>/<Name>_ConVerse_<first 12 of the session id>". Ownership is proven from the
+	// "<Destination>/_ConVerse_<first 12 of the session id>" (older imports: "<Destination>/<Name>_ConVerse_<...>",
+	// which the same token search also finds). Ownership is proven from the
 	// recorded package names, never inferred from a folder scan.
 	static bool DeriveAttemptFolder(const UConVerseOptimizedImportManifest& Manifest, FString& OutFolder)
 	{
@@ -93,7 +95,7 @@ static FConVerseNaniteApplyResult RunApplyNanite(const FConVerseNaniteApplyOptio
 	{
 		if (UStaticMesh* Mesh = Pair.Value.LoadSynchronous())
 			if (Mesh->GetOutermost()->GetName().StartsWith(AttemptFolder + TEXT("/")))
-				PreviousEnabled.Add(Mesh, Mesh->GetNaniteSettings().bEnabled);
+				PreviousEnabled.Add(Mesh, ConVerseGetNaniteSettings(*Mesh).bEnabled);
 	}
 
 	FConVerseOptimizedImportOptions ProcessingOptions;
@@ -139,9 +141,9 @@ static FConVerseNaniteApplyResult RunApplyNanite(const FConVerseNaniteApplyOptio
 		TArray<UStaticMesh*> Restored;
 		for (const auto& Pair : PreviousEnabled)
 		{
-			if (Pair.Key->GetNaniteSettings().bEnabled == Pair.Value) continue;
+			if (ConVerseGetNaniteSettings(*Pair.Key).bEnabled == Pair.Value) continue;
 			Pair.Key->Modify();
-			Pair.Key->GetNaniteSettings().bEnabled = Pair.Value;
+			ConVerseGetNaniteSettings(*Pair.Key).bEnabled = Pair.Value;
 			Pair.Key->PostEditChange();
 			Restored.Add(Pair.Key);
 		}
@@ -254,7 +256,7 @@ FConVerseNaniteAnalysisResult FConVerseDatasmithImportService::AnalyzeNanite(con
 		Row.Triangles = Mesh->GetNumTriangles(0);
 		Row.Placements = Placements.FindRef(Mesh);
 		Row.PlacedTriangles = int64(Row.Triangles) * Row.Placements;
-		Row.bNaniteEnabled = Mesh->GetNaniteSettings().bEnabled;
+		Row.bNaniteEnabled = ConVerseGetNaniteSettings(*Mesh).bEnabled;
 		bool bIncompatible = IncompatibleOverride.Contains(Mesh);
 		for (const auto& Slot : Mesh->GetStaticMaterials()) bIncompatible |= IsNaniteBlend(Slot.MaterialInterface);
 		if (Disabled.Contains(Row.MeshElement)) { Row.bEligible = false; Row.Note = TEXT("Nanite disabled by an exception"); }

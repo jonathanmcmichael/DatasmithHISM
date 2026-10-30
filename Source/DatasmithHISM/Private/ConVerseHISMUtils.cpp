@@ -1,6 +1,7 @@
 #include "ConVerseHISMUtils.h"
 
 #include "ConVerseStaticMeshConsolidationUtils.h"
+#include "ConVerseNaniteSettings.h"
 #include "ISMPartition/ISMComponentDescriptor.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h" // UHierarchicalInstancedStaticMeshComponent is a UInstancedStaticMeshComponent subclass; the include
                                                                   // keeps the full type available so GetComponents<UInstancedStaticMeshComponent> also returns legacy
@@ -1001,15 +1002,15 @@ namespace ConVerseHISM
 
 	bool EnableNaniteIfNeeded(UStaticMesh* Mesh)
 	{
-		if (!IsValid(Mesh) || Mesh->GetNaniteSettings().bEnabled)
+		if (!IsValid(Mesh) || ConVerseGetNaniteSettings(*Mesh).bEnabled)
 		{
 			return false;
 		}
 
 		Mesh->Modify();
-		FMeshNaniteSettings NaniteSettings = Mesh->GetNaniteSettings();
+		FMeshNaniteSettings NaniteSettings = ConVerseGetNaniteSettings(*Mesh);
 		NaniteSettings.bEnabled = true;
-		Mesh->SetNaniteSettings(NaniteSettings);
+		ConVerseGetNaniteSettings(*Mesh) = NaniteSettings;
 		Mesh->PostEditChange();
 		return true;
 	}
@@ -1281,7 +1282,7 @@ namespace ConVerseHISM
 			// whether the canonical mesh has Nanite enabled (ISM preferred for Nanite;
 			// HISM beneficial for non-Nanite where hierarchical culling helps).
 			const bool bResolvedUseHISM = bAutoDetectFromNanite
-				? (IsValid(CanonicalMesh) && !CanonicalMesh->GetNaniteSettings().bEnabled)
+				? (IsValid(CanonicalMesh) && !ConVerseGetNaniteSettings(*CanonicalMesh).bEnabled)
 				: bUseHISM;
 			const UClass* ComponentClass = bResolvedUseHISM
 				? UHierarchicalInstancedStaticMeshComponent::StaticClass()

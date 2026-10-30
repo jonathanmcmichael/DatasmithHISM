@@ -1,6 +1,6 @@
 # Core instancing and Datasmith source-data plan
 
-Date: 2026-10-02. Status: **planned, not executed**. This is a bounded plan for the open questions in the [roadmap](ROADMAP.md), not a replacement for the [import contract](IMPORT_PANEL_VALIDATION.md) or the [handoff's current status](HANDOFF.md#current-status). Dated validation records own results of actual runs.
+Date: 2026-10-02; execution update 2026-10-15. Status: **workstream 1 has preliminary measurements, not an accepted performance gate**; see the [packaged comparison and limitations](Docs/Validation/2026-10-15-runtime-comparison.md). This is a bounded plan for the open questions in the [roadmap](ROADMAP.md), not a replacement for the [import contract](IMPORT_PANEL_VALIDATION.md) or the [handoff's current status](HANDOFF.md#current-status). Dated validation records own results of actual runs.
 
 ## Outcome
 
@@ -12,7 +12,7 @@ The current UE 5.8.3 stock Datasmith scene path creates hierarchical-instanced a
 
 ### 1. Prove the core runtime claim
 
-**Starting point:** the [CWM ordinary/ISM/HISM comparison](Docs/Validation/2026-10-02-runtime-comparison.md) has three verified saved maps and a Win64 package, but no runtime profiling. Ordinary output has 7,101 mesh elements; ISM and HISM each have 379 groups / 2,561 instances and 4,540 ordinary elements. These are import results, not frame-time results.
+**Original starting point:** the [CWM ordinary/ISM/HISM preparation](Docs/Validation/2026-10-02-runtime-comparison.md) supplied three verified saved maps and a Win64 package. Ordinary output has 7,101 mesh elements; ISM and HISM each have 379 groups / 2,561 instances and 4,540 ordinary elements. These are import results, not frame-time results. **2026-10-15:** [nine packaged runs and three fixed views](Docs/Validation/2026-10-15-runtime-comparison.md) are now recorded; diagnose the HISM interior lighting/shadow difference and increased interior draws, then repeat under idle/controlled conditions before a speedup claim. The gate below remains open.
 
 1. When the shared desktop is explicitly available, confirm the imported camera works in the packaged maps or establish the same reproducible camera positions for all three variants. Do not launch the packaged app or take desktop input before that authorization.
 2. Use identical resolution, rendering/scalability, power mode, camera views (interior, exterior, near and distant), and warm/steady-state capture windows. Record CPU game/render/RHI and GPU frame time, draw calls, memory, visible instance behavior, and visual differences; repeat to expose noise. Preserve raw Insights traces, settings, logs, and screenshots with a dated evidence record. Do not mix cold-cache hashing or editor import time into runtime comparisons.
@@ -28,6 +28,8 @@ The current UE 5.8.3 stock Datasmith scene path creates hierarchical-instanced a
 1. Extend read-only Analyze reporting to account for *all* source mesh actors once: converted instances; eligible groups below the minimum; unique mesh references; parent/settings/material splits; explicit keep-ordinary decisions; and unsafe/unresolved cases. Check how many ordinary actors and components each reason could plausibly save, without assuming a group across different source meshes is safe.
 2. First validate classification against existing generated fixtures and the CWM export. Test that counts partition the input, Analyze does not mutate scene assets, and report totals match the import's group/ordinary inventory. Capture a source-level breakdown for each representative model.
 3. Only then rank bottlenecks. If same-geometry assets with distinct Datasmith identities dominate, propose a separately reviewed cross-asset equivalence proof covering geometry, UVs, sections, materials, collision, LODs, identity, and rollback. If parent boundaries dominate, prove attachment/world placement and source lookup can survive any proposed regrouping. Do not weaken eligibility merely to raise the instance count.
+
+The phased follow-on proposal is in the [grouping compression plan](Docs/GROUPING_PLAN.md).
 
 **Gate:** a reproducible breakdown explains the 4,540 CWM ordinary elements and identifies whether a safe grouping improvement is likely to matter. Any changed grouping/ownership behavior requires a contract and PlanId review, focused automation, real-source verification, and updated evidence before it can be accepted.
 

@@ -15,6 +15,7 @@ Evidence sections were reconciled at the [2026-09-27 closeout](../Validation/202
 | [0007](0007-editor-runtime-split.md) | Cook source identity without editor import services | Accepted |
 | [0008](0008-evidence-and-release-gates.md) | Keep implementation evidence separate from release acceptance | Accepted |
 | [0009](0009-legacy-selection-boundary.md) | Preserve a separate contract for legacy selection conversion | Accepted |
+| [0010](0010-equivalent-meshes-and-mirrored-groups.md) | Share geometry-equivalent meshes and group mirrored instances (opt-in) | Proposed |
 
 To change a decision, add a new ADR and mark the old record superseded with a link. Update the behavioral contract if a guarantee changes, and add evidence before marking a release gate complete. Source relinking, automatic cleanup, cross-asset deduplication, selective extraction and a material pack require later decisions; these records do not authorize them as current release work.
 

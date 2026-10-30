@@ -29,12 +29,15 @@
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SGridPanel.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -180,160 +183,27 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 
 			+ SVerticalBox::Slot()
 			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 			[
-				SNew(SGridPanel)
-				.FillColumn(1, 1.0f)
-
-				+ SGridPanel::Slot(0, 0)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SBox)
-					.WidthOverride(ConVerseDatasmithImportPanel::LabelWidth)
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("SourceFileLabel", "Source file"))
-					]
-				]
-
-				+ SGridPanel::Slot(1, 0)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				[
-					SAssignNew(SourcePathTextBox, SEditableTextBox)
-					.Text(FText::FromString(SourcePath))
-					.HintText(LOCTEXT("SourceFileHint", "Choose a Datasmith source file (.udatasmith, CAD, Revit, IFC)"))
-					.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-					.OnTextChanged(this, &SConVerseDatasmithImportPanel::HandleSourcePathChanged)
-				]
-
-				+ SGridPanel::Slot(2, 0)
-				.Padding(8.0f, ConVerseDatasmithImportPanel::RowPadding, 0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("BrowseButton", "Browse..."))
-					.ToolTipText(LOCTEXT("BrowseTooltip", "Select a Datasmith scene file."))
-					.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleBrowseForSource)
-				]
-
-				+ SGridPanel::Slot(0, 1)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SBox)
-					.WidthOverride(ConVerseDatasmithImportPanel::LabelWidth)
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("DestinationLabel", "Destination content folder"))
-					]
-				]
-
-				+ SGridPanel::Slot(1, 1)
-				.ColumnSpan(2)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				[
-					SAssignNew(DestinationPathTextBox, SEditableTextBox)
-					.Text(FText::FromString(DestinationPath))
-					.HintText(LOCTEXT("DestinationHint", "/Game/DatasmithOptimized"))
-					.ToolTipText(LOCTEXT("DestinationTooltip", "Unreal long package path used for the imported Datasmith scene and assets."))
-					.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-					.OnTextChanged(this, &SConVerseDatasmithImportPanel::HandleDestinationPathChanged)
-				]
-
-				+ SGridPanel::Slot(0, 2)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("OutputComponentLabel", "Output component"))
-				]
-
-				+ SGridPanel::Slot(1, 2)
-				.ColumnSpan(2)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				[
-					SNew(SHorizontalBox)
-
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					[
-						SNew(SCheckBox)
-						.Style(FAppStyle::Get(), "RadioButton")
-						.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-						.IsChecked(this, &SConVerseDatasmithImportPanel::GetISMCheckState)
-						.OnCheckStateChanged(this, &SConVerseDatasmithImportPanel::HandleISMCheckStateChanged)
-						.ToolTipText(LOCTEXT("ISMTooltip", "Create standard Instanced Static Mesh components. Nanite is applied afterwards by the separate Apply Nanite step, so this choice does not depend on it."))
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("ISMOption", "ISM"))
-						]
-					]
-
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.Padding(18.0f, 0.0f, 0.0f, 0.0f)
-					[
-						SNew(SCheckBox)
-						.Style(FAppStyle::Get(), "RadioButton")
-						.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-						.IsChecked(this, &SConVerseDatasmithImportPanel::GetHISMCheckState)
-						.OnCheckStateChanged(this, &SConVerseDatasmithImportPanel::HandleHISMCheckStateChanged)
-						.ToolTipText(LOCTEXT("HISMTooltip", "Keep Datasmith's native Hierarchical Instanced Static Mesh components."))
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("HISMOption", "HISM"))
-						]
-					]
-				]
-
-				+ SGridPanel::Slot(0, 3)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("MinimumInstancesLabel", "Minimum instances"))
-				]
-
-				+ SGridPanel::Slot(1, 3)
-				.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-				.HAlign(HAlign_Left)
-				[
-					SNew(SBox)
-					.WidthOverride(120.0f)
-					[
-						SNew(SNumericEntryBox<int32>)
-						.Value(this, &SConVerseDatasmithImportPanel::GetMinimumInstances)
-						.MinValue(2)
-						.MinSliderValue(2)
-						.AllowSpin(true)
-						.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-						.OnValueChanged(this, &SConVerseDatasmithImportPanel::HandleMinimumInstancesChanged)
-						.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleMinimumInstancesCommitted)
-					]
-				]
+				SNew(SSegmentedControl<int32>)
+				.Value_Lambda([this] { return ActiveTab; })
+				.OnValueChanged_Lambda([this](int32 Tab) { ActiveTab = Tab; })
+				+ SSegmentedControl<int32>::Slot(0)
+				.Text(LOCTEXT("ImportTab", "Import"))
+				+ SSegmentedControl<int32>::Slot(1)
+				.Text(LOCTEXT("AdvancedImportTab", "Advanced import"))
+				.ToolTip(LOCTEXT("AdvancedImportTabTooltip", "How much of the source the last run converted, and which further grouping steps would apply to the rest."))
 			]
 
 			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			.FillHeight(1.0f)
 			[
-				SNew(SExpandableArea)
-				.AreaTitle(LOCTEXT("TessellationSection", "Tessellation (CAD, Revit, IFC)"))
-				.InitiallyCollapsed(true)
-				.Padding(FMargin(8.0f, 6.0f, 0.0f, 0.0f))
-				.BodyContent()
+				SNew(SWidgetSwitcher)
+				.WidgetIndex_Lambda([this] { return ActiveTab; })
+
+				+ SWidgetSwitcher::Slot()
 				[
 					SNew(SVerticalBox)
-
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
-					[
-						SNew(STextBlock)
-						.Text(this, &SConVerseDatasmithImportPanel::GetTessellationSummaryText)
-						.AutoWrapText(true)
-						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					]
 
 					+ SVerticalBox::Slot()
 					.AutoHeight()
@@ -349,55 +219,52 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 							.WidthOverride(ConVerseDatasmithImportPanel::LabelWidth)
 							[
 								SNew(STextBlock)
-								.Text(LOCTEXT("ChordToleranceLabel", "Chord tolerance (cm)"))
+								.Text(LOCTEXT("SourceFileLabel", "Source file"))
 							]
 						]
 
 						+ SGridPanel::Slot(1, 0)
 						.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-						.HAlign(HAlign_Left)
 						[
-							SNew(SBox)
-							.WidthOverride(120.0f)
-							[
-								SNew(SNumericEntryBox<float>)
-								.Value(this, &SConVerseDatasmithImportPanel::GetChordTolerance)
-								.MinValue(0.005f)
-								.MinSliderValue(0.005f)
-								.MaxSliderValue(1.0f)
-								.AllowSpin(true)
-								.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-								.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleChordToleranceCommitted)
-								.ToolTipText(LOCTEXT("ChordToleranceTooltip", "Maximum distance between a generated triangle and the original surface. Smaller values produce more triangles. Minimum 0.005."))
-							]
+							SAssignNew(SourcePathTextBox, SEditableTextBox)
+							.Text(FText::FromString(SourcePath))
+							.HintText(LOCTEXT("SourceFileHint", "Choose a Datasmith source file (.udatasmith, CAD, Revit, IFC)"))
+							.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+							.OnTextChanged(this, &SConVerseDatasmithImportPanel::HandleSourcePathChanged)
+						]
+
+						+ SGridPanel::Slot(2, 0)
+						.Padding(8.0f, ConVerseDatasmithImportPanel::RowPadding, 0.0f, ConVerseDatasmithImportPanel::RowPadding)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("BrowseButton", "Browse..."))
+							.ToolTipText(LOCTEXT("BrowseTooltip", "Select a Datasmith scene file."))
+							.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+							.OnClicked(this, &SConVerseDatasmithImportPanel::HandleBrowseForSource)
 						]
 
 						+ SGridPanel::Slot(0, 1)
 						.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
 						.VAlign(VAlign_Center)
 						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("NormalToleranceLabel", "Normal tolerance (deg)"))
+							SNew(SBox)
+							.WidthOverride(ConVerseDatasmithImportPanel::LabelWidth)
+							[
+								SNew(STextBlock)
+								.Text(LOCTEXT("DestinationLabel", "Destination content folder"))
+							]
 						]
 
 						+ SGridPanel::Slot(1, 1)
+						.ColumnSpan(2)
 						.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-						.HAlign(HAlign_Left)
 						[
-							SNew(SBox)
-							.WidthOverride(120.0f)
-							[
-								SNew(SNumericEntryBox<float>)
-								.Value(this, &SConVerseDatasmithImportPanel::GetNormalTolerance)
-								.MinValue(5.0f)
-								.MaxValue(90.0f)
-								.MinSliderValue(5.0f)
-								.MaxSliderValue(90.0f)
-								.AllowSpin(true)
-								.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-								.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleNormalToleranceCommitted)
-								.ToolTipText(LOCTEXT("NormalToleranceTooltip", "Maximum angle between adjacent triangles. Smaller values produce more triangles. Range 5 to 90 degrees."))
-							]
+							SAssignNew(DestinationPathTextBox, SEditableTextBox)
+							.Text(FText::FromString(DestinationPath))
+							.HintText(LOCTEXT("DestinationHint", "/Game/DatasmithOptimized"))
+							.ToolTipText(LOCTEXT("DestinationTooltip", "Unreal long package path used for the imported Datasmith scene and assets."))
+							.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+							.OnTextChanged(this, &SConVerseDatasmithImportPanel::HandleDestinationPathChanged)
 						]
 
 						+ SGridPanel::Slot(0, 2)
@@ -405,25 +272,44 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 						.VAlign(VAlign_Center)
 						[
 							SNew(STextBlock)
-							.Text(LOCTEXT("MaxEdgeLengthLabel", "Max edge length (cm)"))
+							.Text(LOCTEXT("OutputComponentLabel", "Output component"))
 						]
 
 						+ SGridPanel::Slot(1, 2)
+						.ColumnSpan(2)
 						.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
-						.HAlign(HAlign_Left)
 						[
-							SNew(SBox)
-							.WidthOverride(120.0f)
+							SNew(SHorizontalBox)
+
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
 							[
-								SNew(SNumericEntryBox<float>)
-								.Value(this, &SConVerseDatasmithImportPanel::GetMaxEdgeLength)
-								.MinValue(0.0f)
-								.MinSliderValue(0.0f)
-								.MaxSliderValue(100.0f)
-								.AllowSpin(true)
+								SNew(SCheckBox)
+								.Style(FAppStyle::Get(), "RadioButton")
 								.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-								.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleMaxEdgeLengthCommitted)
-								.ToolTipText(LOCTEXT("MaxEdgeLengthTooltip", "Maximum length of any generated edge. 0 means no constraint; any other value is raised to at least 1.0."))
+								.IsChecked(this, &SConVerseDatasmithImportPanel::GetISMCheckState)
+								.OnCheckStateChanged(this, &SConVerseDatasmithImportPanel::HandleISMCheckStateChanged)
+								.ToolTipText(LOCTEXT("ISMTooltip", "Create standard Instanced Static Mesh components. Nanite is applied afterwards by the separate Apply Nanite step, so this choice does not depend on it."))
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("ISMOption", "ISM"))
+								]
+							]
+
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.Padding(18.0f, 0.0f, 0.0f, 0.0f)
+							[
+								SNew(SCheckBox)
+								.Style(FAppStyle::Get(), "RadioButton")
+								.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+								.IsChecked(this, &SConVerseDatasmithImportPanel::GetHISMCheckState)
+								.OnCheckStateChanged(this, &SConVerseDatasmithImportPanel::HandleHISMCheckStateChanged)
+								.ToolTipText(LOCTEXT("HISMTooltip", "Keep Datasmith's native Hierarchical Instanced Static Mesh components."))
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("HISMOption", "HISM"))
+								]
 							]
 						]
 
@@ -432,7 +318,7 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 						.VAlign(VAlign_Center)
 						[
 							SNew(STextBlock)
-							.Text(LOCTEXT("StitchingLabel", "Stitching technique"))
+							.Text(LOCTEXT("MinimumInstancesLabel", "Minimum instances"))
 						]
 
 						+ SGridPanel::Slot(1, 3)
@@ -440,254 +326,402 @@ void SConVerseDatasmithImportPanel::Construct(const FArguments& InArgs)
 						.HAlign(HAlign_Left)
 						[
 							SNew(SBox)
-							.WidthOverride(160.0f)
+							.WidthOverride(120.0f)
 							[
-								SNew(SComboButton)
+								SNew(SNumericEntryBox<int32>)
+								.Value(this, &SConVerseDatasmithImportPanel::GetMinimumInstances)
+								.MinValue(2)
+								.MinSliderValue(2)
+								.AllowSpin(true)
 								.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-								.OnGetMenuContent(this, &SConVerseDatasmithImportPanel::BuildStitchingMenu)
-								.ToolTipText(LOCTEXT("StitchingTooltip", "Stitching applied before tessellation. Sewing can add or remove objects, which may change how instances group."))
-								.ButtonContent()
-								[
-									SNew(STextBlock)
-									.Text(this, &SConVerseDatasmithImportPanel::GetStitchingText)
-								]
+								.OnValueChanged(this, &SConVerseDatasmithImportPanel::HandleMinimumInstancesChanged)
+								.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleMinimumInstancesCommitted)
 							]
 						]
 					]
 
 					+ SVerticalBox::Slot()
 					.AutoHeight()
-					.Padding(0.0f, 4.0f, 0.0f, 0.0f)
-					.HAlign(HAlign_Left)
+					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
 					[
-						SNew(SButton)
-						.Text(LOCTEXT("ResetTessellation", "Reset to defaults"))
+						SNew(SExpandableArea)
+						.AreaTitle(LOCTEXT("TessellationSection", "Tessellation (CAD, Revit, IFC)"))
+						.InitiallyCollapsed(true)
+						.Padding(FMargin(8.0f, 6.0f, 0.0f, 0.0f))
+						.BodyContent()
+						[
+							SNew(SVerticalBox)
+
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+							[
+								SNew(STextBlock)
+								.Text(this, &SConVerseDatasmithImportPanel::GetTessellationSummaryText)
+								.AutoWrapText(true)
+								.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+							]
+
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							[
+								SNew(SGridPanel)
+								.FillColumn(1, 1.0f)
+
+								+ SGridPanel::Slot(0, 0)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.VAlign(VAlign_Center)
+								[
+									SNew(SBox)
+									.WidthOverride(ConVerseDatasmithImportPanel::LabelWidth)
+									[
+										SNew(STextBlock)
+										.Text(LOCTEXT("ChordToleranceLabel", "Chord tolerance (cm)"))
+									]
+								]
+
+								+ SGridPanel::Slot(1, 0)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.HAlign(HAlign_Left)
+								[
+									SNew(SBox)
+									.WidthOverride(120.0f)
+									[
+										SNew(SNumericEntryBox<float>)
+										.Value(this, &SConVerseDatasmithImportPanel::GetChordTolerance)
+										.MinValue(0.005f)
+										.MinSliderValue(0.005f)
+										.MaxSliderValue(1.0f)
+										.AllowSpin(true)
+										.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+										.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleChordToleranceCommitted)
+										.ToolTipText(LOCTEXT("ChordToleranceTooltip", "Maximum distance between a generated triangle and the original surface. Smaller values produce more triangles. Minimum 0.005."))
+									]
+								]
+
+								+ SGridPanel::Slot(0, 1)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("NormalToleranceLabel", "Normal tolerance (deg)"))
+								]
+
+								+ SGridPanel::Slot(1, 1)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.HAlign(HAlign_Left)
+								[
+									SNew(SBox)
+									.WidthOverride(120.0f)
+									[
+										SNew(SNumericEntryBox<float>)
+										.Value(this, &SConVerseDatasmithImportPanel::GetNormalTolerance)
+										.MinValue(5.0f)
+										.MaxValue(90.0f)
+										.MinSliderValue(5.0f)
+										.MaxSliderValue(90.0f)
+										.AllowSpin(true)
+										.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+										.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleNormalToleranceCommitted)
+										.ToolTipText(LOCTEXT("NormalToleranceTooltip", "Maximum angle between adjacent triangles. Smaller values produce more triangles. Range 5 to 90 degrees."))
+									]
+								]
+
+								+ SGridPanel::Slot(0, 2)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("MaxEdgeLengthLabel", "Max edge length (cm)"))
+								]
+
+								+ SGridPanel::Slot(1, 2)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.HAlign(HAlign_Left)
+								[
+									SNew(SBox)
+									.WidthOverride(120.0f)
+									[
+										SNew(SNumericEntryBox<float>)
+										.Value(this, &SConVerseDatasmithImportPanel::GetMaxEdgeLength)
+										.MinValue(0.0f)
+										.MinSliderValue(0.0f)
+										.MaxSliderValue(100.0f)
+										.AllowSpin(true)
+										.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+										.OnValueCommitted(this, &SConVerseDatasmithImportPanel::HandleMaxEdgeLengthCommitted)
+										.ToolTipText(LOCTEXT("MaxEdgeLengthTooltip", "Maximum length of any generated edge. 0 means no constraint; any other value is raised to at least 1.0."))
+									]
+								]
+
+								+ SGridPanel::Slot(0, 3)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("StitchingLabel", "Stitching technique"))
+								]
+
+								+ SGridPanel::Slot(1, 3)
+								.Padding(0.0f, ConVerseDatasmithImportPanel::RowPadding)
+								.HAlign(HAlign_Left)
+								[
+									SNew(SBox)
+									.WidthOverride(160.0f)
+									[
+										SNew(SComboButton)
+										.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+										.OnGetMenuContent(this, &SConVerseDatasmithImportPanel::BuildStitchingMenu)
+										.ToolTipText(LOCTEXT("StitchingTooltip", "Stitching applied before tessellation. Sewing can add or remove objects, which may change how instances group."))
+										.ButtonContent()
+										[
+											SNew(STextBlock)
+											.Text(this, &SConVerseDatasmithImportPanel::GetStitchingText)
+										]
+									]
+								]
+							]
+
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+							.HAlign(HAlign_Left)
+							[
+								SNew(SButton)
+								.Text(LOCTEXT("ResetTessellation", "Reset to defaults"))
+								.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
+								.OnClicked_Lambda([this]()
+								{
+									ResetTessellationToDefaults();
+									return FReply::Handled();
+								})
+							]
+						]
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 6.0f, 0.0f, 2.0f)
+					[
+						SNew(STextBlock)
+						.Text(this, &SConVerseDatasmithImportPanel::GetValidationText)
+						.ColorAndOpacity(this, &SConVerseDatasmithImportPanel::GetValidationColor)
+						.AutoWrapText(true)
+					]
+
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SExpandableArea)
+						.InitiallyCollapsed(true)
+						.HeaderContent()[SNew(STextBlock).Text(LOCTEXT("Processing", "Mesh, lighting, and material settings"))]
+						.BodyContent()[SNew(SBox).MaxDesiredHeight(260.0f).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)[ProcessingDetails]]
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("Rebuild", "Rebuild from source")).IsEnabled(this, &SConVerseDatasmithImportPanel::CanImportAndVerify).OnClicked(this, &SConVerseDatasmithImportPanel::HandleRebuild)]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("SaveResult", "Save imported result")).IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); }).OnClicked(this, &SConVerseDatasmithImportPanel::HandleSaveResult)]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("SavePreset", "Save project preset")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleSavePreset)]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("LoadPreset", "Load project preset")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleLoadPreset)]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("ReviewMaterials", "Review materials")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleReviewMaterials)]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("RenderingSettings", "Rendering settings")).OnClicked_Lambda([] { FModuleManager::LoadModuleChecked<ISettingsModule>(TEXT("Settings")).ShowViewer("Project", "Engine", "Rendering"); return FReply::Handled(); })]
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+						[
+							SNew(STextBlock).Text(LOCTEXT("ApplyNaniteLabel", "Nanite (separate step):"))
+							.ToolTipText(LOCTEXT("ApplyNaniteLabelTooltip", "Imports leave Nanite as imported, so each mesh builds once. Apply Nanite afterwards to enable it on the imported meshes."))
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+						[
+							SNew(SBox).WidthOverride(210.0f)
+							[
+								SNew(SComboButton)
+								.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+								.OnGetMenuContent(this, &SConVerseDatasmithImportPanel::BuildNaniteScopeMenu)
+								.ToolTipText(LOCTEXT("ApplyNaniteScopeTooltip", "Which meshes receive Nanite. Meshes marked Disable mesh Nanite in the inspection list are always left out."))
+								.ButtonContent()[SNew(STextBlock).Text(this, &SConVerseDatasmithImportPanel::GetNaniteScopeText)]
+							]
+						]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+						[
+							SNew(STextBlock).Text(LOCTEXT("ApplyNaniteBudgetLabel", "Max meshes"))
+							.ToolTipText(LOCTEXT("ApplyNaniteBudgetTooltip", "Most meshes that may receive Nanite; 0 is unlimited. The most-placed meshes keep it. UE 5.8.3 crashes when its Nanite root-page pool is exhausted, so keep this below 16,384 on large scenes."))
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+						[
+							SNew(SBox).WidthOverride(100.0f)
+							[
+								SNew(SNumericEntryBox<int32>)
+								.Value_Lambda([this] { return TOptional<int32>(ApplyNaniteBudget); })
+								.MinValue(0)
+								.AllowSpin(false)
+								.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+								.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { ApplyNaniteBudget = FMath::Max(0, NewValue); })
+							]
+						]
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							SNew(SButton).Text(LOCTEXT("ApplyNanite", "Apply Nanite"))
+							.IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); })
+							.ToolTipText(LOCTEXT("ApplyNaniteTooltip", "Enable Nanite on the last imported result. Refused if the import has manual edits. A cancel or failure restores the meshes. Save the imported result afterwards to keep it."))
+							.OnClicked(this, &SConVerseDatasmithImportPanel::HandleApplyNanite)
+						]
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+						[
+							SNew(SButton).Text(LOCTEXT("AnalyzeNanite", "Analyze Nanite"))
+							.IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); })
+							.ToolTipText(LOCTEXT("AnalyzeNaniteTooltip", "Read-only. Ranks the last import's meshes by placed triangles (triangles x placements) and recommends the fewest that cover the chosen share of that load. Choose Recommended meshes in the scope menu to apply it."))
+							.OnClicked(this, &SConVerseDatasmithImportPanel::HandleAnalyzeNanite)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+						[
+							SNew(STextBlock).Text(LOCTEXT("NaniteCoverageLabel", "Cover %"))
+							.ToolTipText(LOCTEXT("NaniteCoverageTooltip", "Share of the candidate meshes' placed triangles the recommendation must cover."))
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+						[
+							SNew(SBox).WidthOverride(70.0f)
+							[
+								SNew(SNumericEntryBox<int32>)
+								.Value_Lambda([this] { return TOptional<int32>(NaniteCoveragePercent); })
+								.MinValue(1).MaxValue(100)
+								.AllowSpin(false)
+								.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+								.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { NaniteCoveragePercent = FMath::Clamp(NewValue, 1, 100); })
+							]
+						]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+						[
+							SNew(STextBlock).Text(LOCTEXT("NaniteMinTrianglesLabel", "Min triangles"))
+							.ToolTipText(LOCTEXT("NaniteMinTrianglesTooltip", "Meshes below this triangle count are not recommended. A heuristic, not a measured Nanite break-even."))
+						]
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							SNew(SBox).WidthOverride(90.0f)
+							[
+								SNew(SNumericEntryBox<int32>)
+								.Value_Lambda([this] { return TOptional<int32>(NaniteMinTriangles); })
+								.MinValue(0)
+								.AllowSpin(false)
+								.IsEnabled_Lambda([this] { return !bOperationInProgress; })
+								.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { NaniteMinTriangles = FMath::Max(0, NewValue); })
+							]
+						]
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.0f)
+					[
+						SNew(SCheckBox)
 						.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-						.OnClicked_Lambda([this]()
-						{
-							ResetTessellationToDefaults();
-							return FReply::Handled();
-						})
-					]
-				]
-			]
-
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 2.0f)
-			[
-				SNew(STextBlock)
-				.Text(this, &SConVerseDatasmithImportPanel::GetValidationText)
-				.ColorAndOpacity(this, &SConVerseDatasmithImportPanel::GetValidationColor)
-				.AutoWrapText(true)
-			]
-
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SExpandableArea)
-				.InitiallyCollapsed(true)
-				.HeaderContent()[SNew(STextBlock).Text(LOCTEXT("Processing", "Mesh, lighting, and material settings"))]
-				.BodyContent()[SNew(SBox).MaxDesiredHeight(260.0f).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)[ProcessingDetails]]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("Rebuild", "Rebuild from source")).IsEnabled(this, &SConVerseDatasmithImportPanel::CanImportAndVerify).OnClicked(this, &SConVerseDatasmithImportPanel::HandleRebuild)]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("SaveResult", "Save imported result")).IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); }).OnClicked(this, &SConVerseDatasmithImportPanel::HandleSaveResult)]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("SavePreset", "Save project preset")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleSavePreset)]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("LoadPreset", "Load project preset")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleLoadPreset)]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("ReviewMaterials", "Review materials")).IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled).OnClicked(this, &SConVerseDatasmithImportPanel::HandleReviewMaterials)]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("RenderingSettings", "Rendering settings")).OnClicked_Lambda([] { FModuleManager::LoadModuleChecked<ISettingsModule>(TEXT("Settings")).ShowViewer("Project", "Engine", "Rendering"); return FReply::Handled(); })]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-				[
-					SNew(STextBlock).Text(LOCTEXT("ApplyNaniteLabel", "Nanite (separate step):"))
-					.ToolTipText(LOCTEXT("ApplyNaniteLabelTooltip", "Imports leave Nanite as imported, so each mesh builds once. Apply Nanite afterwards to enable it on the imported meshes."))
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SBox).WidthOverride(210.0f)
+						.IsChecked_Lambda([this]() { return bProfileNextImport ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+						.OnCheckStateChanged_Lambda([this](ECheckBoxState State) { bProfileNextImport = State == ECheckBoxState::Checked; })
+						.ToolTipText(LOCTEXT("ProfileNextImportTooltip", "Capture CPU, frame, bookmark, and log events for the next Import or Rebuild. The trace is saved under Saved/Profiling and stopped when the operation resolves."))
 					[
-						SNew(SComboButton)
-						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
-						.OnGetMenuContent(this, &SConVerseDatasmithImportPanel::BuildNaniteScopeMenu)
-						.ToolTipText(LOCTEXT("ApplyNaniteScopeTooltip", "Which meshes receive Nanite. Meshes marked Disable mesh Nanite in the inspection list are always left out."))
-						.ButtonContent()[SNew(STextBlock).Text(this, &SConVerseDatasmithImportPanel::GetNaniteScopeText)]
+							SNew(STextBlock).Text(LOCTEXT("ProfileNextImport", "Profile next import"))
 					]
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
-				[
-					SNew(STextBlock).Text(LOCTEXT("ApplyNaniteBudgetLabel", "Max meshes"))
-					.ToolTipText(LOCTEXT("ApplyNaniteBudgetTooltip", "Most meshes that may receive Nanite; 0 is unlimited. The most-placed meshes keep it. UE 5.8.3 crashes when its Nanite root-page pool is exhausted, so keep this below 16,384 on large scenes."))
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SBox).WidthOverride(100.0f)
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 8.0f)
 					[
-						SNew(SNumericEntryBox<int32>)
-						.Value_Lambda([this] { return TOptional<int32>(ApplyNaniteBudget); })
-						.MinValue(0)
-						.AllowSpin(false)
-						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
-						.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { ApplyNaniteBudget = FMath::Max(0, NewValue); })
+						SNew(SUniformGridPanel)
+						.SlotPadding(FMargin(4.0f, 0.0f))
+
+						+ SUniformGridPanel::Slot(0, 0)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("AnalyzeButton", "Analyze (optional)"))
+							.ToolTipText(LOCTEXT("AnalyzeTooltip", "Preview the source plan without creating assets or actors. Import runs its own fresh checks, so Analyze is not required and running both repeats source and sidecar checks."))
+							.IsEnabled(this, &SConVerseDatasmithImportPanel::CanAnalyze)
+							.HAlign(HAlign_Center)
+							.OnClicked(this, &SConVerseDatasmithImportPanel::HandleAnalyze)
+						]
+
+						+ SUniformGridPanel::Slot(1, 0)
+						[
+							SNew(SButton)
+							.Text(this, &SConVerseDatasmithImportPanel::GetImportButtonText)
+							.ToolTipText(this, &SConVerseDatasmithImportPanel::GetImportButtonToolTipText)
+							.IsEnabled(this, &SConVerseDatasmithImportPanel::CanImportAndVerify)
+							.HAlign(HAlign_Center)
+							.OnClicked(this, &SConVerseDatasmithImportPanel::HandleImportAndVerify)
+						]
 					]
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					SNew(SButton).Text(LOCTEXT("ApplyNanite", "Apply Nanite"))
-					.IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); })
-					.ToolTipText(LOCTEXT("ApplyNaniteTooltip", "Enable Nanite on the last imported result. Refused if the import has manual edits. A cancel or failure restores the meshes. Save the imported result afterwards to keep it."))
-					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleApplyNanite)
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SButton).Text(LOCTEXT("AnalyzeNanite", "Analyze Nanite"))
-					.IsEnabled_Lambda([this] { return !bOperationInProgress && LastManifestPath.IsValid(); })
-					.ToolTipText(LOCTEXT("AnalyzeNaniteTooltip", "Read-only. Ranks the last import's meshes by placed triangles (triangles x placements) and recommends the fewest that cover the chosen share of that load. Choose Recommended meshes in the scope menu to apply it."))
-					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleAnalyzeNanite)
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
-				[
-					SNew(STextBlock).Text(LOCTEXT("NaniteCoverageLabel", "Cover %"))
-					.ToolTipText(LOCTEXT("NaniteCoverageTooltip", "Share of the candidate meshes' placed triangles the recommendation must cover."))
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-				[
-					SNew(SBox).WidthOverride(70.0f)
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 2.0f, 0.0f, 8.0f)
 					[
-						SNew(SNumericEntryBox<int32>)
-						.Value_Lambda([this] { return TOptional<int32>(NaniteCoveragePercent); })
-						.MinValue(1).MaxValue(100)
-						.AllowSpin(false)
-						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
-						.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { NaniteCoveragePercent = FMath::Clamp(NewValue, 1, 100); })
+						SNew(STextBlock)
+						.Text(this, &SConVerseDatasmithImportPanel::GetStatusText)
+						.ColorAndOpacity(this, &SConVerseDatasmithImportPanel::GetStatusColor)
+						.AutoWrapText(true)
 					]
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
-				[
-					SNew(STextBlock).Text(LOCTEXT("NaniteMinTrianglesLabel", "Min triangles"))
-					.ToolTipText(LOCTEXT("NaniteMinTrianglesTooltip", "Meshes below this triangle count are not recommended. A heuristic, not a measured Nanite break-even."))
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					SNew(SBox).WidthOverride(90.0f)
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
 					[
-						SNew(SNumericEntryBox<int32>)
-						.Value_Lambda([this] { return TOptional<int32>(NaniteMinTriangles); })
-						.MinValue(0)
-						.AllowSpin(false)
-						.IsEnabled_Lambda([this] { return !bOperationInProgress; })
-						.OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type) { NaniteMinTriangles = FMath::Max(0, NewValue); })
+						SNew(SSeparator)
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("ReportLabel", "Report"))
+						.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+					]
+
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SSearchBox).HintText(LOCTEXT("SearchSource", "Filter source element, mesh, label, or outcome"))
+						.OnTextChanged_Lambda([this](const FText& Text) { InspectionSearch = Text.ToString(); RefreshInspection(); })
+					]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SBox).HeightOverride(180.0f)
+						[
+							SAssignNew(InspectionList, SListView<TSharedPtr<FConVerseImportInspectionRow>>)
+							.ListItemsSource(&FilteredRows).SelectionMode(ESelectionMode::Single)
+							.OnGenerateRow(this, &SConVerseDatasmithImportPanel::MakeInspectionRow)
+							.OnMouseButtonDoubleClick_Lambda([this](TSharedPtr<FConVerseImportInspectionRow>) { FocusInspection(); })
+						]
+					]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("FocusSource", "Select and focus")).OnClicked(this, &SConVerseDatasmithImportPanel::FocusInspection)]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("OpenMesh", "Open mesh")).OnClicked(this, &SConVerseDatasmithImportPanel::OpenInspectionMesh)]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("KeepOrdinary", "Keep mesh ordinary")).OnClicked_Lambda([this] { return SetInspectionException(false); })]
+						+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("DisableMeshNanite", "Disable mesh Nanite")).OnClicked_Lambda([this] { return SetInspectionException(true); })]
+					]
+					+ SVerticalBox::Slot()
+					.FillHeight(1.0f)
+					[
+						SNew(SBox)
+						.MinDesiredHeight(260.0f)
+						[
+							SNew(SMultiLineEditableTextBox)
+							.Text(this, &SConVerseDatasmithImportPanel::GetReportText)
+							.IsReadOnly(true)
+							.AlwaysShowScrollbars(true)
+							.AutoWrapText(false)
+							.AllowContextMenu(true)
+						]
 					]
 				]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.0f)
-			[
-				SNew(SCheckBox)
-				.IsEnabled(this, &SConVerseDatasmithImportPanel::IsInputEnabled)
-				.IsChecked_Lambda([this]() { return bProfileNextImport ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-				.OnCheckStateChanged_Lambda([this](ECheckBoxState State) { bProfileNextImport = State == ECheckBoxState::Checked; })
-				.ToolTipText(LOCTEXT("ProfileNextImportTooltip", "Capture CPU, frame, bookmark, and log events for the next Import or Rebuild. The trace is saved under Saved/Profiling and stopped when the operation resolves."))
-			[
-					SNew(STextBlock).Text(LOCTEXT("ProfileNextImport", "Profile next import"))
-			]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 8.0f)
-			[
-				SNew(SUniformGridPanel)
-				.SlotPadding(FMargin(4.0f, 0.0f))
 
-				+ SUniformGridPanel::Slot(0, 0)
+				+ SWidgetSwitcher::Slot()
 				[
-					SNew(SButton)
-					.Text(LOCTEXT("AnalyzeButton", "Analyze (optional)"))
-					.ToolTipText(LOCTEXT("AnalyzeTooltip", "Preview the source plan without creating assets or actors. Import runs its own fresh checks, so Analyze is not required and running both repeats source and sidecar checks."))
-					.IsEnabled(this, &SConVerseDatasmithImportPanel::CanAnalyze)
-					.HAlign(HAlign_Center)
-					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleAnalyze)
-				]
-
-				+ SUniformGridPanel::Slot(1, 0)
-				[
-					SNew(SButton)
-					.Text(this, &SConVerseDatasmithImportPanel::GetImportButtonText)
-					.ToolTipText(this, &SConVerseDatasmithImportPanel::GetImportButtonToolTipText)
-					.IsEnabled(this, &SConVerseDatasmithImportPanel::CanImportAndVerify)
-					.HAlign(HAlign_Center)
-					.OnClicked(this, &SConVerseDatasmithImportPanel::HandleImportAndVerify)
-				]
-			]
-
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 2.0f, 0.0f, 8.0f)
-			[
-				SNew(STextBlock)
-				.Text(this, &SConVerseDatasmithImportPanel::GetStatusText)
-				.ColorAndOpacity(this, &SConVerseDatasmithImportPanel::GetStatusColor)
-				.AutoWrapText(true)
-			]
-
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 0.0f, 0.0f, 6.0f)
-			[
-				SNew(SSeparator)
-			]
-
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 0.0f, 0.0f, 4.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("ReportLabel", "Report"))
-				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
-			]
-
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SSearchBox).HintText(LOCTEXT("SearchSource", "Filter source element, mesh, label, or outcome"))
-				.OnTextChanged_Lambda([this](const FText& Text) { InspectionSearch = Text.ToString(); RefreshInspection(); })
-			]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SBox).HeightOverride(180.0f)
-				[
-					SAssignNew(InspectionList, SListView<TSharedPtr<FConVerseImportInspectionRow>>)
-					.ListItemsSource(&FilteredRows).SelectionMode(ESelectionMode::Single)
-					.OnGenerateRow(this, &SConVerseDatasmithImportPanel::MakeInspectionRow)
-					.OnMouseButtonDoubleClick_Lambda([this](TSharedPtr<FConVerseImportInspectionRow>) { FocusInspection(); })
-				]
-			]
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("FocusSource", "Select and focus")).OnClicked(this, &SConVerseDatasmithImportPanel::FocusInspection)]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("OpenMesh", "Open mesh")).OnClicked(this, &SConVerseDatasmithImportPanel::OpenInspectionMesh)]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("KeepOrdinary", "Keep mesh ordinary")).OnClicked_Lambda([this] { return SetInspectionException(false); })]
-				+ SHorizontalBox::Slot().AutoWidth()[SNew(SButton).Text(LOCTEXT("DisableMeshNanite", "Disable mesh Nanite")).OnClicked_Lambda([this] { return SetInspectionException(true); })]
-			]
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			[
-				SNew(SBox)
-				.MinDesiredHeight(260.0f)
-				[
-					SNew(SMultiLineEditableTextBox)
-					.Text(this, &SConVerseDatasmithImportPanel::GetReportText)
-					.IsReadOnly(true)
-					.AlwaysShowScrollbars(true)
-					.AutoWrapText(false)
-					.AllowContextMenu(true)
+					BuildAdvancedTab()
 				]
 			]
 		]
@@ -1333,6 +1367,167 @@ FText SConVerseDatasmithImportPanel::GetTessellationSummaryText() const
 		: LOCTEXT("TessellationIgnored", "The translator for this source exposes no tessellation options, so these values were ignored.");
 }
 
+TSharedRef<SWidget> SConVerseDatasmithImportPanel::BuildAdvancedTab()
+{
+	const FSlateColor PartColors[] = {
+		ConVerseDatasmithImportPanel::SuccessColor(),
+		FSlateColor(FLinearColor(0.95f, 0.78f, 0.1f)),
+		ConVerseDatasmithImportPanel::ErrorColor()};
+	auto Fraction = [this](int32 Part) -> float
+	{
+		if (!ConversionSummary.bValid) return 0.0f;
+		return float(Part == 0 ? ConversionSummary.ConvertedFraction()
+			: Part == 1 ? ConversionSummary.RecoverableFraction()
+			: ConversionSummary.RemainingFraction());
+	};
+
+	TSharedRef<SHorizontalBox> Bar = SNew(SHorizontalBox);
+	TSharedRef<SVerticalBox> Legend = SNew(SVerticalBox);
+	for (int32 Part = 0; Part < 3; ++Part)
+	{
+		Bar->AddSlot()
+			.FillWidth(TAttribute<float>::CreateLambda([Fraction, Part] { return Fraction(Part); }))
+			[
+				SNew(SImage)
+				.Image(FAppStyle::GetBrush("WhiteBrush"))
+				.ColorAndOpacity(PartColors[Part])
+				.ToolTipText_Lambda([this, Part] { return GetConversionLegendText(Part); })
+			];
+		Legend->AddSlot()
+			.AutoHeight()
+			.Padding(0.0f, 2.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SNew(SBox).WidthOverride(12.0f).HeightOverride(12.0f)
+					[
+						SNew(SImage).Image(FAppStyle::GetBrush("WhiteBrush")).ColorAndOpacity(PartColors[Part])
+					]
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock).Text_Lambda([this, Part] { return GetConversionLegendText(Part); })
+				]
+			];
+	}
+
+	return SNew(SVerticalBox)
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+		[
+			SNew(STextBlock)
+			.Text(this, &SConVerseDatasmithImportPanel::GetConversionHeadlineText)
+			.AutoWrapText(true)
+		]
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(SBox)
+			.HeightOverride(20.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FLinearColor(0.12f, 0.12f, 0.12f))
+				.Padding(0.0f)
+				[
+					Bar
+				]
+			]
+		]
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 6.0f, 0.0f, 10.0f)
+		[
+			Legend
+		]
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(SSeparator)
+		]
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 8.0f, 0.0f, 4.0f)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("NextStepsLabel", "Further grouping steps"))
+			.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+		]
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(STextBlock)
+			.Text(this, &SConVerseDatasmithImportPanel::GetNextStepsText)
+			.AutoWrapText(true)
+		];
+}
+
+FText SConVerseDatasmithImportPanel::GetConversionHeadlineText() const
+{
+	if (!ConversionSummary.bValid)
+	{
+		return LOCTEXT("ConversionNone", "Run Analyze or Import on the Import tab to see how much of the source converts to instances.");
+	}
+	FNumberFormattingOptions Percent;
+	Percent.MinimumFractionalDigits = 1;
+	Percent.MaximumFractionalDigits = 1;
+	const FText Share = FText::AsPercent(ConversionSummary.ConvertedFraction(), &Percent);
+	const FText Converted = ConversionSummary.bImported
+		? FText::Format(LOCTEXT("ConversionImported", "The last import converted {0} of {1} source mesh actors ({2}) into {3} instanced groups."),
+			FText::AsNumber(ConversionSummary.ConvertedActors), FText::AsNumber(ConversionSummary.TotalSourceMeshActors), Share, FText::AsNumber(ConversionSummary.GroupCount))
+		: FText::Format(LOCTEXT("ConversionPlanned", "The last analysis plans to convert {0} of {1} source mesh actors ({2}) into {3} instanced groups. Import to apply it."),
+			FText::AsNumber(ConversionSummary.ConvertedActors), FText::AsNumber(ConversionSummary.TotalSourceMeshActors), Share, FText::AsNumber(ConversionSummary.GroupCount));
+	return FText::Format(LOCTEXT("ConversionHeadline", "{0}\nUnique meshes left: {1}. Each is placed once in the source, so instancing cannot group it."),
+		Converted, FText::AsNumber(ConversionSummary.UniqueMeshes));
+}
+
+FText SConVerseDatasmithImportPanel::GetConversionLegendText(int32 Part) const
+{
+	FNumberFormattingOptions Percent;
+	Percent.MinimumFractionalDigits = 1;
+	Percent.MaximumFractionalDigits = 1;
+	const int32 Count = Part == 0 ? ConversionSummary.ConvertedActors : Part == 1 ? ConversionSummary.RecoverableActors : ConversionSummary.RemainingActors;
+	const double Share = Part == 0 ? ConversionSummary.ConvertedFraction() : Part == 1 ? ConversionSummary.RecoverableFraction() : ConversionSummary.RemainingFraction();
+	const FText Label = Part == 0
+		? (ConversionSummary.bImported ? LOCTEXT("LegendConverted", "Converted to instances") : LOCTEXT("LegendPlanned", "Planned instances"))
+		: Part == 1 ? LOCTEXT("LegendRecoverable", "Could group with a further step")
+		: LOCTEXT("LegendRemaining", "Stays ordinary (unique meshes, exceptions, unresolved)");
+	if (!ConversionSummary.bValid) return Label;
+	return FText::Format(LOCTEXT("LegendEntry", "{0}: {1} ({2})"), Label, FText::AsNumber(Count), FText::AsPercent(Share, &Percent));
+}
+
+FText SConVerseDatasmithImportPanel::GetNextStepsText() const
+{
+	if (!ConversionSummary.bValid) return FText::GetEmpty();
+	const FConVerseGroupingBreakdown& Breakdown = ConversionBreakdown;
+	TArray<FText> Lines;
+	if (Breakdown.NegativeScaleCouldGroup > 0)
+		Lines.Add(FText::Format(LOCTEXT("StepMirrored", "- Mirrored instances: {0} actors would join groups if negative-scale instances were supported. Not available yet; needs an engine check first."), FText::AsNumber(Breakdown.NegativeScaleCouldGroup)));
+	if (Breakdown.ParentSplitActors > 0)
+		Lines.Add(FText::Format(LOCTEXT("StepParent", "- Same mesh under different parents: {0} actors. Planned: grouping across parents within spatial cells."), FText::AsNumber(Breakdown.ParentSplitActors)));
+	if (Breakdown.HasChildrenCouldGroup > 0)
+		Lines.Add(FText::Format(LOCTEXT("StepChildren", "- Meshes with child actors: {0} actors would group if their children did not block them."), FText::AsNumber(Breakdown.HasChildrenCouldGroup)));
+	if (Breakdown.SettingsSplitActors > 0)
+		Lines.Add(FText::Format(LOCTEXT("StepSettings", "- Same mesh and parent, different settings: {0} actors. Their visibility, shadow, layer or material settings differ, so they stay separate."), FText::AsNumber(Breakdown.SettingsSplitActors)));
+	if (Breakdown.PayloadDuplicateActors > 0)
+		Lines.Add(FText::Format(LOCTEXT("StepPayload", "- Identical geometry under different mesh names: {0} actors could group after deduplication."), FText::AsNumber(Breakdown.PayloadDuplicateActors)));
+	if (Breakdown.SceneSpanningGroups > 0)
+		Lines.Add(FText::Format(LOCTEXT("StepCells", "- {0} groups span half the scene or more. Splitting them into spatial cells may help culling."), FText::AsNumber(Breakdown.SceneSpanningGroups)));
+	if (ConversionSummary.UniqueMeshes > 0)
+		Lines.Add(FText::Format(LOCTEXT("StepUnique", "- Unique meshes: {0}. Only merging or HLOD can reduce these."), FText::AsNumber(ConversionSummary.UniqueMeshes)));
+	if (Lines.IsEmpty()) return LOCTEXT("StepsNone", "No further grouping step applies to this source.");
+	Lines.Add(LOCTEXT("StepsNote", "These steps are not in the importer yet. The counts show how many actors each one would affect."));
+	return FText::Join(FText::FromString(TEXT("\n")), Lines);
+}
+
 void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResult& Result, bool bWasImport)
 {
 	CloseMaterialReview();
@@ -1341,6 +1536,8 @@ void SConVerseDatasmithImportPanel::SetResult(const FConVerseOptimizedImportResu
 	FConVerseDatasmithImportService::SavePreset(FPaths::ProjectSavedDir() / TEXT("DatasmithHISM/Presets/Session.json"), MakeOptions(), SessionError);
 	if (Result.ManifestAssetPath.IsValid()) { LastManifestPath = Result.ManifestAssetPath; NaniteRecommended.Reset(); }
 	InspectionRows = Result.InspectionRows;
+	ConversionSummary = FConVerseDatasmithImportService::SummarizeConversion(Result);
+	ConversionBreakdown = Result.GroupingBreakdown;
 	Appearances = Result.Appearances;
 	RefreshInspection();
 	ReportText = FText::FromString(Result.Report);

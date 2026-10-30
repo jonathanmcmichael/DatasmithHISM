@@ -1,0 +1,2796 @@
+{
+  "date": "2026-10-15",
+  "status": "preliminary-comparison-collected-release-gate-open",
+  "current_source_tree_recooked": false,
+  "host_artifact_root": "Saved\\Benchmarks\\CWMRuntime_20261015\\FinalCaptures",
+  "settings": {
+    "Engine": "UE 5.8.3-58210709",
+    "Resolution": [
+      1280,
+      720
+    ],
+    "ScreenPercentage": 100,
+    "HorizontalFov": 60,
+    "SegmentFrames": 4500,
+    "WarmupFrames": 2000,
+    "MeasureStart": 2000,
+    "MeasureEndExclusive": 4000,
+    "ScreenshotFrame": 4200,
+    "Views": [
+      {
+        "Rotation": [
+          -30,
+          -135,
+          0
+        ],
+        "Position": [
+          75000,
+          -90000,
+          40000
+        ],
+        "Name": "Distant"
+      },
+      {
+        "Rotation": [
+          -15,
+          -135,
+          0
+        ],
+        "Position": [
+          60000,
+          -110000,
+          16000
+        ],
+        "Name": "Near"
+      },
+      {
+        "Rotation": [
+          0,
+          180,
+          0
+        ],
+        "Position": [
+          35000,
+          -135000,
+          3300
+        ],
+        "Name": "Interior"
+      }
+    ],
+    "Order": [
+      "Ordinary",
+      "ISM",
+      "HISM",
+      "HISM",
+      "Ordinary",
+      "ISM",
+      "ISM",
+      "HISM",
+      "Ordinary"
+    ],
+    "Lighting": "One transient default DirectionalLight spawned at initial distant-view pawn transform; source lights retained; no map saved.",
+    "BackgroundPolicy": "t.IdleWhenNotForeground=0; foreground and other Unreal processes sampled; no Windows Security interaction.",
+    "TracePolicy": "Native Trace.File default at CSV frame 200; Trace.Stop at 13400. Startup -trace probes exited 777003 after shutdown and are excluded.",
+    "InputPolicy": "Native ke PlayerController SetIgnoreLookInput true and SetIgnoreMoveInput true; validate every measured frame against position and direction.",
+    "PowerScheme": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
+    "CPU": {
+      "Name": "Intel(R) Core(TM) Ultra 9 285HX",
+      "NumberOfCores": 24,
+      "NumberOfLogicalProcessors": 24
+    },
+    "System": {
+      "Manufacturer": "Dell Inc.",
+      "Model": "Dell Pro Max 16 Plus MB16250",
+      "TotalPhysicalMemory": 136856682496
+    },
+    "GPU": [
+      {
+        "Name": "NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU",
+        "DriverVersion": "32.0.15.9716"
+      },
+      {
+        "Name": "Intel(R) Graphics",
+        "DriverVersion": "32.0.101.8724"
+      }
+    ],
+    "Executable": "069DF80E70F2346ED424DE3A6C2990092B6B59EAC6E615F79F691ECD1436FE71"
+  },
+  "runs": [
+    {
+      "Name": "01_Ordinary_R1",
+      "Variant": "Ordinary",
+      "Round": 1,
+      "Started": "2026-10-15T14:12:43.0074681-05:00",
+      "Finished": "2026-10-15T14:14:24.5949333-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "02_ISM_R1",
+      "Variant": "ISM",
+      "Round": 1,
+      "Started": "2026-10-15T14:14:31.297146-05:00",
+      "Finished": "2026-10-15T14:16:10.9706267-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "03_HISM_R1",
+      "Variant": "HISM",
+      "Round": 1,
+      "Started": "2026-10-15T14:16:57.4371091-05:00",
+      "Finished": "2026-10-15T14:18:34.2706294-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "04_HISM_R2",
+      "Variant": "HISM",
+      "Round": 2,
+      "Started": "2026-10-15T14:18:43.2431692-05:00",
+      "Finished": "2026-10-15T14:20:28.0367745-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "05_Ordinary_R2",
+      "Variant": "Ordinary",
+      "Round": 2,
+      "Started": "2026-10-15T14:20:38.6548479-05:00",
+      "Finished": "2026-10-15T14:22:38.9663470-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "06_ISM_R2",
+      "Variant": "ISM",
+      "Round": 2,
+      "Started": "2026-10-15T14:22:51.4134149-05:00",
+      "Finished": "2026-10-15T14:25:03.6198097-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "07_ISM_R3",
+      "Variant": "ISM",
+      "Round": 3,
+      "Started": "2026-10-15T14:25:18.4965734-05:00",
+      "Finished": "2026-10-15T14:27:46.9870562-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "08_HISM_R3",
+      "Variant": "HISM",
+      "Round": 3,
+      "Started": "2026-10-15T14:28:02.9361322-05:00",
+      "Finished": "2026-10-15T14:30:27.3326998-05:00",
+      "ExitCode": 0
+    },
+    {
+      "Name": "09_Ordinary_R3",
+      "Variant": "Ordinary",
+      "Round": 3,
+      "Started": "2026-10-15T14:30:44.6790668-05:00",
+      "Finished": "2026-10-15T14:33:11.4588848-05:00",
+      "ExitCode": 0
+    }
+  ],
+  "validation": {
+    "runs": 9,
+    "views_per_run": 3,
+    "total_native_frames": 121500,
+    "measured_windows": 27,
+    "frames_per_measured_window": 2000,
+    "measured_frames": 54000,
+    "warmup_seconds_range": [
+      12.621817500000015,
+      25.891810700000082
+    ],
+    "measured_seconds_range": [
+      12.303577199999994,
+      28.588128199999993
+    ],
+    "measured_pso_misses": 0,
+    "exact_position_direction_and_stationarity_checked_every_measured_frame": true,
+    "all_runtime_exit_codes_zero": true,
+    "decoded_cpu_gpu_trace_count": 9
+  },
+  "summary": [
+    {
+      "view": "Distant",
+      "variant": "Ordinary",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 6.8477,
+          "min_run_median": 6.5188,
+          "max_run_median": 7.5827,
+          "median_run_p95": 7.788374999999999
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.5052500000000002,
+          "min_run_median": 1.40665,
+          "max_run_median": 1.74465,
+          "median_run_p95": 1.7943
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 6.83855,
+          "min_run_median": 6.5066500000000005,
+          "max_run_median": 7.581099999999999,
+          "median_run_p95": 7.7648649999999995
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 3.12955,
+          "min_run_median": 2.8547000000000002,
+          "max_run_median": 3.5207,
+          "median_run_p95": 3.828585
+        },
+        "GPUTime": {
+          "median_of_run_medians": 2.5641,
+          "min_run_median": 2.5515,
+          "max_run_median": 2.60595,
+          "median_run_p95": 2.797535
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.5052500000000002,
+          "min_run_median": 1.40665,
+          "max_run_median": 1.74465,
+          "median_run_p95": 1.7943
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 6.83855,
+          "min_run_median": 6.5066500000000005,
+          "max_run_median": 7.581099999999999,
+          "median_run_p95": 7.7648649999999995
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 5726.5,
+          "min_run_median": 5720.0,
+          "max_run_median": 5732.0,
+          "median_run_p95": 6221.0
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 6942885.0,
+          "min_run_median": 6933875.0,
+          "max_run_median": 7012608.0,
+          "median_run_p95": 11661832.399999999
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2280.6405999999997,
+          "min_run_median": 2271.9141,
+          "max_run_median": 2455.41215,
+          "median_run_p95": 2282.363495
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 4908.27925,
+          "min_run_median": 4883.43945,
+          "max_run_median": 5096.3594,
+          "median_run_p95": 4911.117394999999
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2619.7695,
+          "min_run_median": 2588.3945,
+          "max_run_median": 2620.3945,
+          "median_run_p95": 2619.7695
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 3092.0,
+          "min_run_median": 3092.0,
+          "max_run_median": 3092.0,
+          "median_run_p95": 3092.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 1.0,
+          "min_run_median": 1.0,
+          "max_run_median": 1.0,
+          "median_run_p95": 1.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.0079,
+          "min_run_median": 0.0076,
+          "max_run_median": 0.0094,
+          "median_run_p95": 0.0162
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 1.8699,
+          "min_run_median": 1.75915,
+          "max_run_median": 2.1753,
+          "median_run_p95": 2.1963
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.4235,
+          "min_run_median": 0.4155,
+          "max_run_median": 0.46995,
+          "median_run_p95": 0.589475
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.1289,
+          "min_run_median": 0.12755,
+          "max_run_median": 0.13275,
+          "median_run_p95": 0.25061
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.0255,
+          "min_run_median": 0.0242,
+          "max_run_median": 0.0286,
+          "median_run_p95": 0.0367
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.1137,
+          "min_run_median": 0.1074,
+          "max_run_median": 0.12745,
+          "median_run_p95": 0.17881499999999997
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.035250000000000004,
+          "min_run_median": 0.0339,
+          "max_run_median": 0.0416,
+          "median_run_p95": 0.06400499999999999
+        }
+      }
+    },
+    {
+      "view": "Distant",
+      "variant": "ISM",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 6.872199999999999,
+          "min_run_median": 6.2453,
+          "max_run_median": 6.94285,
+          "median_run_p95": 8.470619999999998
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.5004,
+          "min_run_median": 1.4405999999999999,
+          "max_run_median": 1.5611,
+          "median_run_p95": 1.914555
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 6.86795,
+          "min_run_median": 6.233599999999999,
+          "max_run_median": 6.927,
+          "median_run_p95": 8.43619
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 3.21665,
+          "min_run_median": 3.0385999999999997,
+          "max_run_median": 3.3292,
+          "median_run_p95": 3.909495
+        },
+        "GPUTime": {
+          "median_of_run_medians": 2.7605500000000003,
+          "min_run_median": 2.7342,
+          "max_run_median": 2.8065,
+          "median_run_p95": 2.91654
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.5004,
+          "min_run_median": 1.4405999999999999,
+          "max_run_median": 1.5611,
+          "median_run_p95": 1.914555
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 6.86795,
+          "min_run_median": 6.233599999999999,
+          "max_run_median": 6.927,
+          "median_run_p95": 8.43619
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 5329.5,
+          "min_run_median": 5325.0,
+          "max_run_median": 5348.0,
+          "median_run_p95": 5776.1
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 3910735.0,
+          "min_run_median": 3903945.0,
+          "max_run_median": 3914639.0,
+          "median_run_p95": 4697183.3
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2444.05275,
+          "min_run_median": 2439.0977,
+          "max_run_median": 2464.8047,
+          "median_run_p95": 2446.472895
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 5072.8398,
+          "min_run_median": 5071.18165,
+          "max_run_median": 5123.06835,
+          "median_run_p95": 5074.371295
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2619.5195,
+          "min_run_median": 2619.0195,
+          "max_run_median": 2651.5195,
+          "median_run_p95": 2619.7695
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 2551.0,
+          "min_run_median": 2551.0,
+          "max_run_median": 2551.0,
+          "median_run_p95": 2551.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 1.0,
+          "min_run_median": 1.0,
+          "max_run_median": 1.0,
+          "median_run_p95": 1.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.008,
+          "min_run_median": 0.0077,
+          "max_run_median": 0.0083,
+          "median_run_p95": 0.0141
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 1.9331,
+          "min_run_median": 1.7705,
+          "max_run_median": 1.9800499999999999,
+          "median_run_p95": 2.3559550000000002
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.3405,
+          "min_run_median": 0.3345,
+          "max_run_median": 0.35855000000000004,
+          "median_run_p95": 0.52513
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.1343,
+          "min_run_median": 0.12235,
+          "max_run_median": 0.1347,
+          "median_run_p95": 0.32521999999999995
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.0264,
+          "min_run_median": 0.0243,
+          "max_run_median": 0.0268,
+          "median_run_p95": 0.036405
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.118,
+          "min_run_median": 0.108,
+          "max_run_median": 0.1193,
+          "median_run_p95": 0.17041499999999998
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.0368,
+          "min_run_median": 0.0334,
+          "max_run_median": 0.0387,
+          "median_run_p95": 0.06401499999999999
+        }
+      }
+    },
+    {
+      "view": "Distant",
+      "variant": "HISM",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 6.541449999999999,
+          "min_run_median": 6.08855,
+          "max_run_median": 7.3136,
+          "median_run_p95": 7.9633899999999995
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.54855,
+          "min_run_median": 1.5444499999999999,
+          "max_run_median": 1.77735,
+          "median_run_p95": 2.5135599999999996
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 6.52655,
+          "min_run_median": 6.0563,
+          "max_run_median": 7.295249999999999,
+          "median_run_p95": 7.746335
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 3.02305,
+          "min_run_median": 2.68335,
+          "max_run_median": 3.41255,
+          "median_run_p95": 4.16597
+        },
+        "GPUTime": {
+          "median_of_run_medians": 2.7345,
+          "min_run_median": 2.73225,
+          "max_run_median": 2.82425,
+          "median_run_p95": 2.89911
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.54855,
+          "min_run_median": 1.5444499999999999,
+          "max_run_median": 1.77735,
+          "median_run_p95": 2.5135599999999996
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 6.52655,
+          "min_run_median": 6.0563,
+          "max_run_median": 7.295249999999999,
+          "median_run_p95": 7.746335
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 5438.5,
+          "min_run_median": 5434.5,
+          "max_run_median": 5447.5,
+          "median_run_p95": 5861.1
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 3938278.0,
+          "min_run_median": 3937948.0,
+          "max_run_median": 3946043.0,
+          "median_run_p95": 4701669.0
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2452.12305,
+          "min_run_median": 2432.72855,
+          "max_run_median": 2492.5,
+          "median_run_p95": 2453.300995
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 5081.3398,
+          "min_run_median": 5059.543,
+          "max_run_median": 5119.8438,
+          "median_run_p95": 5082.5234
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2618.6445,
+          "min_run_median": 2618.3945,
+          "max_run_median": 2619.332,
+          "median_run_p95": 2618.6445
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 2551.0,
+          "min_run_median": 2551.0,
+          "max_run_median": 2551.0,
+          "median_run_p95": 2551.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 1.0,
+          "min_run_median": 1.0,
+          "max_run_median": 1.0,
+          "median_run_p95": 1.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.008,
+          "min_run_median": 0.0073,
+          "max_run_median": 0.0088,
+          "median_run_p95": 0.016304999999999993
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 2.02165,
+          "min_run_median": 1.88105,
+          "max_run_median": 2.2605500000000003,
+          "median_run_p95": 2.841615
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.3385,
+          "min_run_median": 0.3235,
+          "max_run_median": 0.36075,
+          "median_run_p95": 0.48521000000000003
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.1406,
+          "min_run_median": 0.12895,
+          "max_run_median": 0.15435,
+          "median_run_p95": 0.2455
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.0249,
+          "min_run_median": 0.0218,
+          "max_run_median": 0.0278,
+          "median_run_p95": 0.0426
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.11115,
+          "min_run_median": 0.0927,
+          "max_run_median": 0.1267,
+          "median_run_p95": 0.206705
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.0348,
+          "min_run_median": 0.0348,
+          "max_run_median": 0.0415,
+          "median_run_p95": 0.0696
+        }
+      }
+    },
+    {
+      "view": "Near",
+      "variant": "Ordinary",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 8.141,
+          "min_run_median": 8.0302,
+          "max_run_median": 12.08395,
+          "median_run_p95": 10.488775
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.60575,
+          "min_run_median": 1.52175,
+          "max_run_median": 2.25145,
+          "median_run_p95": 2.0639499999999997
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 8.1308,
+          "min_run_median": 8.0242,
+          "max_run_median": 12.07245,
+          "median_run_p95": 10.476595
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 3.35435,
+          "min_run_median": 3.2614,
+          "max_run_median": 4.6802,
+          "median_run_p95": 4.249229999999999
+        },
+        "GPUTime": {
+          "median_of_run_medians": 3.4970999999999997,
+          "min_run_median": 3.47465,
+          "max_run_median": 3.7239500000000003,
+          "median_run_p95": 3.7190499999999997
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.60575,
+          "min_run_median": 1.52175,
+          "max_run_median": 2.25145,
+          "median_run_p95": 2.0639499999999997
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 8.1308,
+          "min_run_median": 8.0242,
+          "max_run_median": 12.07245,
+          "median_run_p95": 10.476595
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 6756.0,
+          "min_run_median": 6753.0,
+          "max_run_median": 6763.0,
+          "median_run_p95": 7089.1
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 7749097.0,
+          "min_run_median": 7686193.0,
+          "max_run_median": 7806280.0,
+          "median_run_p95": 12393378.4
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2310.1758,
+          "min_run_median": 2280.3281,
+          "max_run_median": 2486.31445,
+          "median_run_p95": 2311.3008
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 4979.7891,
+          "min_run_median": 4975.6133,
+          "max_run_median": 5171.61135,
+          "median_run_p95": 4980.945885
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2668.8203,
+          "min_run_median": 2637.6953,
+          "max_run_median": 2669.4453,
+          "median_run_p95": 2668.8203
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 3092.0,
+          "min_run_median": 3091.0,
+          "max_run_median": 3092.0,
+          "median_run_p95": 3092.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 338.0,
+          "min_run_median": 338.0,
+          "max_run_median": 338.0,
+          "median_run_p95": 338.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.0084,
+          "min_run_median": 0.0081,
+          "max_run_median": 0.0138,
+          "median_run_p95": 0.0141
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 2.32045,
+          "min_run_median": 2.2904999999999998,
+          "max_run_median": 3.395,
+          "median_run_p95": 2.97354
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.4759,
+          "min_run_median": 0.4635,
+          "max_run_median": 0.7185,
+          "median_run_p95": 0.8158599999999999
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.14615,
+          "min_run_median": 0.142,
+          "max_run_median": 0.20279999999999998,
+          "median_run_p95": 0.39553499999999997
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.0283,
+          "min_run_median": 0.0276,
+          "max_run_median": 0.0391,
+          "median_run_p95": 0.037605
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.1911,
+          "min_run_median": 0.1849,
+          "max_run_median": 0.2699,
+          "median_run_p95": 0.2673749999999999
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.0375,
+          "min_run_median": 0.0374,
+          "max_run_median": 0.05895,
+          "median_run_p95": 0.0692
+        }
+      }
+    },
+    {
+      "view": "Near",
+      "variant": "ISM",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 10.93345,
+          "min_run_median": 7.2789,
+          "max_run_median": 11.239899999999999,
+          "median_run_p95": 14.661734999999998
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.9044,
+          "min_run_median": 1.44775,
+          "max_run_median": 1.9793,
+          "median_run_p95": 2.44203
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 10.9169,
+          "min_run_median": 7.27095,
+          "max_run_median": 11.2238,
+          "median_run_p95": 14.665634999999998
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 4.347849999999999,
+          "min_run_median": 2.9993,
+          "max_run_median": 4.5232,
+          "median_run_p95": 5.918434999999999
+        },
+        "GPUTime": {
+          "median_of_run_medians": 3.7679,
+          "min_run_median": 3.5922,
+          "max_run_median": 3.82125,
+          "median_run_p95": 3.972305
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.9044,
+          "min_run_median": 1.44775,
+          "max_run_median": 1.9793,
+          "median_run_p95": 2.44203
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 10.9169,
+          "min_run_median": 7.27095,
+          "max_run_median": 11.2238,
+          "median_run_p95": 14.665634999999998
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 6562.5,
+          "min_run_median": 6557.0,
+          "max_run_median": 6569.5,
+          "median_run_p95": 6902.0
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 4081555.0,
+          "min_run_median": 4081073.0,
+          "max_run_median": 4088347.0,
+          "median_run_p95": 4253055.1
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2470.2617,
+          "min_run_median": 2458.8359,
+          "max_run_median": 2618.03715,
+          "median_run_p95": 2478.4805
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 5107.81055,
+          "min_run_median": 5105.31445,
+          "max_run_median": 5152.0547,
+          "median_run_p95": 5108.6836
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2637.0703,
+          "min_run_median": 2636.0703,
+          "max_run_median": 2668.5703,
+          "median_run_p95": 2637.0703
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 2550.0,
+          "min_run_median": 2550.0,
+          "max_run_median": 2551.0,
+          "median_run_p95": 2551.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 338.0,
+          "min_run_median": 338.0,
+          "max_run_median": 338.0,
+          "median_run_p95": 338.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.0113,
+          "min_run_median": 0.0074,
+          "max_run_median": 0.0122,
+          "median_run_p95": 0.018604999999999993
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 3.11775,
+          "min_run_median": 2.1243,
+          "max_run_median": 3.2016999999999998,
+          "median_run_p95": 4.248205
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.5217499999999999,
+          "min_run_median": 0.3381,
+          "max_run_median": 0.53595,
+          "median_run_p95": 1.10609
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.1953,
+          "min_run_median": 0.14515,
+          "max_run_median": 0.2247,
+          "median_run_p95": 0.6137449999999995
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.0377,
+          "min_run_median": 0.0263,
+          "max_run_median": 0.0378,
+          "median_run_p95": 0.054705
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.2593,
+          "min_run_median": 0.16865,
+          "max_run_median": 0.2644,
+          "median_run_p95": 0.36920499999999995
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.0514,
+          "min_run_median": 0.0323,
+          "max_run_median": 0.054150000000000004,
+          "median_run_p95": 0.069005
+        }
+      }
+    },
+    {
+      "view": "Near",
+      "variant": "HISM",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 7.9247,
+          "min_run_median": 6.9921500000000005,
+          "max_run_median": 13.4018,
+          "median_run_p95": 9.292109999999997
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.6258499999999998,
+          "min_run_median": 1.61945,
+          "max_run_median": 2.5333,
+          "median_run_p95": 2.0075
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 7.91395,
+          "min_run_median": 6.9845500000000005,
+          "max_run_median": 13.3842,
+          "median_run_p95": 9.287465
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 3.29615,
+          "min_run_median": 2.6923000000000004,
+          "max_run_median": 5.08095,
+          "median_run_p95": 4.0169999999999995
+        },
+        "GPUTime": {
+          "median_of_run_medians": 3.60725,
+          "min_run_median": 3.5604,
+          "max_run_median": 3.9097,
+          "median_run_p95": 3.8152749999999997
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.6258499999999998,
+          "min_run_median": 1.61945,
+          "max_run_median": 2.5333,
+          "median_run_p95": 2.0075
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 7.91395,
+          "min_run_median": 6.9845500000000005,
+          "max_run_median": 13.3842,
+          "median_run_p95": 9.287465
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 6709.5,
+          "min_run_median": 6706.5,
+          "max_run_median": 6709.5,
+          "median_run_p95": 7045.05
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 4105448.0,
+          "min_run_median": 4096471.0,
+          "max_run_median": 4109865.0,
+          "median_run_p95": 4326642.5
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2471.1133,
+          "min_run_median": 2446.7734,
+          "max_run_median": 2499.3164,
+          "median_run_p95": 2471.9532950000003
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 5121.0156,
+          "min_run_median": 5092.2891,
+          "max_run_median": 5144.1582,
+          "median_run_p95": 5121.8594
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2635.9453,
+          "min_run_median": 2635.4453,
+          "max_run_median": 2636.3828,
+          "median_run_p95": 2635.9453
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 2551.0,
+          "min_run_median": 2550.0,
+          "max_run_median": 2551.0,
+          "median_run_p95": 2551.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 338.0,
+          "min_run_median": 338.0,
+          "max_run_median": 338.0,
+          "median_run_p95": 338.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.0078,
+          "min_run_median": 0.0074,
+          "max_run_median": 0.0152,
+          "median_run_p95": 0.014804999999999995
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 2.55025,
+          "min_run_median": 2.1839,
+          "max_run_median": 4.34825,
+          "median_run_p95": 3.2705550000000003
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.37065,
+          "min_run_median": 0.3409,
+          "max_run_median": 0.57655,
+          "median_run_p95": 0.6321599999999999
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.16205,
+          "min_run_median": 0.1306,
+          "max_run_median": 0.21865,
+          "median_run_p95": 0.280425
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.028,
+          "min_run_median": 0.023,
+          "max_run_median": 0.04715,
+          "median_run_p95": 0.047205
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.19285,
+          "min_run_median": 0.1487,
+          "max_run_median": 0.3391,
+          "median_run_p95": 0.297
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.0359,
+          "min_run_median": 0.0348,
+          "max_run_median": 0.07025,
+          "median_run_p95": 0.0706
+        }
+      }
+    },
+    {
+      "view": "Interior",
+      "variant": "Ordinary",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 8.76875,
+          "min_run_median": 6.12615,
+          "max_run_median": 9.61065,
+          "median_run_p95": 10.17853
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.9875500000000001,
+          "min_run_median": 1.4142,
+          "max_run_median": 2.05495,
+          "median_run_p95": 2.5291349999999997
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 8.7602,
+          "min_run_median": 6.122400000000001,
+          "max_run_median": 9.60225,
+          "median_run_p95": 10.16062
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 4.5200499999999995,
+          "min_run_median": 3.1636,
+          "max_run_median": 4.8645,
+          "median_run_p95": 5.363255
+        },
+        "GPUTime": {
+          "median_of_run_medians": 3.1149,
+          "min_run_median": 3.0075,
+          "max_run_median": 3.1495,
+          "median_run_p95": 3.214415
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.9875500000000001,
+          "min_run_median": 1.4142,
+          "max_run_median": 2.05495,
+          "median_run_p95": 2.5291349999999997
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 8.7602,
+          "min_run_median": 6.122400000000001,
+          "max_run_median": 9.60225,
+          "median_run_p95": 10.16062
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 1965.0,
+          "min_run_median": 1965.0,
+          "max_run_median": 1965.0,
+          "median_run_p95": 2032.0
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 90470.0,
+          "min_run_median": 88676.5,
+          "max_run_median": 90482.0,
+          "median_run_p95": 291279.6
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2319.31445,
+          "min_run_median": 2315.8164,
+          "max_run_median": 2515.59575,
+          "median_run_p95": 2334.605695
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 5108.0156,
+          "min_run_median": 5074.06055,
+          "max_run_median": 5289.6484,
+          "median_run_p95": 5124.7812
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2757.5703,
+          "min_run_median": 2727.1953,
+          "max_run_median": 2758.9453,
+          "median_run_p95": 2757.5703
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 3091.0,
+          "min_run_median": 3091.0,
+          "max_run_median": 3091.0,
+          "median_run_p95": 3091.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 55.0,
+          "min_run_median": 55.0,
+          "max_run_median": 55.0,
+          "median_run_p95": 55.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.01035,
+          "min_run_median": 0.0069,
+          "max_run_median": 0.012,
+          "median_run_p95": 0.0206
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 3.19375,
+          "min_run_median": 2.2689500000000002,
+          "max_run_median": 3.44405,
+          "median_run_p95": 3.741005
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.2713,
+          "min_run_median": 0.17959999999999998,
+          "max_run_median": 0.29025,
+          "median_run_p95": 0.36261499999999997
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.11215,
+          "min_run_median": 0.0697,
+          "max_run_median": 0.1287,
+          "median_run_p95": 0.1642
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.03615,
+          "min_run_median": 0.026,
+          "max_run_median": 0.0391,
+          "median_run_p95": 0.049405
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.2635,
+          "min_run_median": 0.18295,
+          "max_run_median": 0.2847,
+          "median_run_p95": 0.34715999999999997
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.0481,
+          "min_run_median": 0.0307,
+          "max_run_median": 0.0554,
+          "median_run_p95": 0.064
+        }
+      }
+    },
+    {
+      "view": "Interior",
+      "variant": "ISM",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 9.1564,
+          "min_run_median": 6.3157,
+          "max_run_median": 10.20315,
+          "median_run_p95": 10.6746
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.8549,
+          "min_run_median": 1.4798,
+          "max_run_median": 1.9919,
+          "median_run_p95": 2.480095
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 9.1401,
+          "min_run_median": 6.3004,
+          "max_run_median": 10.07665,
+          "median_run_p95": 10.658404999999998
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 4.3367,
+          "min_run_median": 3.2862999999999998,
+          "max_run_median": 4.78315,
+          "median_run_p95": 5.646929999999999
+        },
+        "GPUTime": {
+          "median_of_run_medians": 3.2165,
+          "min_run_median": 3.0979,
+          "max_run_median": 3.2717,
+          "median_run_p95": 3.45843
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.8549,
+          "min_run_median": 1.4798,
+          "max_run_median": 1.9919,
+          "median_run_p95": 2.480095
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 9.1401,
+          "min_run_median": 6.3004,
+          "max_run_median": 10.07665,
+          "median_run_p95": 10.658404999999998
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 2062.0,
+          "min_run_median": 2062.0,
+          "max_run_median": 2064.0,
+          "median_run_p95": 2130.0
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 52316.0,
+          "min_run_median": 52099.0,
+          "max_run_median": 52353.0,
+          "median_run_p95": 210360.4
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2487.00975,
+          "min_run_median": 2465.4648,
+          "max_run_median": 2658.8242,
+          "median_run_p95": 2492.97699
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 5266.3789,
+          "min_run_median": 5235.2031,
+          "max_run_median": 5289.67775,
+          "median_run_p95": 5267.078294999999
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2758.6875,
+          "min_run_median": 2757.6875,
+          "max_run_median": 2790.1875,
+          "median_run_p95": 2758.6875
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 2550.0,
+          "min_run_median": 2550.0,
+          "max_run_median": 2550.0,
+          "median_run_p95": 2550.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 55.0,
+          "min_run_median": 55.0,
+          "max_run_median": 55.0,
+          "median_run_p95": 55.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.0097,
+          "min_run_median": 0.0073,
+          "max_run_median": 0.011,
+          "median_run_p95": 0.018704999999999996
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 3.2175000000000002,
+          "min_run_median": 2.3238,
+          "max_run_median": 3.31145,
+          "median_run_p95": 3.87425
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.19955,
+          "min_run_median": 0.1522,
+          "max_run_median": 0.2357,
+          "median_run_p95": 0.3095
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.11025,
+          "min_run_median": 0.0744,
+          "max_run_median": 0.12985,
+          "median_run_p95": 0.18913499999999997
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.0367,
+          "min_run_median": 0.0263,
+          "max_run_median": 0.037,
+          "median_run_p95": 0.0487
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.2662,
+          "min_run_median": 0.1898,
+          "max_run_median": 0.2737,
+          "median_run_p95": 0.3557
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.0484,
+          "min_run_median": 0.0322,
+          "max_run_median": 0.0509,
+          "median_run_p95": 0.0645
+        }
+      }
+    },
+    {
+      "view": "Interior",
+      "variant": "HISM",
+      "runs": 3,
+      "metrics": {
+        "FrameTime": {
+          "median_of_run_medians": 6.453250000000001,
+          "min_run_median": 6.140700000000001,
+          "max_run_median": 9.37805,
+          "median_run_p95": 7.22904
+        },
+        "GameThreadTime": {
+          "median_of_run_medians": 1.5412499999999998,
+          "min_run_median": 1.4499,
+          "max_run_median": 2.3092,
+          "median_run_p95": 1.8056400000000001
+        },
+        "RenderThreadTime": {
+          "median_of_run_medians": 6.44675,
+          "min_run_median": 6.12985,
+          "max_run_median": 9.3651,
+          "median_run_p95": 7.204140000000001
+        },
+        "RHIThreadTime": {
+          "median_of_run_medians": 3.30225,
+          "min_run_median": 3.1186,
+          "max_run_median": 4.55255,
+          "median_run_p95": 3.7886349999999998
+        },
+        "GPUTime": {
+          "median_of_run_medians": 3.1229,
+          "min_run_median": 3.10205,
+          "max_run_median": 3.2491,
+          "median_run_p95": 3.286515
+        },
+        "GameThreadTime_CriticalPath": {
+          "median_of_run_medians": 1.5412499999999998,
+          "min_run_median": 1.4499,
+          "max_run_median": 2.3092,
+          "median_run_p95": 1.8056400000000001
+        },
+        "RenderThreadTime_CriticalPath": {
+          "median_of_run_medians": 6.44675,
+          "min_run_median": 6.12985,
+          "max_run_median": 9.3651,
+          "median_run_p95": 7.204140000000001
+        },
+        "RHI/DrawCalls": {
+          "median_of_run_medians": 2135.0,
+          "min_run_median": 2135.0,
+          "max_run_median": 2135.0,
+          "median_run_p95": 2199.0
+        },
+        "RHI/PrimitivesDrawn": {
+          "median_of_run_medians": 61803.0,
+          "min_run_median": 61681.0,
+          "max_run_median": 62836.0,
+          "median_run_p95": 181907.54999999984
+        },
+        "PhysicalUsedMB": {
+          "median_of_run_medians": 2472.6328,
+          "min_run_median": 2457.0781,
+          "max_run_median": 2506.22465,
+          "median_run_p95": 2473.625
+        },
+        "VirtualUsedMB": {
+          "median_of_run_medians": 5210.9062,
+          "min_run_median": 5189.5352,
+          "max_run_median": 5240.9668,
+          "median_run_p95": 5211.9023
+        },
+        "GPUMem/LocalUsedMB": {
+          "median_of_run_medians": 2725.4453,
+          "min_run_median": 2724.9453,
+          "max_run_median": 2725.8828,
+          "median_run_p95": 2725.4453
+        },
+        "GPUSceneInstanceCount": {
+          "median_of_run_medians": 7106.0,
+          "min_run_median": 7106.0,
+          "max_run_median": 7106.0,
+          "median_run_p95": 7106.0
+        },
+        "ActorCount/TotalActorCount": {
+          "median_of_run_medians": 2550.0,
+          "min_run_median": 2550.0,
+          "max_run_median": 2550.0,
+          "median_run_p95": 2550.0
+        },
+        "LightCount/All": {
+          "median_of_run_medians": 55.0,
+          "min_run_median": 55.0,
+          "max_run_median": 55.0,
+          "median_run_p95": 55.0
+        },
+        "PSO/PSOMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "PSO/PSOComputeMisses": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/Total": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/CriticalPath": {
+          "median_of_run_medians": 0.0,
+          "min_run_median": 0.0,
+          "max_run_median": 0.0,
+          "median_run_p95": 0.0
+        },
+        "RenderThreadIdle/SwapBuffer": {
+          "median_of_run_medians": 0.0074,
+          "min_run_median": 0.007,
+          "max_run_median": 0.0104,
+          "median_run_p95": 0.0128
+        },
+        "Exclusive/RenderThread/RenderOther": {
+          "median_of_run_medians": 2.3983,
+          "min_run_median": 2.2776,
+          "max_run_median": 3.4636,
+          "median_run_p95": 2.71427
+        },
+        "Exclusive/RenderThread/InitViews_Scene": {
+          "median_of_run_medians": 0.1466,
+          "min_run_median": 0.14005,
+          "max_run_median": 0.2231,
+          "median_run_p95": 0.2131
+        },
+        "Exclusive/RenderThread/RDG_Execute": {
+          "median_of_run_medians": 0.0757,
+          "min_run_median": 0.0718,
+          "max_run_median": 0.12595,
+          "median_run_p95": 0.163605
+        },
+        "Exclusive/RenderThread/RenderBasePass": {
+          "median_of_run_medians": 0.027,
+          "min_run_median": 0.0256,
+          "max_run_median": 0.0381,
+          "median_run_p95": 0.035429999999999975
+        },
+        "Exclusive/RenderThread/RenderShadows": {
+          "median_of_run_medians": 0.1934,
+          "min_run_median": 0.18075,
+          "max_run_median": 0.2723,
+          "median_run_p95": 0.2739949999999999
+        },
+        "Exclusive/RenderThread/Slate": {
+          "median_of_run_medians": 0.033,
+          "min_run_median": 0.0299,
+          "max_run_median": 0.0514,
+          "median_run_p95": 0.05251999999999998
+        }
+      }
+    }
+  ],
+  "per_run_windows": [
+    {
+      "run": "01_Ordinary_R1",
+      "view": "Distant",
+      "frame_time_median_ms": 6.5188,
+      "frame_time_p95_ms": 7.177875,
+      "warmup_seconds": 13.645273800000007,
+      "measured_seconds": 13.098547599999973,
+      "foreground_samples": {
+        "rider64": 80,
+        "AdvancedHISM": 7,
+        "ms-teams": 11
+      }
+    },
+    {
+      "run": "01_Ordinary_R1",
+      "view": "Near",
+      "frame_time_median_ms": 8.0302,
+      "frame_time_p95_ms": 9.75508,
+      "warmup_seconds": 16.143687399999997,
+      "measured_seconds": 16.488617699999967,
+      "foreground_samples": {
+        "rider64": 80,
+        "AdvancedHISM": 7,
+        "ms-teams": 11
+      }
+    },
+    {
+      "run": "01_Ordinary_R1",
+      "view": "Interior",
+      "frame_time_median_ms": 6.12615,
+      "frame_time_p95_ms": 6.8911999999999995,
+      "warmup_seconds": 13.058921800000027,
+      "measured_seconds": 12.303577199999994,
+      "foreground_samples": {
+        "rider64": 80,
+        "AdvancedHISM": 7,
+        "ms-teams": 11
+      }
+    },
+    {
+      "run": "02_ISM_R1",
+      "view": "Distant",
+      "frame_time_median_ms": 6.2453,
+      "frame_time_p95_ms": 7.01548,
+      "warmup_seconds": 13.006808700000004,
+      "measured_seconds": 12.595850100000003,
+      "foreground_samples": {
+        "rider64": 91,
+        "ms-teams": 5
+      }
+    },
+    {
+      "run": "02_ISM_R1",
+      "view": "Near",
+      "frame_time_median_ms": 7.2789,
+      "frame_time_p95_ms": 7.983165,
+      "warmup_seconds": 14.793834700000001,
+      "measured_seconds": 14.624155499999981,
+      "foreground_samples": {
+        "rider64": 91,
+        "ms-teams": 5
+      }
+    },
+    {
+      "run": "02_ISM_R1",
+      "view": "Interior",
+      "frame_time_median_ms": 6.3157,
+      "frame_time_p95_ms": 7.2507150000000005,
+      "warmup_seconds": 12.621817500000015,
+      "measured_seconds": 12.744891899999967,
+      "foreground_samples": {
+        "rider64": 91,
+        "ms-teams": 5
+      }
+    },
+    {
+      "run": "03_HISM_R1",
+      "view": "Distant",
+      "frame_time_median_ms": 6.08855,
+      "frame_time_p95_ms": 7.9633899999999995,
+      "warmup_seconds": 13.043388299999998,
+      "measured_seconds": 12.58715910000001,
+      "foreground_samples": {
+        "rider64": 19,
+        "AdvancedHISM": 58,
+        "explorer": 16
+      }
+    },
+    {
+      "run": "03_HISM_R1",
+      "view": "Near",
+      "frame_time_median_ms": 6.9921500000000005,
+      "frame_time_p95_ms": 9.292109999999997,
+      "warmup_seconds": 14.68257589999999,
+      "measured_seconds": 14.601056500000018,
+      "foreground_samples": {
+        "rider64": 19,
+        "AdvancedHISM": 58,
+        "explorer": 16
+      }
+    },
+    {
+      "run": "03_HISM_R1",
+      "view": "Interior",
+      "frame_time_median_ms": 6.140700000000001,
+      "frame_time_p95_ms": 6.87207,
+      "warmup_seconds": 12.650507699999995,
+      "measured_seconds": 12.323084700000015,
+      "foreground_samples": {
+        "rider64": 19,
+        "AdvancedHISM": 58,
+        "explorer": 16
+      }
+    },
+    {
+      "run": "04_HISM_R2",
+      "view": "Distant",
+      "frame_time_median_ms": 6.541449999999999,
+      "frame_time_p95_ms": 7.422115,
+      "warmup_seconds": 13.83471000000001,
+      "measured_seconds": 13.128642499999987,
+      "foreground_samples": {
+        "explorer": 6,
+        "SearchHost": 5,
+        "lore-client": 54,
+        "rider64": 35
+      }
+    },
+    {
+      "run": "04_HISM_R2",
+      "view": "Near",
+      "frame_time_median_ms": 7.9247,
+      "frame_time_p95_ms": 8.860249999999999,
+      "warmup_seconds": 15.852682599999987,
+      "measured_seconds": 15.941294200000012,
+      "foreground_samples": {
+        "explorer": 6,
+        "SearchHost": 5,
+        "lore-client": 54,
+        "rider64": 35
+      }
+    },
+    {
+      "run": "04_HISM_R2",
+      "view": "Interior",
+      "frame_time_median_ms": 6.453250000000001,
+      "frame_time_p95_ms": 7.22904,
+      "warmup_seconds": 13.188688000000008,
+      "measured_seconds": 12.992071599999987,
+      "foreground_samples": {
+        "explorer": 6,
+        "SearchHost": 5,
+        "lore-client": 54,
+        "rider64": 35
+      }
+    },
+    {
+      "run": "05_Ordinary_R2",
+      "view": "Distant",
+      "frame_time_median_ms": 6.8477,
+      "frame_time_p95_ms": 7.788374999999999,
+      "warmup_seconds": 14.548562500000036,
+      "measured_seconds": 13.828904899999984,
+      "foreground_samples": {
+        "rider64": 82,
+        "lore-client": 5,
+        "explorer": 4,
+        "chrome": 14,
+        "WinRAR": 9,
+        "AdvancedHISM": 1
+      }
+    },
+    {
+      "run": "05_Ordinary_R2",
+      "view": "Near",
+      "frame_time_median_ms": 8.141,
+      "frame_time_p95_ms": 10.488775,
+      "warmup_seconds": 15.883138599999988,
+      "measured_seconds": 16.915616900000025,
+      "foreground_samples": {
+        "rider64": 82,
+        "lore-client": 5,
+        "explorer": 4,
+        "chrome": 14,
+        "WinRAR": 9,
+        "AdvancedHISM": 1
+      }
+    },
+    {
+      "run": "05_Ordinary_R2",
+      "view": "Interior",
+      "frame_time_median_ms": 8.76875,
+      "frame_time_p95_ms": 10.17853,
+      "warmup_seconds": 18.42649420000001,
+      "measured_seconds": 17.7807574,
+      "foreground_samples": {
+        "rider64": 82,
+        "lore-client": 5,
+        "explorer": 4,
+        "chrome": 14,
+        "WinRAR": 9,
+        "AdvancedHISM": 1
+      }
+    },
+    {
+      "run": "06_ISM_R2",
+      "view": "Distant",
+      "frame_time_median_ms": 6.872199999999999,
+      "frame_time_p95_ms": 8.470619999999998,
+      "warmup_seconds": 13.57646820000002,
+      "measured_seconds": 14.257008100000021,
+      "foreground_samples": {
+        "explorer": 7,
+        "AdvancedHISM": 7,
+        "EpicGamesLauncher": 14,
+        "UnrealEditor": 11,
+        "chrome": 86
+      }
+    },
+    {
+      "run": "06_ISM_R2",
+      "view": "Near",
+      "frame_time_median_ms": 10.93345,
+      "frame_time_p95_ms": 14.661734999999998,
+      "warmup_seconds": 22.60843320000001,
+      "measured_seconds": 22.823336999999988,
+      "foreground_samples": {
+        "explorer": 7,
+        "AdvancedHISM": 7,
+        "EpicGamesLauncher": 14,
+        "UnrealEditor": 11,
+        "chrome": 86
+      }
+    },
+    {
+      "run": "06_ISM_R2",
+      "view": "Interior",
+      "frame_time_median_ms": 9.1564,
+      "frame_time_p95_ms": 10.6746,
+      "warmup_seconds": 19.41062479999999,
+      "measured_seconds": 18.548220899999997,
+      "foreground_samples": {
+        "explorer": 7,
+        "AdvancedHISM": 7,
+        "EpicGamesLauncher": 14,
+        "UnrealEditor": 11,
+        "chrome": 86
+      }
+    },
+    {
+      "run": "07_ISM_R3",
+      "view": "Distant",
+      "frame_time_median_ms": 6.94285,
+      "frame_time_p95_ms": 9.314834999999999,
+      "warmup_seconds": 15.33290340000003,
+      "measured_seconds": 14.542943000000026,
+      "foreground_samples": {
+        "UnrealEditor": 12,
+        "AdvancedHISM": 3,
+        "explorer": 11,
+        "rider64": 69,
+        "EpicGamesLauncher": 3,
+        "lore-client": 23,
+        "Idle": 2,
+        "ShellExperienceHost": 1,
+        "chrome": 17
+      }
+    },
+    {
+      "run": "07_ISM_R3",
+      "view": "Near",
+      "frame_time_median_ms": 11.239899999999999,
+      "frame_time_p95_ms": 14.83708,
+      "warmup_seconds": 23.78755179999999,
+      "measured_seconds": 23.521430099999968,
+      "foreground_samples": {
+        "UnrealEditor": 12,
+        "AdvancedHISM": 3,
+        "explorer": 11,
+        "rider64": 69,
+        "EpicGamesLauncher": 3,
+        "lore-client": 23,
+        "Idle": 2,
+        "ShellExperienceHost": 1,
+        "chrome": 17
+      }
+    },
+    {
+      "run": "07_ISM_R3",
+      "view": "Interior",
+      "frame_time_median_ms": 10.20315,
+      "frame_time_p95_ms": 38.17153,
+      "warmup_seconds": 20.150495700000068,
+      "measured_seconds": 28.588128199999993,
+      "foreground_samples": {
+        "UnrealEditor": 12,
+        "AdvancedHISM": 3,
+        "explorer": 11,
+        "rider64": 69,
+        "EpicGamesLauncher": 3,
+        "lore-client": 23,
+        "Idle": 2,
+        "ShellExperienceHost": 1,
+        "chrome": 17
+      }
+    },
+    {
+      "run": "08_HISM_R3",
+      "view": "Distant",
+      "frame_time_median_ms": 7.3136,
+      "frame_time_p95_ms": 10.424965,
+      "warmup_seconds": 14.89398209999997,
+      "measured_seconds": 15.303714199999963,
+      "foreground_samples": {
+        "chrome": 12,
+        "AdvancedHISM": 115,
+        "Idle": 3,
+        "ms-teams": 4,
+        "dwm": 1
+      }
+    },
+    {
+      "run": "08_HISM_R3",
+      "view": "Near",
+      "frame_time_median_ms": 13.4018,
+      "frame_time_p95_ms": 16.516505000000002,
+      "warmup_seconds": 25.891810700000082,
+      "measured_seconds": 27.030953400000005,
+      "foreground_samples": {
+        "chrome": 12,
+        "AdvancedHISM": 115,
+        "Idle": 3,
+        "ms-teams": 4,
+        "dwm": 1
+      }
+    },
+    {
+      "run": "08_HISM_R3",
+      "view": "Interior",
+      "frame_time_median_ms": 9.37805,
+      "frame_time_p95_ms": 11.19686,
+      "warmup_seconds": 19.355413200000008,
+      "measured_seconds": 19.0637936,
+      "foreground_samples": {
+        "chrome": 12,
+        "AdvancedHISM": 115,
+        "Idle": 3,
+        "ms-teams": 4,
+        "dwm": 1
+      }
+    },
+    {
+      "run": "09_Ordinary_R3",
+      "view": "Distant",
+      "frame_time_median_ms": 7.5827,
+      "frame_time_p95_ms": 9.744504999999998,
+      "warmup_seconds": 16.00739070000004,
+      "measured_seconds": 15.436115700000009,
+      "foreground_samples": {
+        "devenv": 8,
+        "AdvancedHISM": 76,
+        "chrome": 51,
+        "UnrealEditor": 3
+      }
+    },
+    {
+      "run": "09_Ordinary_R3",
+      "view": "Near",
+      "frame_time_median_ms": 12.08395,
+      "frame_time_p95_ms": 15.161764999999999,
+      "warmup_seconds": 24.9994599,
+      "measured_seconds": 24.758113899999948,
+      "foreground_samples": {
+        "devenv": 8,
+        "AdvancedHISM": 76,
+        "chrome": 51,
+        "UnrealEditor": 3
+      }
+    },
+    {
+      "run": "09_Ordinary_R3",
+      "view": "Interior",
+      "frame_time_median_ms": 9.61065,
+      "frame_time_p95_ms": 11.19296,
+      "warmup_seconds": 20.82066290000001,
+      "measured_seconds": 19.454753800000024,
+      "foreground_samples": {
+        "devenv": 8,
+        "AdvancedHISM": 76,
+        "chrome": 51,
+        "UnrealEditor": 3
+      }
+    }
+  ],
+  "image_summary": [
+    {
+      "view": "Distant",
+      "candidate": "ISM",
+      "pair_count": 9,
+      "mean_absolute_rgb_range": [
+        0.010063295717592593,
+        0.011418185763888889
+      ],
+      "max_percent_pixels_channel_delta_over_16": 0.003472222222222222
+    },
+    {
+      "view": "Distant",
+      "candidate": "HISM",
+      "pair_count": 9,
+      "mean_absolute_rgb_range": [
+        0.010005787037037037,
+        0.012063078703703704
+      ],
+      "max_percent_pixels_channel_delta_over_16": 0.003363715277777778
+    },
+    {
+      "view": "Near",
+      "candidate": "ISM",
+      "pair_count": 9,
+      "mean_absolute_rgb_range": [
+        0.020944372106481483,
+        0.02998119212962963
+      ],
+      "max_percent_pixels_channel_delta_over_16": 0.007378472222222222
+    },
+    {
+      "view": "Near",
+      "candidate": "HISM",
+      "pair_count": 9,
+      "mean_absolute_rgb_range": [
+        0.021889467592592592,
+        0.029626374421296297
+      ],
+      "max_percent_pixels_channel_delta_over_16": 0.007378472222222222
+    },
+    {
+      "view": "Interior",
+      "candidate": "ISM",
+      "pair_count": 9,
+      "mean_absolute_rgb_range": [
+        0.12379087094907408,
+        0.14923828125
+      ],
+      "max_percent_pixels_channel_delta_over_16": 0.018663194444444444
+    },
+    {
+      "view": "Interior",
+      "candidate": "HISM",
+      "pair_count": 9,
+      "mean_absolute_rgb_range": [
+        1.9176671006944443,
+        1.9431810619212964
+      ],
+      "max_percent_pixels_channel_delta_over_16": 3.8021918402777777
+    }
+  ],
+  "trace_diagnostics": [
+    {
+      "run": "01_Ordinary_R1",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 22
+    },
+    {
+      "run": "02_ISM_R1",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 91
+    },
+    {
+      "run": "03_HISM_R1",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 87
+    },
+    {
+      "run": "04_HISM_R2",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 107
+    },
+    {
+      "run": "05_Ordinary_R2",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 107
+    },
+    {
+      "run": "06_ISM_R2",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 79
+    },
+    {
+      "run": "07_ISM_R3",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 43
+    },
+    {
+      "run": "08_HISM_R3",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 106
+    },
+    {
+      "run": "09_Ordinary_R3",
+      "exit_code": 0,
+      "cpu_provider_complete": true,
+      "gpu_provider_complete": true,
+      "memory_error_log_lines": 101,
+      "warning_log_lines": 107
+    }
+  ],
+  "limitations": [
+    "Active shared machine, variable foreground and unlocked clocks; not a reliable causal frame-time speedup.",
+    "HISM interior lighting/shadow difference unresolved.",
+    "Memory Insights tag tracker errors and GPU event-order corrections; use native CSV/OS/RHI memory counters.",
+    "Existing 2026-10-02 package, not a recook of current source tree.",
+    "Seven accepted missing textures; incomplete full-model visual/photometric acceptance."
+  ],
+  "artifacts": [
+    {
+      "path": "01_Ordinary_R1\\arguments.txt",
+      "bytes": 1591,
+      "sha256": "eedcee8f18e631401c25e53e49d6bf8f22022749a27042153f966cf4388e0bf6"
+    },
+    {
+      "path": "01_Ordinary_R1\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "01_Ordinary_R1\\Distant.png",
+      "bytes": 103224,
+      "sha256": "cb479a6e1ca80beec5acf81c13c3f8a6dfb173e53128988d21680706d0a0f31d"
+    },
+    {
+      "path": "01_Ordinary_R1\\insights-export-backup-2026.10.15-19.34.39.log",
+      "bytes": 40577,
+      "sha256": "68724fb04bccd5c4b9cd1e17fa5e5178ecd6b17be2dcc073bbe15bfd43b84086"
+    },
+    {
+      "path": "01_Ordinary_R1\\insights-export-backup-2026.10.15-19.35.42.log",
+      "bytes": 40586,
+      "sha256": "ce08c6fba5176db25f7f47dcc8ca54fceece8f29afdad4080d97a257a8839328"
+    },
+    {
+      "path": "01_Ordinary_R1\\insights-export.log",
+      "bytes": 40423,
+      "sha256": "f10752e570310086b395410254a7dcaa5d56b9817a324495c717e2a4ce838f3a"
+    },
+    {
+      "path": "01_Ordinary_R1\\Interior.png",
+      "bytes": 263548,
+      "sha256": "78f0edba41db6626e6ecd0b58499e08c13f93b6c46a1a14f17201baf91619b2d"
+    },
+    {
+      "path": "01_Ordinary_R1\\Near.png",
+      "bytes": 175874,
+      "sha256": "dc82616860c51eb59a03830b579c751e55a8600454e5f8699f412d41243c14f4"
+    },
+    {
+      "path": "01_Ordinary_R1\\process-samples.csv",
+      "bytes": 11400,
+      "sha256": "6e83424dc1682dcbbb2f01bc9ea06f5d3097cb52aa0abf9fcd1faba92b9028e7"
+    },
+    {
+      "path": "01_Ordinary_R1\\runtime.csv",
+      "bytes": 27310459,
+      "sha256": "6206867d7a08b4f7b032bc4d045a029a7856307e0bd4697ed2f5064cba4492d3"
+    },
+    {
+      "path": "01_Ordinary_R1\\runtime.log",
+      "bytes": 107666,
+      "sha256": "b4e6684428fe4f13770015248139f4ba3f2111f1c20306a1ece9cd08d1c6ef7a"
+    },
+    {
+      "path": "01_Ordinary_R1\\runtime.utrace",
+      "bytes": 568380844,
+      "sha256": "facd22ae67f77c5a1fdc012d4628a0ce4ad4b29f86924cc88a71f04736a9652e"
+    },
+    {
+      "path": "01_Ordinary_R1\\threads.csv",
+      "bytes": 2543,
+      "sha256": "35b2f168c9136ff3bb69754b1f373a0c364b86a9f7c55b0ff5ad73ba8067ca82"
+    },
+    {
+      "path": "01_Ordinary_R1\\timer-statistics.csv",
+      "bytes": 97212,
+      "sha256": "09597547b454d428032a0f219d797182c15741ea66d41ce9496cb9d7b8f1cc93"
+    },
+    {
+      "path": "01_Ordinary_R1\\timers.csv",
+      "bytes": 97107,
+      "sha256": "6273b2bcd1ec7e703f60d661c09031a0170d5f2431586ac2ce6a15a5de47e36f"
+    },
+    {
+      "path": "02_ISM_R1\\arguments.txt",
+      "bytes": 1556,
+      "sha256": "be8a186a587c71a2a10f57a6b9411b2cd3e635c2e7224c987e269a8f6d1af2f9"
+    },
+    {
+      "path": "02_ISM_R1\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "02_ISM_R1\\Distant.png",
+      "bytes": 103543,
+      "sha256": "535b0b181c5b98d65f89a2e307d9b2df39f6253fd7a5f53ef92047bb9cc160f7"
+    },
+    {
+      "path": "02_ISM_R1\\insights-export.log",
+      "bytes": 50813,
+      "sha256": "d86df49bc388d8961ba12702cbbfe57f9a076bd98142582cc4c129263383d48e"
+    },
+    {
+      "path": "02_ISM_R1\\Interior.png",
+      "bytes": 262798,
+      "sha256": "22f30577c537a125cb519e7e16a60d08496daa214ebb50dc9a8ba9a54d018dd2"
+    },
+    {
+      "path": "02_ISM_R1\\Near.png",
+      "bytes": 175774,
+      "sha256": "ed09ee3b2119fb61579b7bb4e2135fd72a8d09085d39be8589c5516ee19f04fc"
+    },
+    {
+      "path": "02_ISM_R1\\process-samples.csv",
+      "bytes": 11127,
+      "sha256": "6d55cd8e8bf300b8dcc4162e217df4467db4f2817af7d3ed2da4237d4946455f"
+    },
+    {
+      "path": "02_ISM_R1\\runtime.csv",
+      "bytes": 27284848,
+      "sha256": "483211959ce5867d82d827c87af1b3659ab63a45e97ec929a732b239952f6e6f"
+    },
+    {
+      "path": "02_ISM_R1\\runtime.log",
+      "bytes": 107289,
+      "sha256": "fb93331c6ee1cbc6156f2d621b81c2cbf553cf7f079a7afa21742173ee9c1e61"
+    },
+    {
+      "path": "02_ISM_R1\\runtime.utrace",
+      "bytes": 526385145,
+      "sha256": "0ed9c80abead83ea48ba0e1c50e8e283e2d0665f5593811cadd4f1eadc23b1d9"
+    },
+    {
+      "path": "02_ISM_R1\\threads.csv",
+      "bytes": 2525,
+      "sha256": "de65004294c28cccaf6d6261595f9c8121633d062f2c83d874bcf99f2119aef3"
+    },
+    {
+      "path": "02_ISM_R1\\timer-statistics.csv",
+      "bytes": 95170,
+      "sha256": "7d2641c593d0ad2832fb9d3a9c65cd1437ad598e49ac4a165c5998f01d335adb"
+    },
+    {
+      "path": "02_ISM_R1\\timers.csv",
+      "bytes": 97481,
+      "sha256": "861ea42f93722120be1ca83dc56143da38c1003ef81fdb0cd9b993d995d3cc4f"
+    },
+    {
+      "path": "03_HISM_R1\\arguments.txt",
+      "bytes": 1563,
+      "sha256": "b09f243c182e6233f02d68345c762bf4d07d9a8c0dfd1633ecf67704330c991b"
+    },
+    {
+      "path": "03_HISM_R1\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "03_HISM_R1\\Distant.png",
+      "bytes": 102719,
+      "sha256": "036e67078268a800dd91f3863a5fe41fe2284e3ce889cd50c43c5448f8b0ec9b"
+    },
+    {
+      "path": "03_HISM_R1\\insights-export.log",
+      "bytes": 50153,
+      "sha256": "69bf608253acc014302e788b4fa59009ab26815a1c3914e7a6f8eb4851c223c9"
+    },
+    {
+      "path": "03_HISM_R1\\Interior.png",
+      "bytes": 207192,
+      "sha256": "eef913c556e72bcea02d6e6d82c962a2893fdb1bcc269072f3e5c7d54b17d898"
+    },
+    {
+      "path": "03_HISM_R1\\Near.png",
+      "bytes": 175925,
+      "sha256": "3e4d30186b3fc5ea43cb1acf37c211b9a390efc3ab4c141da30a8abe53a1f81a"
+    },
+    {
+      "path": "03_HISM_R1\\process-samples.csv",
+      "bytes": 11104,
+      "sha256": "cc8efa20c13c46ee4c122ab4ee642858e09f0bad266966ea5a9f4a7e869bd6ce"
+    },
+    {
+      "path": "03_HISM_R1\\runtime.csv",
+      "bytes": 27294933,
+      "sha256": "74fb6725d28ede61cec9afa5b3b401cd015e37ddbbd5e46416ae5b2e7faa3f36"
+    },
+    {
+      "path": "03_HISM_R1\\runtime.log",
+      "bytes": 107628,
+      "sha256": "62dc839a47941ebe5763b5691bbc3c32289d9de676fd5fc3ae1fe670dbd3d967"
+    },
+    {
+      "path": "03_HISM_R1\\runtime.utrace",
+      "bytes": 542299782,
+      "sha256": "ba665e2b785380824bb0318d4effd30457ee3f19cd710a3fe7934cb6e423b5c7"
+    },
+    {
+      "path": "03_HISM_R1\\threads.csv",
+      "bytes": 2525,
+      "sha256": "68d9109b33f7ff5eb1a02cdd4c15835fa9009e4deecfe14c85411657938d3713"
+    },
+    {
+      "path": "03_HISM_R1\\timer-statistics.csv",
+      "bytes": 97898,
+      "sha256": "c5c08b1036daf685819d293591d88027dcae7ddd0c10bfe0e7f6933cf1d93077"
+    },
+    {
+      "path": "03_HISM_R1\\timers.csv",
+      "bytes": 98568,
+      "sha256": "2e04c2cc9cf4392606bafc4cc9fa8d8f4089699837aa8c0b70b0e461ebb6fc47"
+    },
+    {
+      "path": "04_HISM_R2\\arguments.txt",
+      "bytes": 1563,
+      "sha256": "61599f69318fe16c8e23cd78abe088656d58e67d6c899e5785789006c24cb1a6"
+    },
+    {
+      "path": "04_HISM_R2\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "04_HISM_R2\\Distant.png",
+      "bytes": 103201,
+      "sha256": "e056423f1ec346c55811624fb9e9540b7f921f1cff7eda34903bddadcef6fc78"
+    },
+    {
+      "path": "04_HISM_R2\\insights-export.log",
+      "bytes": 52921,
+      "sha256": "aee5bf00d78120f86e140eebda67f7bd93b47fd01f26e8167b86e14c8d54ede5"
+    },
+    {
+      "path": "04_HISM_R2\\Interior.png",
+      "bytes": 206665,
+      "sha256": "d168c906113feb8ae3eeb657fe34364d25c80eca3d44784003203f8de43a7871"
+    },
+    {
+      "path": "04_HISM_R2\\Near.png",
+      "bytes": 176036,
+      "sha256": "c25c04162036b55577bef70d915b3d7b49c9eb3a44dc7c06febda0ef09f80490"
+    },
+    {
+      "path": "04_HISM_R2\\process-samples.csv",
+      "bytes": 11826,
+      "sha256": "01a952984805a6941ab0186a0139a36ca2dcc32707bea5b0f9d715a2fe74f343"
+    },
+    {
+      "path": "04_HISM_R2\\runtime.csv",
+      "bytes": 27274376,
+      "sha256": "739bebf45f5fc6038e25d7e0091c507bcb278d64b7be856bffdbeea59a307ce9"
+    },
+    {
+      "path": "04_HISM_R2\\runtime.log",
+      "bytes": 107225,
+      "sha256": "27365f03c02e4bb375a0a2551b301fff722e11fe4529b692656fe5eed1c1938a"
+    },
+    {
+      "path": "04_HISM_R2\\runtime.utrace",
+      "bytes": 541984102,
+      "sha256": "e9fd08d655638f9edcfeb03e2fcbc777330399d8d6886b8891e0103628951314"
+    },
+    {
+      "path": "04_HISM_R2\\threads.csv",
+      "bytes": 2471,
+      "sha256": "f21defa81386faef52b5b34839b7d3a22bac6e26976ea923054b73841c0d094f"
+    },
+    {
+      "path": "04_HISM_R2\\timer-statistics.csv",
+      "bytes": 96892,
+      "sha256": "79b5a51d55b0d754063f0406a09d4edce674b9ce21436817aa937072ddcd54e3"
+    },
+    {
+      "path": "04_HISM_R2\\timers.csv",
+      "bytes": 98378,
+      "sha256": "a290a369271c933d40b543924d6081a41c6f28f63349dc6a9e98f14a45febd4b"
+    },
+    {
+      "path": "05_Ordinary_R2\\arguments.txt",
+      "bytes": 1591,
+      "sha256": "c6322a75f9a478382f8a6b878aa9eb8fe6ee6b39890c2244c16f9999bb3e7d14"
+    },
+    {
+      "path": "05_Ordinary_R2\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "05_Ordinary_R2\\Distant.png",
+      "bytes": 103385,
+      "sha256": "a528af6465ddb3eaf126cd5f0f25dabbc924a2cff3836cd86cedb7bb1ada8a7e"
+    },
+    {
+      "path": "05_Ordinary_R2\\insights-export.log",
+      "bytes": 53028,
+      "sha256": "616bb3d3e59e5e6a8ec6d76817a211b522ec2d37fb0a29011930e0485f35b89c"
+    },
+    {
+      "path": "05_Ordinary_R2\\Interior.png",
+      "bytes": 263693,
+      "sha256": "6185e67d6af3226cd220e663a4cedb49c79e136f2113f4f80722bffb13b581cb"
+    },
+    {
+      "path": "05_Ordinary_R2\\Near.png",
+      "bytes": 175569,
+      "sha256": "15dc57e89ef51b15daca6cccef67c166e32b73d1939d48171f2eab243a6a5d6c"
+    },
+    {
+      "path": "05_Ordinary_R2\\process-samples.csv",
+      "bytes": 13341,
+      "sha256": "451e4dfa18a2719beb58600cb2c01656c1556cc750824fc18be90cfd363edc31"
+    },
+    {
+      "path": "05_Ordinary_R2\\runtime.csv",
+      "bytes": 27203383,
+      "sha256": "f9e4661e5c32e7e64ed2ebfcb7180c02e04896ef9eb7d22d17c2ee53eecace77"
+    },
+    {
+      "path": "05_Ordinary_R2\\runtime.log",
+      "bytes": 107591,
+      "sha256": "d233723cddee3ce15e2c026bb497ca4a7bc1eca8050309254bea160e60ca1954"
+    },
+    {
+      "path": "05_Ordinary_R2\\runtime.utrace",
+      "bytes": 578569427,
+      "sha256": "2acda278c4e4314962f486172cfa83cea6743d111a36c0245205336ce231d0f9"
+    },
+    {
+      "path": "05_Ordinary_R2\\threads.csv",
+      "bytes": 2525,
+      "sha256": "c72827428b273f4a7fa2eae98aed8a1e0e953ddb2ec3c08c463c73110e354ebf"
+    },
+    {
+      "path": "05_Ordinary_R2\\timer-statistics.csv",
+      "bytes": 97122,
+      "sha256": "0251c81c213ac1ae8abb73f2e9e73ac4f949f45e24d1b8fcb009f1f440c1f36f"
+    },
+    {
+      "path": "05_Ordinary_R2\\timers.csv",
+      "bytes": 98841,
+      "sha256": "b7f176cff8c3761252df05fd9262256ba7222a9082f8640d6955e2a5daaf610b"
+    },
+    {
+      "path": "06_ISM_R2\\arguments.txt",
+      "bytes": 1556,
+      "sha256": "402fbfb8d24b3b9d3f316170b315902b057b2679c030d5f574199b0ae76f9398"
+    },
+    {
+      "path": "06_ISM_R2\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "06_ISM_R2\\Distant.png",
+      "bytes": 103717,
+      "sha256": "313dce038163ccc4bc7d231601e3320c1717607e94eab6cde90a63231f6aacd0"
+    },
+    {
+      "path": "06_ISM_R2\\insights-export.log",
+      "bytes": 48993,
+      "sha256": "497be074f6ad5f01711ac44accf33a5a9d9e750850932ddbed06c9bf7e3f712a"
+    },
+    {
+      "path": "06_ISM_R2\\Interior.png",
+      "bytes": 263032,
+      "sha256": "95f60f5d5435d0c0d98fe8c837d53c21cf36ca2a52a9908a367b6db863304465"
+    },
+    {
+      "path": "06_ISM_R2\\Near.png",
+      "bytes": 176115,
+      "sha256": "880483ba83ea61e8f31cf4ff01e40d9b2ace427526b25694a99685b77ca6760c"
+    },
+    {
+      "path": "06_ISM_R2\\process-samples.csv",
+      "bytes": 21623,
+      "sha256": "fe4ebc48189bf7f68c915a897b11af113725aa06e5f0b71303d377fdce9c3028"
+    },
+    {
+      "path": "06_ISM_R2\\runtime.csv",
+      "bytes": 27255483,
+      "sha256": "6fc9f0471cf10a759596a7a9f9f4fca7ab8294e74993be63f844fb2a669b7195"
+    },
+    {
+      "path": "06_ISM_R2\\runtime.log",
+      "bytes": 107374,
+      "sha256": "108f43fafa6eee15198037d91a21a3dd4a82b81d1267a93956c156972924b989"
+    },
+    {
+      "path": "06_ISM_R2\\runtime.utrace",
+      "bytes": 539399119,
+      "sha256": "2e45d88ac0a3444c0c88a2fb7d42a35aec22800e5c577b17b770e9a02004e53f"
+    },
+    {
+      "path": "06_ISM_R2\\threads.csv",
+      "bytes": 2579,
+      "sha256": "3e284a0e5f94a9c7929675aa962ff449de64b2e1f08d6dd0b6e83fd423f29561"
+    },
+    {
+      "path": "06_ISM_R2\\timer-statistics.csv",
+      "bytes": 98426,
+      "sha256": "9f17a802fc80e106dce8edf16dec364888f2996ccf1831107629573ff206344a"
+    },
+    {
+      "path": "06_ISM_R2\\timers.csv",
+      "bytes": 98292,
+      "sha256": "5bea81371da909cd9ef1bbf7909432fa83c40d93ffab75eeafdb4de46e00ee83"
+    },
+    {
+      "path": "07_ISM_R3\\arguments.txt",
+      "bytes": 1556,
+      "sha256": "58f7d84acbd7dbb63ec9f78ace89f52831e8f80893f49570cf467b6e9f8eab1e"
+    },
+    {
+      "path": "07_ISM_R3\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "07_ISM_R3\\Distant.png",
+      "bytes": 103363,
+      "sha256": "7cdfe4c91a81678da230da6a0296ed1db041d8e283f910f59ca0ca39c26c97e0"
+    },
+    {
+      "path": "07_ISM_R3\\insights-export.log",
+      "bytes": 43487,
+      "sha256": "d770b297244c715b96d108e7734840bce3fd0b4ff95db51cf222b815f1d367a8"
+    },
+    {
+      "path": "07_ISM_R3\\Interior.png",
+      "bytes": 263623,
+      "sha256": "48c6bdc7d581aa2c33977ca3324680423ffbb5fd39b99d2a52b391301202f3a1"
+    },
+    {
+      "path": "07_ISM_R3\\Near.png",
+      "bytes": 175902,
+      "sha256": "42dc3d975f49c89faae27a8c4f56206e423935169b964608a3b38439ef47ac8c"
+    },
+    {
+      "path": "07_ISM_R3\\process-samples.csv",
+      "bytes": 26155,
+      "sha256": "09eef0ade425db951432643be5524d2b4605bb83569d77a658b2cce2915d6b70"
+    },
+    {
+      "path": "07_ISM_R3\\runtime.csv",
+      "bytes": 27241975,
+      "sha256": "96d6e8d59bc3abf45161a56ea8c5af437359e12a5891aa81049546c199bceb4b"
+    },
+    {
+      "path": "07_ISM_R3\\runtime.log",
+      "bytes": 107374,
+      "sha256": "a3ef1cdbbf62e0d2091d465d433f1a311d8b3fdf563a28fd72bdf509289fee58"
+    },
+    {
+      "path": "07_ISM_R3\\runtime.utrace",
+      "bytes": 538226515,
+      "sha256": "25ac586d570290ce85ba5d5e2f4c71bad501b78ccf41775ab70b64706a5c076e"
+    },
+    {
+      "path": "07_ISM_R3\\threads.csv",
+      "bytes": 2525,
+      "sha256": "41f3ce6786fd6274ae1cf8810f04fe9e87801f57a58c2357684f80a9eec8eeb6"
+    },
+    {
+      "path": "07_ISM_R3\\timer-statistics.csv",
+      "bytes": 100704,
+      "sha256": "cc954657c7d10f597480e9a13b26a34963a43379c35d3454f5c5e1d4bfb044ba"
+    },
+    {
+      "path": "07_ISM_R3\\timers.csv",
+      "bytes": 98286,
+      "sha256": "e2d95c1bc247888698db46e5a96eefdbbe95bc9a45f3e326e1ccde210f24479c"
+    },
+    {
+      "path": "08_HISM_R3\\arguments.txt",
+      "bytes": 1563,
+      "sha256": "765cc4e7b1c03db1b607487a1161a1440d368c3c933ce993091330fa3e95f8dd"
+    },
+    {
+      "path": "08_HISM_R3\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "08_HISM_R3\\Distant.png",
+      "bytes": 103168,
+      "sha256": "42922613d6eeca676e72f478aafb0fb80d3e984de4aabb7d4fc8e7e3b13f35eb"
+    },
+    {
+      "path": "08_HISM_R3\\insights-export.log",
+      "bytes": 52914,
+      "sha256": "c53db964b3df2d34c819316322782b5f2bb21071caf83bac5b59310be3986dae"
+    },
+    {
+      "path": "08_HISM_R3\\Interior.png",
+      "bytes": 206986,
+      "sha256": "d6ac28531babc767189fab7fda01cbb39bad8e95b720f02adfc9a50ba2a48041"
+    },
+    {
+      "path": "08_HISM_R3\\Near.png",
+      "bytes": 176048,
+      "sha256": "11505e66bfe542cf4bd9aa35af52c4c4554dc9a33ef024a9205e1a7c5441a514"
+    },
+    {
+      "path": "08_HISM_R3\\process-samples.csv",
+      "bytes": 25754,
+      "sha256": "3638c15eaa225f10b70add6fd707ccb519edc1d9c20ff71e8ff7f0e1928b4c21"
+    },
+    {
+      "path": "08_HISM_R3\\runtime.csv",
+      "bytes": 27253683,
+      "sha256": "0c579b8a13e73679797143af074a8f7f73a493cb5e601178bb36b70d420f50bf"
+    },
+    {
+      "path": "08_HISM_R3\\runtime.log",
+      "bytes": 107713,
+      "sha256": "2696246b82834da6bb79b351052e159c94ef68006dca8f47e68ff09da35c5f9f"
+    },
+    {
+      "path": "08_HISM_R3\\runtime.utrace",
+      "bytes": 563057917,
+      "sha256": "dff6e21febf9503b3064b9852538acf3aead32713a5f43576fec11e21c08baef"
+    },
+    {
+      "path": "08_HISM_R3\\threads.csv",
+      "bytes": 2543,
+      "sha256": "5ab3c03543d9dfeb2c8ae5eedae41ac4f35c74459af143aa8d028943e6e62526"
+    },
+    {
+      "path": "08_HISM_R3\\timer-statistics.csv",
+      "bytes": 97626,
+      "sha256": "fafec4a6ad78e3836b19a0b76ebd4522a6e05ec3164b4b1d1807e769ed05f379"
+    },
+    {
+      "path": "08_HISM_R3\\timers.csv",
+      "bytes": 99152,
+      "sha256": "849bc901defff6217f5c4d11ff83d4796d3a71a06fe9836ba200dfd61550c051"
+    },
+    {
+      "path": "09_Ordinary_R3\\arguments.txt",
+      "bytes": 1591,
+      "sha256": "1ceb5868d1044f88fbed8c2eb2ab9cf42926261e31fcf319de23e44bac5b2f64"
+    },
+    {
+      "path": "09_Ordinary_R3\\counters.csv",
+      "bytes": 113639,
+      "sha256": "3f4b66bc0edb51831ca0c5ef43f1b4ddd9fb84fca37bdb35d132ba217894d316"
+    },
+    {
+      "path": "09_Ordinary_R3\\Distant.png",
+      "bytes": 102970,
+      "sha256": "45a0595b5e4ac795b2b75ce48dd956c29683148a163c248d0878f9fe51936f1b"
+    },
+    {
+      "path": "09_Ordinary_R3\\insights-export.log",
+      "bytes": 52991,
+      "sha256": "a9b415bd519fc7dab26d05b653e6faaed5bfc7bb79b4505f9d3f7a5962ec000e"
+    },
+    {
+      "path": "09_Ordinary_R3\\Interior.png",
+      "bytes": 263099,
+      "sha256": "9659991ac754b09749d442bc92cbba35523bdda06f161e4636c7f3ce5eb3aaf0"
+    },
+    {
+      "path": "09_Ordinary_R3\\Near.png",
+      "bytes": 176096,
+      "sha256": "d306707fac8175f9f2a04c90cd5e97cc0b5b6c4ce0c7886450ab63b8d727b9d7"
+    },
+    {
+      "path": "09_Ordinary_R3\\process-samples.csv",
+      "bytes": 22733,
+      "sha256": "8c31209b556cacf8fe52c693f7f9e837742d375495b1cfa65ae1b554581469c7"
+    },
+    {
+      "path": "09_Ordinary_R3\\runtime.csv",
+      "bytes": 27252058,
+      "sha256": "80b84453f3ac02c3f0e4a56cdb06d72f2eb350e72425674268f583e8040baa65"
+    },
+    {
+      "path": "09_Ordinary_R3\\runtime.log",
+      "bytes": 107569,
+      "sha256": "a534ba3889807d6da99a20be6e3b26ebaba23a311b0c803a7a2defa2549669a0"
+    },
+    {
+      "path": "09_Ordinary_R3\\runtime.utrace",
+      "bytes": 590018096,
+      "sha256": "dc98d4daad0aa83b63fcdcdf7be652506c5e1584566d5f64f12c118372e5942f"
+    },
+    {
+      "path": "09_Ordinary_R3\\threads.csv",
+      "bytes": 2543,
+      "sha256": "f37e46ce4eab3165bdbc5bfd63b8312ab604dad8b5dcbff586a0d42befe9f46c"
+    },
+    {
+      "path": "09_Ordinary_R3\\timer-statistics.csv",
+      "bytes": 98726,
+      "sha256": "8e678cf19bad136e8ff66b08a002693f843d99b94d495114dadb8d2baae4b744"
+    },
+    {
+      "path": "09_Ordinary_R3\\timers.csv",
+      "bytes": 97944,
+      "sha256": "9d8ebbd71d8d035ef59341c0ace248f1100568bac0a1937e313c8dbb3f1dc7a4"
+    }
+  ]
+}

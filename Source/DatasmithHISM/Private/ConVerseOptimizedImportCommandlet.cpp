@@ -1,12 +1,17 @@
 #include "ConVerseOptimizedImportCommandlet.h"
 
 #include "ConVerseDatasmithImportService.h"
+#include "ConVerseNaniteSettings.h"
 
 #include "Misc/Parse.h"
 #include "Editor.h"
 #include "FileHelpers.h"
 #include "DatasmithScene.h"
 #include "DatasmithMeshSerialization.h"
+#include "DatasmithSceneFactory.h"
+#include "DatasmithSceneXmlReader.h"
+#include "IDatasmithSceneElements.h"
+#include "Hash/xxhash.h"
 #include "Engine/StaticMesh.h"
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
@@ -53,6 +58,22 @@ namespace ConVerseOptimizedImportCommandlet
 		case EConVerseOptimizedImportStatus::OptimizedReimportBlocked: return TEXT("OptimizedReimportBlocked");
 		case EConVerseOptimizedImportStatus::ManualEditsDetected: return TEXT("ManualEditsDetected");
 		case EConVerseOptimizedImportStatus::RollbackFailed: return TEXT("RollbackFailed");
+		default: return TEXT("Unknown");
+		}
+	}
+
+	static const TCHAR* ToString(EConVerseOptimizedSkipReason Reason)
+	{
+		switch (Reason)
+		{
+		case EConVerseOptimizedSkipReason::HasChildren: return TEXT("HasChildren");
+		case EConVerseOptimizedSkipReason::MissingMeshReference: return TEXT("MissingMeshReference");
+		case EConVerseOptimizedSkipReason::UnresolvedMeshReference: return TEXT("UnresolvedMeshReference");
+		case EConVerseOptimizedSkipReason::UnresolvedMaterialBinding: return TEXT("UnresolvedMaterialBinding");
+		case EConVerseOptimizedSkipReason::NonFiniteTransform: return TEXT("NonFiniteTransform");
+		case EConVerseOptimizedSkipReason::UnsupportedNegativeScale: return TEXT("UnsupportedNegativeScale");
+		case EConVerseOptimizedSkipReason::BelowMinimumInstanceCount: return TEXT("BelowMinimumInstanceCount");
+		case EConVerseOptimizedSkipReason::ExplicitKeepOrdinary: return TEXT("ExplicitKeepOrdinary");
 		default: return TEXT("Unknown");
 		}
 	}
@@ -121,6 +142,41 @@ namespace ConVerseOptimizedImportCommandlet
 			Metrics->SetNumberField(TEXT("ApplyNaniteEnabledMeshes"), Apply->NaniteEnabledMeshes);
 			Metrics->SetNumberField(TEXT("ApplyNaniteRebuiltMeshes"), Apply->NaniteRebuiltMeshes);
 			Metrics->SetNumberField(TEXT("ApplyNaniteBudgetSkippedMeshes"), Apply->NaniteBudgetSkippedMeshes);
+		}
+
+		{
+			const FConVerseGroupingBreakdown& Leftovers = Result.GroupingBreakdown;
+			TSharedRef<FJsonObject> Breakdown = MakeShared<FJsonObject>();
+			Breakdown->SetNumberField(TEXT("EligibleActors"), Result.EligibleSourceActors);
+			Breakdown->SetNumberField(TEXT("ParentSplitActors"), Leftovers.ParentSplitActors);
+			Breakdown->SetNumberField(TEXT("SettingsSplitActors"), Leftovers.SettingsSplitActors);
+			Breakdown->SetNumberField(TEXT("PayloadDuplicateActors"), Leftovers.PayloadDuplicateActors);
+			Breakdown->SetNumberField(TEXT("UniqueMeshActors"), Leftovers.UniqueMeshActors);
+			Breakdown->SetNumberField(TEXT("NoSingleLeverActors"), Leftovers.NoSingleLeverActors);
+			Breakdown->SetNumberField(TEXT("HasChildrenCouldGroup"), Leftovers.HasChildrenCouldGroup);
+			Breakdown->SetNumberField(TEXT("NegativeScaleCouldGroup"), Leftovers.NegativeScaleCouldGroup);
+			Breakdown->SetNumberField(TEXT("MeshesWithPayloadHash"), Leftovers.MeshesWithPayloadHash);
+			TSharedRef<FJsonObject> Fields = MakeShared<FJsonObject>();
+			for (const TPair<FString, int32>& Field : Leftovers.SettingsSplitFields) Fields->SetNumberField(Field.Key, Field.Value);
+			Breakdown->SetObjectField(TEXT("SettingsSplitFields"), Fields);
+			TSharedRef<FJsonObject> Skips = MakeShared<FJsonObject>();
+			for (const FConVerseOptimizedSkipCount& Count : Result.SkipCounts) Skips->SetNumberField(ToString(Count.Reason), Count.Count);
+			Breakdown->SetObjectField(TEXT("SkipCounts"), Skips);
+			Breakdown->SetNumberField(TEXT("SceneSpreadCm"), Leftovers.SceneSpreadCm);
+			Breakdown->SetNumberField(TEXT("MedianGroupSpreadCm"), Leftovers.MedianGroupSpreadCm);
+			Breakdown->SetNumberField(TEXT("SceneSpanningGroups"), Leftovers.SceneSpanningGroups);
+			TArray<TSharedPtr<FJsonValue>> Widest;
+			for (const FConVerseGroupingBreakdown::FGroupSpread& Group : Leftovers.WidestGroups)
+			{
+				TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+				Row->SetStringField(TEXT("GroupId"), Group.GroupId);
+				Row->SetStringField(TEXT("MeshElement"), Group.MeshElement);
+				Row->SetNumberField(TEXT("Instances"), Group.Instances);
+				Row->SetNumberField(TEXT("SpreadCm"), Group.SpreadCm);
+				Widest.Add(MakeShared<FJsonValueObject>(Row));
+			}
+			Breakdown->SetArrayField(TEXT("WidestGroups"), Widest);
+			Metrics->SetObjectField(TEXT("GroupingBreakdown"), Breakdown);
 		}
 
 		TSharedRef<FJsonObject> Stages = MakeShared<FJsonObject>();
@@ -197,6 +253,174 @@ namespace ConVerseOptimizedImportCommandlet
 		}
 		return bWithinBudget;
 	}
+
+	// Read-only grouping-plan survey: counts mesh elements whose payloads match once translation is
+	// removed (Revit bakes many copies' positions into their geometry). Writes only OutputFile.
+	static int32 RunGeometrySurvey(const FString& SourceFile, const FString& OutputFile, int32 MinInstances)
+	{
+		TSharedRef<IDatasmithScene> Scene = FDatasmithSceneFactory::CreateScene(TEXT("GeometrySurvey"));
+		FDatasmithSceneXmlReader Reader;
+		if (!Reader.ParseFile(SourceFile, Scene))
+		{
+			UE_LOG(LogConVerseOptimizedImportCommandlet, Error, TEXT("Could not parse '%s'."), *SourceFile);
+			return 1;
+		}
+
+		TMap<FString, int32> Placements;
+		int32 MeshActors = 0;
+		TFunction<void(const TSharedPtr<IDatasmithActorElement>&)> Visit = [&](const TSharedPtr<IDatasmithActorElement>& Actor)
+		{
+			if (!Actor.IsValid()) return;
+			if (Actor->IsA(EDatasmithElementType::StaticMeshActor))
+			{
+				++MeshActors;
+				++Placements.FindOrAdd(StaticCastSharedPtr<IDatasmithMeshActorElement>(Actor)->GetStaticMeshPathName());
+			}
+			for (int32 Child = 0; Child < Actor->GetChildrenCount(); ++Child) Visit(Actor->GetChild(Child));
+		};
+		for (int32 Index = 0; Index < Scene->GetActorsCount(); ++Index) Visit(Scene->GetActor(Index));
+
+		// Exact: payload as stored. Shape: sorted vertex positions relative to the centroid.
+		// ShapeAndUV: ordered centroid-relative positions, triangle corners, normals and UV0. All include material slots.
+		enum EKind { Exact, Shape, ShapeAndUV, KindCount };
+		const TCHAR* KindNames[KindCount] = { TEXT("Exact"), TEXT("Shape"), TEXT("ShapeAndUV") };
+		struct FClass { int32 Meshes = 0; int32 Actors = 0; FString Label; };
+		TMap<uint64, FClass> Classes[KindCount];
+		TMap<FString, uint64> MeshSignature[KindCount];
+		int32 Unreadable = 0;
+
+		for (int32 Index = 0; Index < Scene->GetMeshesCount(); ++Index)
+		{
+			const TSharedPtr<IDatasmithMeshElement> Mesh = Scene->GetMesh(Index);
+			const int32* Uses = Mesh.IsValid() ? Placements.Find(Mesh->GetName()) : nullptr;
+			if (!Uses) continue;
+			FString File = Mesh->GetFile();
+			if (FPaths::IsRelative(File)) File = FPaths::GetPath(SourceFile) / File;
+			const FDatasmithPackedMeshes Packed = GetDatasmithMeshFromFile(File);
+			const FDatasmithMeshModels* Model = Packed.Meshes.FindByPredicate(
+				[](const FDatasmithMeshModels& Candidate) { return !Candidate.bIsCollisionMesh && !Candidate.SourceModels.IsEmpty(); });
+			if (!Model) { ++Unreadable; continue; }
+			const FMeshDescription& Description = Model->SourceModels[0];
+			const FStaticMeshConstAttributes Attributes(Description);
+			const auto Positions = Attributes.GetVertexPositions();
+			const auto UVs = Attributes.GetVertexInstanceUVs();
+			const auto Normals = Attributes.GetVertexInstanceNormals();
+
+			TArray<FString> Slots;
+			for (int32 Slot = 0; Slot < Mesh->GetMaterialSlotCount(); ++Slot)
+			{
+				const TSharedPtr<const IDatasmithMaterialIDElement> Material = Mesh->GetMaterialSlotAt(Slot);
+				if (Material.IsValid()) Slots.Add(FString::Printf(TEXT("%d:%s"), Material->GetId(), Material->GetName()));
+			}
+			Slots.Sort();
+			const FString SlotText = FString::Join(Slots, TEXT(";"));
+
+			FVector3d Centroid = FVector3d::ZeroVector;
+			for (FVertexID Vertex : Description.Vertices().GetElementIDs()) Centroid += FVector3d(Positions[Vertex]);
+			Centroid /= FMath::Max(1, Description.Vertices().Num());
+
+			// 1 mm position and 1e-3 UV/normal quanta: coarse enough to absorb float noise at kilometre offsets.
+			auto Quantize = [](double Value, double Scale) { return FMath::RoundToInt64(Value * Scale); };
+			TArray<int64> Streams[KindCount];
+			TArray<FIntVector3> Sorted;
+			TMap<FVertexID, int32> Ordinal;
+			for (FVertexID Vertex : Description.Vertices().GetElementIDs())
+			{
+				const FVector3d P(Positions[Vertex]);
+				const FVector3d C = P - Centroid;
+				Ordinal.Add(Vertex, Ordinal.Num());
+				Streams[Exact].Append({ Quantize(P.X, 10.0), Quantize(P.Y, 10.0), Quantize(P.Z, 10.0) });
+				Streams[ShapeAndUV].Append({ Quantize(C.X, 10.0), Quantize(C.Y, 10.0), Quantize(C.Z, 10.0) });
+				Sorted.Add(FIntVector3(int32(Quantize(C.X, 10.0)), int32(Quantize(C.Y, 10.0)), int32(Quantize(C.Z, 10.0))));
+			}
+			Sorted.Sort([](const FIntVector3& A, const FIntVector3& B)
+			{
+				return A.X != B.X ? A.X < B.X : A.Y != B.Y ? A.Y < B.Y : A.Z < B.Z;
+			});
+			for (const FIntVector3& P : Sorted) Streams[Shape].Append({ P.X, P.Y, P.Z });
+			Streams[Shape].Add(Description.Triangles().Num());
+			for (FTriangleID Triangle : Description.Triangles().GetElementIDs())
+			{
+				const auto Corners = Description.GetTriangleVertexInstances(Triangle);
+				for (int32 Corner = 0; Corner < 3; ++Corner)
+				{
+					const int32 VertexOrdinal = Ordinal[Description.GetVertexInstanceVertex(Corners[Corner])];
+					const FVector2f UV = UVs.GetNumChannels() > 0 ? UVs.Get(Corners[Corner], 0) : FVector2f::ZeroVector;
+					const FVector3f N = Normals[Corners[Corner]];
+					for (EKind Kind : { Exact, ShapeAndUV })
+					{
+						Streams[Kind].Append({ VertexOrdinal, Quantize(UV.X, 1000.0), Quantize(UV.Y, 1000.0),
+							Quantize(N.X, 1000.0), Quantize(N.Y, 1000.0), Quantize(N.Z, 1000.0) });
+					}
+				}
+			}
+			for (int32 Kind = 0; Kind < KindCount; ++Kind)
+			{
+				const uint64 Signature = FXxHash64::HashBuffer(Streams[Kind].GetData(), Streams[Kind].Num() * sizeof(int64)).Hash
+					^ GetTypeHash(SlotText);
+				MeshSignature[Kind].Add(Mesh->GetName(), Signature);
+				FClass& Class = Classes[Kind].FindOrAdd(Signature);
+				++Class.Meshes;
+				Class.Actors += *Uses;
+				if (Class.Label.IsEmpty()) Class.Label = Mesh->GetLabel();
+			}
+		}
+
+		int32 Baseline = 0, PlacedOnce = 0;
+		for (const TPair<FString, int32>& Use : Placements)
+		{
+			Baseline += Use.Value >= MinInstances ? Use.Value : 0;
+			PlacedOnce += Use.Value == 1 ? 1 : 0;
+		}
+		const TSharedRef<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("Source"), SourceFile);
+		Report->SetNumberField(TEXT("MinInstances"), MinInstances);
+		Report->SetNumberField(TEXT("MeshActors"), MeshActors);
+		Report->SetNumberField(TEXT("PlacedMeshElements"), Placements.Num());
+		Report->SetNumberField(TEXT("PlacedOnceMeshElements"), PlacedOnce);
+		Report->SetNumberField(TEXT("UnreadablePayloads"), Unreadable);
+		Report->SetNumberField(TEXT("ActorsGroupableByMeshElement"), Baseline);
+		UE_LOG(LogConVerseOptimizedImportCommandlet, Display,
+			TEXT("Geometry survey: %d mesh actors, %d placed mesh elements (%d placed once), %d unreadable; %d actors groupable by mesh element."),
+			MeshActors, Placements.Num(), PlacedOnce, Unreadable, Baseline);
+		for (int32 Kind = 0; Kind < KindCount; ++Kind)
+		{
+			int32 Groupable = 0, PlacedOnceRescued = 0;
+			for (const TPair<FString, uint64>& Entry : MeshSignature[Kind])
+			{
+				if (Placements[Entry.Key] == 1 && Classes[Kind][Entry.Value].Actors >= MinInstances) ++PlacedOnceRescued;
+			}
+			TArray<FClass> Ranked;
+			for (const TPair<uint64, FClass>& Entry : Classes[Kind])
+			{
+				Groupable += Entry.Value.Actors >= MinInstances ? Entry.Value.Actors : 0;
+				Ranked.Add(Entry.Value);
+			}
+			Ranked.Sort([](const FClass& A, const FClass& B) { return A.Actors > B.Actors; });
+			const TSharedRef<FJsonObject> Section = MakeShared<FJsonObject>();
+			Section->SetNumberField(TEXT("DistinctSignatures"), Classes[Kind].Num());
+			Section->SetNumberField(TEXT("ActorsGroupable"), Groupable);
+			Section->SetNumberField(TEXT("PlacedOnceMeshesRescued"), PlacedOnceRescued);
+			TArray<TSharedPtr<FJsonValue>> Top;
+			for (int32 Rank = 0; Rank < FMath::Min(10, Ranked.Num()); ++Rank)
+			{
+				const TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+				Row->SetStringField(TEXT("Label"), Ranked[Rank].Label);
+				Row->SetNumberField(TEXT("Meshes"), Ranked[Rank].Meshes);
+				Row->SetNumberField(TEXT("Actors"), Ranked[Rank].Actors);
+				Top.Add(MakeShared<FJsonValueObject>(Row));
+			}
+			Section->SetArrayField(TEXT("Largest"), Top);
+			Report->SetObjectField(KindNames[Kind], Section);
+			UE_LOG(LogConVerseOptimizedImportCommandlet, Display,
+				TEXT("  %s: %d distinct signatures, %d actors groupable, %d placed-once meshes rescued."),
+				KindNames[Kind], Classes[Kind].Num(), Groupable, PlacedOnceRescued);
+		}
+
+		FString Json;
+		FJsonSerializer::Serialize(Report, TJsonWriterFactory<>::Create(&Json));
+		return FFileHelper::SaveStringToFile(Json, *OutputFile) ? 0 : 1;
+	}
 }
 
 int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
@@ -207,6 +431,14 @@ int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
 	TArray<FString> Switches;
 	TMap<FString, FString> Arguments;
 	ParseCommandLine(*Params, Tokens, Switches, Arguments);
+
+	if (const FString* SurveySource = Arguments.Find(TEXT("GeometrySurvey")))
+	{
+		const FString* SurveyFile = Arguments.Find(TEXT("SurveyFile"));
+		const FString* MinText = Arguments.Find(TEXT("MinInstances"));
+		if (!SurveyFile) return 1;
+		return RunGeometrySurvey(*SurveySource, *SurveyFile, MinText ? FMath::Max(2, FCString::Atoi(**MinText)) : 2);
+	}
 
 	if (const FString* MeshFile = Arguments.Find(TEXT("InspectMesh")))
 	{
@@ -554,7 +786,7 @@ int32 UConVerseOptimizedImportCommandlet::Main(const FString& Params)
 					const auto Vertices = Description->GetTriangleVertices(Triangle);
 					Obj += FString::Printf(TEXT("f %d %d %d\n"), Indices[Vertices[0]], Indices[Vertices[1]], Indices[Vertices[2]]);
 				}
-				Inventory += FString::Printf(TEXT("%s,%d,%d,%d,%d\n"), *Pair.Key.ToString(), Description->Vertices().Num(), Description->Triangles().Num(), Mesh->GetNaniteSettings().bEnabled, Mesh->HasValidNaniteData());
+				Inventory += FString::Printf(TEXT("%s,%d,%d,%d,%d\n"), *Pair.Key.ToString(), Description->Vertices().Num(), Description->Triangles().Num(), ConVerseGetNaniteSettings(*Mesh).bEnabled, Mesh->HasValidNaniteData());
 				if (!FFileHelper::SaveStringToFile(Obj, *(*Directory / (Pair.Key.ToString() + TEXT(".obj"))))) return 1;
 			}
 			if (!FFileHelper::SaveStringToFile(Inventory, *(*Directory / TEXT("meshes.csv")))) return 1;

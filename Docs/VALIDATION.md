@@ -7,6 +7,10 @@ Current build and test status is kept in the [handoff](../HANDOFF.md#current-sta
 Close Unreal Editor before either command. If Live Coding blocks the build, close the editor or disable Live Coding through its normal workflow; do not kill an editor holding user work. IntelliSense error output does not substitute for this build. The host project is `C:\Unreal\Projects\AdvancedHISM`; adjust paths for another checkout.
 
 ```powershell
+& 'C:\Program Files\Epic Games\UE_5.6\Engine\Build\BatchFiles\Build.bat' `
+  AdvancedHISMEditor Win64 Development `
+  -Project='C:\Unreal\Projects\AdvancedHISM\AdvancedHISM.uproject' -WaitMutex
+
 & 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat' `
   AdvancedHISMEditor Win64 Development `
   -Project='C:\Unreal\Projects\AdvancedHISM\AdvancedHISM.uproject' -WaitMutex
@@ -17,6 +21,8 @@ Close Unreal Editor before either command. If Live Coding blocks the build, clos
   -unattended -nopause -nosplash -NullRHI `
   '-abslog=C:\Unreal\Projects\AdvancedHISM\Saved\Logs\Automation.txt'
 ```
+
+The editor target has source-build evidence on UE 5.6.1 and 5.8.3. When switching engine versions, regenerate shared host/plugin `Intermediate` output for the selected engine before building; see the [compatibility record](Validation/2026-10-06-engine-compatibility.md). Full UE 5.6 automation has not been established.
 
 Capture each process exit code. Inspect `Test Completed`, `LogAutomationController: Error:`, and the final test-complete exit marker. Optional LinuxArm64/VisionOS validation messages do not block runs.
 
@@ -62,7 +68,7 @@ This negative joist fixture proves source preservation, not restored diagonals. 
 | Lifecycle | Unchanged drift, changed source, manual edits, sidecars, stock refusal, injected failure, no duplicate active geometry | Generated lifecycle/rollback/ownership tests pass; complete real-model replacement and sidecar scenarios remain. |
 | Persistence | Save/reopen, failed saves, named-level rename, interrupted attempt, uncertain ownership, source immutability | Save/reopen, named-copy refusal, save-with-drift, real read-only asset/map failures, bounded capacity simulation and actual pre-commit interruption/restart pass. Live UI, Content Browser rename/move, other crash windows and actual full-volume behavior remain. |
 | Packaging | Clean Windows cook, geometry/materials/textures/lights, collision, metadata | Development cook and NullRHI/DX12 runtime smoke pass; ordinary texture/UV and rendered breadth remain. |
-| Performance | Fixed baseline/candidate source, import/build time, memory, CPU/GPU camera paths | Import metrics implemented. CWM ordinary/ISM/HISM maps are cooked; manual fixed-camera runtime capture remains pending. Preparation is recorded in [2026-10-02 runtime comparison](Validation/2026-10-02-runtime-comparison.md). |
+| Performance | Fixed baseline/candidate source, import/build time, memory, CPU/GPU camera paths | Import metrics implemented. [2026-10-15 packaged CWM comparison](Validation/2026-10-15-runtime-comparison.md): nine runs, three fixed views, 27 validated windows, CPU/GPU timings, draw calls, memory, screenshots and decoded traces. Preliminary only: busy-machine repeat noise, increased interior draws and a HISM lighting/shadow difference leave the release gate open. Diagnose and repeat under idle/controlled conditions before budgets or a speedup claim. |
 
 ## Interactive and fault checks
 

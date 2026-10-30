@@ -57,7 +57,50 @@ enum class EConVerseOptimizedSkipReason : uint8
 	UnresolvedMaterialBinding,
 	NonFiniteTransform,
 	UnsupportedNegativeScale,
-	BelowMinimumInstanceCount
+	BelowMinimumInstanceCount,
+	// Appended so existing values keep their ordinals; previously counted as HasChildren.
+	ExplicitKeepOrdinary
+};
+
+/**
+ * Read-only explanation of why eligible actors stayed ordinary and how spread out the planned groups
+ * are. Each below-minimum actor is counted once, in the first class that applies, in declaration
+ * order. Reporting only: nothing here participates in PlanId or changes generated output.
+ */
+struct FConVerseGroupingBreakdown
+{
+	// Below-minimum actors whose group key without the parent would reach the minimum.
+	int32 ParentSplitActors = 0;
+	// Below-minimum actors whose mesh and parent alone would reach the minimum.
+	int32 SettingsSplitActors = 0;
+	// Below-minimum actors that would reach the minimum if mesh elements with an identical payload hash were one mesh.
+	int32 PayloadDuplicateActors = 0;
+	// Below-minimum actors whose mesh element is placed once in the whole scene.
+	int32 UniqueMeshActors = 0;
+	int32 NoSingleLeverActors = 0;
+	// Per settings field, the settings-split actors whose same-mesh, same-parent siblings differ in it.
+	TMap<FString, int32> SettingsSplitFields;
+	// Skipped actors that would reach the minimum with eligible siblings sharing their full group key
+	// if their skip rule alone were lifted.
+	int32 HasChildrenCouldGroup = 0;
+	int32 NegativeScaleCouldGroup = 0;
+	// Mesh elements whose source declares a payload hash; the payload class can only see these.
+	int32 MeshesWithPayloadHash = 0;
+
+	// Instance pivot spread, the largest axis of the world-space box around a group's instance
+	// locations. Mesh extents are not included.
+	double SceneSpreadCm = 0.0;
+	double MedianGroupSpreadCm = 0.0;
+	// Groups whose spread is at least half the scene spread.
+	int32 SceneSpanningGroups = 0;
+	struct FGroupSpread
+	{
+		FString GroupId;
+		FString MeshElement;
+		int32 Instances = 0;
+		double SpreadCm = 0.0;
+	};
+	TArray<FGroupSpread> WidestGroups;
 };
 
 enum class EConVerseStitchingTechnique : uint8
@@ -135,7 +178,11 @@ enum class EConVerseOptimizedImportFailureInjection : uint8
 	// intensity) just before verification runs. Nothing is faked: VerifyLights compares against the
 	// source element and fails on its own terms. Shared by the per-field light diagnostic test and
 	// the failed-verification-summary test, which both need a genuine, isolated light failure.
-	CorruptLightBeforeVerification
+	CorruptLightBeforeVerification,
+	// Before verification, remove one group's mesh from the imported UDatasmithScene map and clear it
+	// from that group's components: the state Datasmith leaves when it cannot create a mesh asset.
+	// Exercises accepting an import in which some meshes failed.
+	DropMeshBeforeVerification
 };
 
 /** Transient work notifications. These do not participate in output identity or persistence. */
@@ -281,6 +328,7 @@ struct FConVerseOptimizedImportResult
 	int32 BelowThresholdActorCount = 0;
 	int32 SkippedActorCount = 0;
 	TArray<FConVerseOptimizedSkipCount> SkipCounts;
+	FConVerseGroupingBreakdown GroupingBreakdown;
 	TArray<FConVerseOptimizedGroupVerification> GroupVerification;
 	TArray<FString> Diagnostics;
 	/** Referenced texture/mesh files absent from disk, as "<element>: <path>". */
@@ -359,6 +407,29 @@ struct FConVerseOptimizedImportResult
 	bool bSourceLoaded = false;
 	bool bImportSucceeded = false;
 	bool bVerificationSucceeded = false;
+};
+
+/**
+ * Three-way split of a result's source mesh actors for the panel's conversion bar. The parts are
+ * disjoint and sum to TotalSourceMeshActors: converted instances, actors a further grouping step
+ * could convert (Amendment 20 levers), and actors that stay ordinary.
+ */
+struct FConVerseConversionSummary
+{
+	bool bValid = false;
+	// True when the counts describe a verified import rather than an analysis plan.
+	bool bImported = false;
+	int32 TotalSourceMeshActors = 0;
+	int32 GroupCount = 0;
+	int32 ConvertedActors = 0;
+	int32 RecoverableActors = 0;
+	int32 RemainingActors = 0;
+	// Mesh elements placed once in the whole scene; each is one remaining ordinary actor.
+	int32 UniqueMeshes = 0;
+
+	double ConvertedFraction() const { return TotalSourceMeshActors > 0 ? double(ConvertedActors) / TotalSourceMeshActors : 0.0; }
+	double RecoverableFraction() const { return TotalSourceMeshActors > 0 ? double(RecoverableActors) / TotalSourceMeshActors : 0.0; }
+	double RemainingFraction() const { return TotalSourceMeshActors > 0 ? double(RemainingActors) / TotalSourceMeshActors : 0.0; }
 };
 
 /**
@@ -455,6 +526,8 @@ public:
 
 	static FConVerseOptimizedImportResult Analyze(const FConVerseOptimizedImportOptions& Options);
 	static FConVerseOptimizedImportResult ImportAndVerify(const FConVerseOptimizedImportOptions& Options);
+	/** Converted / recoverable / remaining split of a result; invalid when the result has no source counts. */
+	static FConVerseConversionSummary SummarizeConversion(const FConVerseOptimizedImportResult& Result);
 
 	/**
 	 * Enables Nanite on the meshes of a committed, verified, unmodified import and updates its tracked

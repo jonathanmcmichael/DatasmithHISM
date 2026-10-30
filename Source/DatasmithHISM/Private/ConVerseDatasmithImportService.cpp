@@ -44,6 +44,7 @@
 #include "Misc/Paths.h"
 #include "Misc/MessageDialog.h"
 #include "Misc/ScopedSlowTask.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/SecureHash.h"
 #include "Containers/StringConv.h"
 #include "ObjectTools.h"
@@ -140,6 +141,23 @@ namespace ConVerseDatasmithImport
 		EDatasmithActorMobilityType Mobility = EDatasmithActorMobilityType::Static;
 	};
 
+	// Group-key fields of one source mesh actor, kept for the read-only grouping breakdown.
+	struct FKeyRecord
+	{
+		FString SourceElementName;
+		FString ParentPath;
+		FString MeshElementName;
+		FString Overrides;
+		FString Layer;
+		bool bIsComponent = false;
+		bool bVisible = true;
+		bool bCastShadow = true;
+		EDatasmithActorMobilityType Mobility = EDatasmithActorMobilityType::Static;
+		// Unset for eligible actors.
+		TOptional<EConVerseOptimizedSkipReason> SkipReason;
+		FVector WorldLocation = FVector::ZeroVector;
+	};
+
 	struct FPlan
 	{
 		int32 SchemaVersion = ContractVersion;
@@ -165,6 +183,10 @@ namespace ConVerseDatasmithImport
 		TMap<EConVerseOptimizedSkipReason, int32> SkipCounts;
 		TArray<FGroupValue> Groups;
 		TArray<FGroupValue> AllMeshActors;
+		TArray<FKeyRecord> KeyRecords;
+		FConVerseGroupingBreakdown Breakdown;
+		// Source element name -> inspection outcome for actors that stay ordinary.
+		TMap<FString, FString> OrdinaryOutcomes;
 	};
 
 	struct FGroupBucketKey
@@ -274,6 +296,7 @@ namespace ConVerseDatasmithImport
 		case EConVerseOptimizedSkipReason::NonFiniteTransform: return TEXT("NonFiniteTransform");
 		case EConVerseOptimizedSkipReason::UnsupportedNegativeScale: return TEXT("UnsupportedNegativeScale");
 		case EConVerseOptimizedSkipReason::BelowMinimumInstanceCount: return TEXT("BelowMinimumInstanceCount");
+		case EConVerseOptimizedSkipReason::ExplicitKeepOrdinary: return TEXT("ExplicitKeepOrdinary");
 		default: return TEXT("Unknown");
 		}
 	}
@@ -740,9 +763,23 @@ namespace ConVerseDatasmithImport
 			CaptureActorSourceData(Scene, MeshActor, SourceCandidate);
 			if (const auto* Mesh = MeshesByName.Find(SourceMesh.MeshElementName))
 				ResolveEffectiveMaterials(**Mesh, *MeshActor, MaterialNames, SourceMesh.EffectiveMaterials);
+			FKeyRecord& KeyRecord = Plan.KeyRecords.AddDefaulted_GetRef();
+			KeyRecord.SourceElementName = MeshActor->GetName();
+			KeyRecord.ParentPath = ParentPath;
+			KeyRecord.MeshElementName = SourceMesh.MeshElementName;
+			KeyRecord.Overrides = BuildOverrideSignature(*MeshActor);
+			KeyRecord.Layer = MeshActor->GetLayer();
+			KeyRecord.bIsComponent = SourceMesh.bIsComponent;
+			KeyRecord.bVisible = SourceMesh.bVisible;
+			KeyRecord.bCastShadow = SourceMesh.bCastShadow;
+			KeyRecord.Mobility = SourceMesh.Mobility;
+			KeyRecord.WorldLocation = SourceCandidate.WorldTransform.GetLocation();
 			if (Actor->GetChildrenCount() > 0 || Plan.Options.Processing.KeepOrdinaryMeshElements.Contains(MeshActor->GetStaticMeshPathName()))
 			{
-				IncrementSkip(Plan, EConVerseOptimizedSkipReason::HasChildren);
+				KeyRecord.SkipReason = Actor->GetChildrenCount() > 0
+					? EConVerseOptimizedSkipReason::HasChildren
+					: EConVerseOptimizedSkipReason::ExplicitKeepOrdinary;
+				IncrementSkip(Plan, KeyRecord.SkipReason.GetValue());
 			}
 			else
 			{
@@ -782,6 +819,7 @@ namespace ConVerseDatasmithImport
 
 				if (!bEligible)
 				{
+					KeyRecord.SkipReason = FailureReason;
 					IncrementSkip(Plan, FailureReason);
 				}
 				else
@@ -827,6 +865,181 @@ namespace ConVerseDatasmithImport
 				Scene, Actor->GetChild(ChildIndex), ActorPath, ChildIndex, TraversalOrdinal,
 				MeshesByName, MaterialNames, Plan, Buckets, Work);
 		}
+	}
+
+	static FString SettingsSignature(const FKeyRecord& Record)
+	{
+		FString Key;
+		AppendField(Key, TEXT("Overrides"), Record.Overrides);
+		AppendField(Key, TEXT("Layer"), Record.Layer);
+		AppendField(Key, TEXT("Component"), Record.bIsComponent ? TEXT("1") : TEXT("0"));
+		AppendField(Key, TEXT("Visible"), Record.bVisible ? TEXT("1") : TEXT("0"));
+		AppendField(Key, TEXT("CastShadow"), Record.bCastShadow ? TEXT("1") : TEXT("0"));
+		AppendField(Key, TEXT("Mobility"), FString::FromInt(static_cast<int32>(Record.Mobility)));
+		return Key;
+	}
+
+	// Mesh element default material slots, so a payload match also requires the same default materials.
+	static FString MeshSlotSignature(const IDatasmithMeshElement& Mesh)
+	{
+		FString Signature;
+		for (int32 Index = 0; Index < Mesh.GetMaterialSlotCount(); ++Index)
+		{
+			if (const TSharedPtr<const IDatasmithMaterialIDElement> Slot = Mesh.GetMaterialSlotAt(Index))
+			{
+				AppendField(Signature, FString::FromInt(Slot->GetId()), Slot->GetName());
+			}
+		}
+		return Signature;
+	}
+
+	/**
+	 * Read-only explanation of the plan's ordinary leftovers and group spread. Runs after groups are
+	 * final; it never changes Plan.Groups, skip counts or PlanId inputs.
+	 */
+	static void ComputeGroupingBreakdown(FPlan& Plan, const TMap<FString, TSharedPtr<IDatasmithMeshElement>>& MeshesByName)
+	{
+		FConVerseGroupingBreakdown& Breakdown = Plan.Breakdown;
+		const int32 Minimum = Plan.Options.MinimumInstanceCount;
+		TSet<FString> Converted;
+		for (const FGroupValue& Group : Plan.Groups)
+			for (const FCandidateValue& Candidate : Group.Candidates) Converted.Add(Candidate.SourceElementName);
+
+		TMap<FString, FString> PayloadByMesh;
+		TMap<FString, int32> MeshesPerPayload;
+		for (const TPair<FString, TSharedPtr<IDatasmithMeshElement>>& Pair : MeshesByName)
+		{
+			const FMD5Hash Hash = Pair.Value->GetFileHash();
+			if (!Hash.IsValid()) continue;
+			++Breakdown.MeshesWithPayloadHash;
+			FString Payload;
+			AppendField(Payload, TEXT("Hash"), LexToString(Hash));
+			AppendField(Payload, TEXT("Slots"), MeshSlotSignature(*Pair.Value));
+			++MeshesPerPayload.FindOrAdd(Payload);
+			PayloadByMesh.Add(Pair.Key, MoveTemp(Payload));
+		}
+
+		auto Join = [](const FString& Left, const FString& Right)
+		{
+			FString Key;
+			AppendField(Key, TEXT("A"), Left);
+			AppendField(Key, TEXT("B"), Right);
+			return Key;
+		};
+		auto FullKey = [&Join](const FKeyRecord& Record)
+		{
+			return Join(Join(Record.ParentPath, Record.MeshElementName), SettingsSignature(Record));
+		};
+
+		TMap<FString, int32> FullCounts, NoParentCounts, MeshParentCounts, PayloadCounts, Placements;
+		TMap<EConVerseOptimizedSkipReason, TMap<FString, int32>> BlockedCounts;
+		TMap<FString, TMap<FString, TSet<FString>>> FieldValues;
+		for (const FKeyRecord& Record : Plan.KeyRecords)
+		{
+			++Placements.FindOrAdd(Record.MeshElementName);
+			if (Record.SkipReason.IsSet())
+			{
+				++BlockedCounts.FindOrAdd(Record.SkipReason.GetValue()).FindOrAdd(FullKey(Record));
+				continue;
+			}
+			const FString Settings = SettingsSignature(Record);
+			const FString MeshParent = Join(Record.ParentPath, Record.MeshElementName);
+			++FullCounts.FindOrAdd(FullKey(Record));
+			++NoParentCounts.FindOrAdd(Join(Record.MeshElementName, Settings));
+			++MeshParentCounts.FindOrAdd(MeshParent);
+			if (const FString* Payload = PayloadByMesh.Find(Record.MeshElementName))
+				++PayloadCounts.FindOrAdd(Join(Join(Record.ParentPath, *Payload), Settings));
+			TMap<FString, TSet<FString>>& Fields = FieldValues.FindOrAdd(MeshParent);
+			Fields.FindOrAdd(TEXT("Overrides")).Add(Record.Overrides);
+			Fields.FindOrAdd(TEXT("Layer")).Add(Record.Layer);
+			Fields.FindOrAdd(TEXT("Component")).Add(Record.bIsComponent ? TEXT("1") : TEXT("0"));
+			Fields.FindOrAdd(TEXT("Visible")).Add(Record.bVisible ? TEXT("1") : TEXT("0"));
+			Fields.FindOrAdd(TEXT("CastShadow")).Add(Record.bCastShadow ? TEXT("1") : TEXT("0"));
+			Fields.FindOrAdd(TEXT("Mobility")).Add(FString::FromInt(static_cast<int32>(Record.Mobility)));
+		}
+
+		for (const FKeyRecord& Record : Plan.KeyRecords)
+		{
+			if (Record.SkipReason.IsSet())
+			{
+				const EConVerseOptimizedSkipReason Reason = Record.SkipReason.GetValue();
+				if (Reason == EConVerseOptimizedSkipReason::HasChildren || Reason == EConVerseOptimizedSkipReason::UnsupportedNegativeScale)
+				{
+					const FString Key = FullKey(Record);
+					const int32* Eligible = FullCounts.Find(Key);
+					if ((Eligible ? *Eligible : 0) + BlockedCounts[Reason][Key] >= Minimum)
+						++(Reason == EConVerseOptimizedSkipReason::HasChildren ? Breakdown.HasChildrenCouldGroup : Breakdown.NegativeScaleCouldGroup);
+				}
+				Plan.OrdinaryOutcomes.Add(Record.SourceElementName,
+					Reason == EConVerseOptimizedSkipReason::ExplicitKeepOrdinary ? FString(TEXT("Ordinary: explicit exception"))
+						: TEXT("Ordinary: ") + SkipReasonName(Reason));
+				continue;
+			}
+			if (Converted.Contains(Record.SourceElementName)) continue;
+
+			const FString Settings = SettingsSignature(Record);
+			const FString MeshParent = Join(Record.ParentPath, Record.MeshElementName);
+			const FString* Payload = PayloadByMesh.Find(Record.MeshElementName);
+			const TCHAR* Lever = nullptr;
+			if (NoParentCounts.FindRef(Join(Record.MeshElementName, Settings)) >= Minimum)
+			{
+				++Breakdown.ParentSplitActors;
+				Lever = TEXT("parent split");
+			}
+			else if (MeshParentCounts.FindRef(MeshParent) >= Minimum)
+			{
+				++Breakdown.SettingsSplitActors;
+				Lever = TEXT("settings split");
+				for (const TPair<FString, TSet<FString>>& Field : FieldValues.FindChecked(MeshParent))
+					if (Field.Value.Num() > 1) ++Breakdown.SettingsSplitFields.FindOrAdd(Field.Key);
+			}
+			else if (Payload && MeshesPerPayload.FindRef(*Payload) > 1
+				&& PayloadCounts.FindRef(Join(Join(Record.ParentPath, *Payload), Settings)) >= Minimum)
+			{
+				++Breakdown.PayloadDuplicateActors;
+				Lever = TEXT("payload duplicate");
+			}
+			else if (Placements.FindRef(Record.MeshElementName) == 1)
+			{
+				++Breakdown.UniqueMeshActors;
+				Lever = TEXT("unique mesh");
+			}
+			else
+			{
+				++Breakdown.NoSingleLeverActors;
+				Lever = TEXT("no single lever");
+			}
+			Plan.OrdinaryOutcomes.Add(Record.SourceElementName, FString::Printf(TEXT("Ordinary: below minimum (%s)"), Lever));
+		}
+		Breakdown.SettingsSplitFields.KeySort(TLess<FString>());
+
+		FBox SceneBox(ForceInit);
+		for (const FKeyRecord& Record : Plan.KeyRecords) SceneBox += Record.WorldLocation;
+		Breakdown.SceneSpreadCm = SceneBox.IsValid ? SceneBox.GetSize().GetMax() : 0.0;
+		TArray<double> Spreads;
+		for (const FGroupValue& Group : Plan.Groups)
+		{
+			FBox GroupBox(ForceInit);
+			for (const FCandidateValue& Candidate : Group.Candidates) GroupBox += Candidate.WorldTransform.GetLocation();
+			const double Spread = GroupBox.IsValid ? GroupBox.GetSize().GetMax() : 0.0;
+			Spreads.Add(Spread);
+			if (Breakdown.SceneSpreadCm > 0.0 && Spread >= 0.5 * Breakdown.SceneSpreadCm) ++Breakdown.SceneSpanningGroups;
+			FConVerseGroupingBreakdown::FGroupSpread& Row = Breakdown.WidestGroups.AddDefaulted_GetRef();
+			Row.GroupId = Group.GroupId;
+			Row.MeshElement = Group.MeshElementName;
+			Row.Instances = Group.Candidates.Num();
+			Row.SpreadCm = Spread;
+		}
+		if (!Spreads.IsEmpty())
+		{
+			Spreads.Sort();
+			Breakdown.MedianGroupSpreadCm = Spreads[Spreads.Num() / 2];
+		}
+		Breakdown.WidestGroups.Sort([](const FConVerseGroupingBreakdown::FGroupSpread& Left, const FConVerseGroupingBreakdown::FGroupSpread& Right)
+		{
+			return Left.SpreadCm != Right.SpreadCm ? Left.SpreadCm > Right.SpreadCm : Left.GroupId < Right.GroupId;
+		});
+		if (Breakdown.WidestGroups.Num() > 10) Breakdown.WidestGroups.SetNum(10);
 	}
 
 	/**
@@ -1014,6 +1227,7 @@ namespace ConVerseDatasmithImport
 		});
 		Plan.Groups = MoveTemp(CandidateGroups);
 		if (Work.IsCancelled()) return Plan;
+		ComputeGroupingBreakdown(Plan, MeshesByName);
 		Plan.PlanId = ComputePlanId(Plan);
 		return Plan;
 	}
@@ -2053,9 +2267,15 @@ namespace ConVerseDatasmithImport
 		FConVerseOptimizedImportResult& Result,
 		FString& OutError)
 	{
+		// Only an explicitly accepted, degraded session reaches commit with failed verification. It keeps
+		// whatever the import produced: groups whose mesh or materials Datasmith could not create are
+		// recorded with the assets that do exist and named in the diagnostics instead of aborting the
+		// commit, which would roll back every group that did import. A verified session resolved every
+		// group, so it keeps the strict checks.
+		const bool bCommitDegraded = !Result.bVerificationSucceeded;
 		TMap<FString, TArray<UInstancedStaticMeshComponent*>> ComponentsByGroup;
 		GatherSessionComponents(World, Result.SessionId, ComponentsByGroup);
-		if (ComponentsByGroup.Num() != Plan.Groups.Num())
+		if (!bCommitDegraded && ComponentsByGroup.Num() != Plan.Groups.Num())
 		{
 			OutError = TEXT("The verified component inventory changed before the manifest was committed.");
 			return false;
@@ -2181,16 +2401,29 @@ namespace ConVerseDatasmithImport
 			const TArray<UInstancedStaticMeshComponent*>* Components = ComponentsByGroup.Find(Group.GroupId);
 			if (Components == nullptr || Components->Num() != 1)
 			{
-				OutError = FString::Printf(TEXT("Group %s no longer has exactly one verified component."), *Group.GroupId);
-				return false;
+				const FString Problem = FString::Printf(TEXT("Group %s no longer has exactly one verified component."), *Group.GroupId);
+				if (!bCommitDegraded)
+				{
+					OutError = Problem;
+					return false;
+				}
+				Result.Diagnostics.Add(Problem + TEXT(" Accepted without a group record."));
+				continue;
 			}
 
 			UInstancedStaticMeshComponent* Component = (*Components)[0];
 			UStaticMesh* ImportedMesh = nullptr;
 			TArray<UMaterialInterface*> ImportedMaterials;
-			if (!ResolveExpectedAssets(Group, ImportedScene, ImportedMesh, ImportedMaterials, OutError))
+			FString ResolveError;
+			if (!ResolveExpectedAssets(Group, ImportedScene, ImportedMesh, ImportedMaterials, ResolveError))
 			{
-				return false;
+				if (!bCommitDegraded)
+				{
+					OutError = ResolveError;
+					return false;
+				}
+				Result.Diagnostics.Add(FString::Printf(TEXT("Group %s accepted with incomplete assets: %s"),
+					*Group.GroupId, *ResolveError));
 			}
 
 			FConVerseOptimizedImportGroupRecord& GroupRecord = Manifest->Groups.AddDefaulted_GetRef();
@@ -2214,7 +2447,7 @@ namespace ConVerseDatasmithImport
 			GroupRecord.InstanceRecordCount = Group.Candidates.Num();
 
 			TArray<int32> SlotIds;
-			BuildImportedSlotIds(*ImportedMesh, SlotIds);
+			if (ImportedMesh != nullptr) BuildImportedSlotIds(*ImportedMesh, SlotIds);
 			for (int32 SlotIndex = 0; SlotIndex < ImportedMaterials.Num(); ++SlotIndex)
 			{
 				const FEffectiveMaterialValue* Effective = FindEffectiveMaterial(
@@ -2261,6 +2494,7 @@ namespace ConVerseDatasmithImport
 				}
 			}
 		}
+		Manifest->Diagnostics = Result.Diagnostics;
 
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		TArray<FAssetData> AttemptAssetData;
@@ -2695,7 +2929,11 @@ namespace ConVerseDatasmithImport
 		TArray<UObject*> Contained;
 		for (const UPackage* Package : Packages)
 		{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			GetObjectsWithPackage(Package, Contained, true);
+#else
 			GetObjectsWithPackage(Package, Contained, EGetObjectsFlags::IncludeNestedObjects);
+#endif
 		}
 
 		const UObject* Transactor = GEditor != nullptr ? GEditor->Trans.Get() : nullptr;
@@ -2849,10 +3087,12 @@ namespace ConVerseDatasmithImport
 				Row.SourceIdentity += (Row.SourceIdentity.IsEmpty() ? FString() : TEXT("; ")) + Identity.Key + TEXT("=") + Identity.Value;
 			Row.Label = Candidate.SourceLabel;
 			Row.MeshElement = Candidate.MeshElementName;
-			Row.Outcome = ConvertedElements.Contains(Candidate.SourceElementName) ? TEXT("Planned instance")
-				: Plan.Options.Processing.KeepOrdinaryMeshElements.Contains(Candidate.MeshElementName) ? TEXT("Ordinary: explicit exception")
-				: TEXT("Ordinary: not eligible or below threshold");
+			const FString* OrdinaryOutcome = Plan.OrdinaryOutcomes.Find(Candidate.SourceElementName);
+			Row.Outcome = ConvertedElements.Contains(Candidate.SourceElementName) ? FString(TEXT("Planned instance"))
+				: OrdinaryOutcome ? *OrdinaryOutcome
+				: FString(TEXT("Ordinary: not eligible or below threshold"));
 		}
+		Result.GroupingBreakdown = Plan.Breakdown;
 		Result.SourceFileHash = Plan.SourceFileHash;
 		Result.PlannedGroupCount = Plan.Groups.Num();
 		Result.TotalSourceMeshActors = Plan.TotalMeshActors;
@@ -2942,6 +3182,28 @@ namespace ConVerseDatasmithImport
 		for (const FConVerseOptimizedSkipCount& Count : Result.SkipCounts)
 		{
 			Report += FString::Printf(TEXT("Skipped %s: %d\n"), *SkipReasonName(Count.Reason), Count.Count);
+		}
+		if (Plan != nullptr)
+		{
+			const FConVerseGroupingBreakdown& Breakdown = Result.GroupingBreakdown;
+			Report += FString::Printf(
+				TEXT("Below-minimum actors by lever: parent split %d, settings split %d, payload duplicate %d, unique mesh %d, no single lever %d\n"),
+				Breakdown.ParentSplitActors, Breakdown.SettingsSplitActors, Breakdown.PayloadDuplicateActors,
+				Breakdown.UniqueMeshActors, Breakdown.NoSingleLeverActors);
+			for (const TPair<FString, int32>& Field : Breakdown.SettingsSplitFields)
+			{
+				Report += FString::Printf(TEXT("Settings split by %s: %d\n"), *Field.Key, Field.Value);
+			}
+			Report += FString::Printf(TEXT("Skipped actors that could group if their rule were lifted: HasChildren %d, UnsupportedNegativeScale %d\n"),
+				Breakdown.HasChildrenCouldGroup, Breakdown.NegativeScaleCouldGroup);
+			Report += FString::Printf(TEXT("Mesh elements with a payload hash: %d of %d\n"), Breakdown.MeshesWithPayloadHash, Result.SourceMeshAssetCount);
+			Report += FString::Printf(TEXT("Group instance spread: scene %.0f cm, median group %.0f cm, groups spanning half the scene or more %d\n"),
+				Breakdown.SceneSpreadCm, Breakdown.MedianGroupSpreadCm, Breakdown.SceneSpanningGroups);
+			for (const FConVerseGroupingBreakdown::FGroupSpread& Group : Breakdown.WidestGroups)
+			{
+				Report += FString::Printf(TEXT("Wide group %s (%s, %d instances): %.0f cm\n"),
+					*Group.GroupId, *Group.MeshElement, Group.Instances, Group.SpreadCm);
+			}
 		}
 		Report += FString::Printf(TEXT("Source mesh assets: %d\nSource lights: %d\nEnabled local lights: %d\nUnitless lights: %d\nIES lights: %d\nNanite meshes enabled: %d\nNanite exclusions: %d\nVerified ordinary meshes: %d\n"),
 			Result.SourceMeshAssetCount, Result.SourceLightCount, Result.EnabledLocalLights, Result.UnitlessLights, Result.IESLights, Result.NaniteEnabledMeshes, Result.NaniteSkippedMeshes, Result.VerifiedOrdinaryMeshes);
@@ -3263,6 +3525,8 @@ namespace ConVerseDatasmithImport
 		TWeakObjectPtr<UDatasmithScene> ImportedScene;
 		TWeakObjectPtr<UConVerseOptimizedImportManifest> PreviousManifest;
 		FString FailureDetails;
+		// The capped list shown in summaries; FailureDetails keeps every failed group for the manifest.
+		FString FailurePreview;
 		bool bFailPreviousSessionRemovalForTesting = false;
 		// The per-category breakdown ("N of M lights; source accounting (...)") computed when the
 		// attempt was parked. Reused verbatim by AcceptFailedVerification so the accepted summary names
@@ -3325,6 +3589,36 @@ TArray<FString> ConVerseDefaultTextureSearchFolders()
 	if (Common.IsEmpty()) return {};
 	const FString Root = FPaths::Combine(Common.Replace(TEXT("\\"), TEXT("/")), TEXT("Autodesk Shared/Materials/Textures"));
 	return { Root / TEXT("1/Mats"), Root / TEXT("2/Mats"), Root / TEXT("3/Mats") };
+}
+
+FConVerseConversionSummary FConVerseDatasmithImportService::SummarizeConversion(const FConVerseOptimizedImportResult& Result)
+{
+	FConVerseConversionSummary Summary;
+	switch (Result.Status)
+	{
+	case EConVerseOptimizedImportStatus::AnalysisSucceeded:
+	case EConVerseOptimizedImportStatus::AnalysisNoEligibleGroups:
+	case EConVerseOptimizedImportStatus::Verified:
+	case EConVerseOptimizedImportStatus::AlreadyCurrent:
+	case EConVerseOptimizedImportStatus::AcceptedWithFailedVerification:
+		break;
+	default:
+		// Failed, cancelled and blocked results converted nothing that remains in the level.
+		return Summary;
+	}
+	if (Result.TotalSourceMeshActors <= 0) return Summary;
+
+	const FConVerseGroupingBreakdown& Breakdown = Result.GroupingBreakdown;
+	Summary.bValid = true;
+	Summary.bImported = Result.Operation != EConVerseOptimizedImportOperation::Analyze;
+	Summary.TotalSourceMeshActors = Result.TotalSourceMeshActors;
+	Summary.GroupCount = Summary.bImported ? Result.VerifiedGroupCount : Result.PlannedGroupCount;
+	Summary.ConvertedActors = Summary.bImported ? Result.VerifiedInstanceCount : Result.PlannedInstanceCount;
+	Summary.RecoverableActors = Breakdown.ParentSplitActors + Breakdown.SettingsSplitActors + Breakdown.PayloadDuplicateActors
+		+ Breakdown.HasChildrenCouldGroup + Breakdown.NegativeScaleCouldGroup;
+	Summary.RemainingActors = FMath::Max(0, Summary.TotalSourceMeshActors - Summary.ConvertedActors - Summary.RecoverableActors);
+	Summary.UniqueMeshes = Breakdown.UniqueMeshActors;
+	return Summary;
 }
 
 FConVerseOptimizedImportResult FConVerseDatasmithImportService::Analyze(const FConVerseOptimizedImportOptions& Options)
@@ -3820,8 +4114,11 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		return Result;
 	}
 
-	const FString AttemptFolder = FString::Printf(TEXT("%s/%s_ConVerse_%s"),
-		*Normalized.DestinationPath, *AssetName, *Result.SessionId.Left(12));
+	// Datasmith nests "<AssetName>/Geometries" (and Materials, Textures) under this folder and truncates
+	// each asset name to keep the whole file path within its limit. Repeating the source name here as
+	// well left no room on long Revit export names, so every mesh was named "" and failed to import.
+	const FString AttemptFolder = FString::Printf(TEXT("%s/_ConVerse_%s"),
+		*Normalized.DestinationPath, *Result.SessionId.Left(12));
 	TArray<FAssetData> ExistingAttemptAssets;
 	Registry.GetAssetsByPath(FName(*AttemptFolder), ExistingAttemptAssets, true, false);
 	if (!ExistingAttemptAssets.IsEmpty())
@@ -4035,6 +4332,19 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		}
 		if (AnyLight) AnyLight->Intensity += 100000.0f;
 	}
+	else if (Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::DropMeshBeforeVerification
+		&& !Plan.Groups.IsEmpty())
+	{
+		// Test-only seam: reproduces a mesh Datasmith could not create (no scene map entry, no mesh on the component).
+		const FGroupValue& Group = Plan.Groups[0];
+		ImportedScene->StaticMeshes.Remove(FName(*Group.MeshElementName));
+		TMap<FString, TArray<UInstancedStaticMeshComponent*>> DropTargets;
+		GatherSessionComponents(*World, Result.SessionId, DropTargets);
+		if (const TArray<UInstancedStaticMeshComponent*>* Components = DropTargets.Find(Group.GroupId))
+		{
+			for (UInstancedStaticMeshComponent* Component : *Components) Component->SetStaticMesh(nullptr);
+		}
+	}
 
 	EnterStage(SlowTask, Result, 1.0f,
 		NSLOCTEXT("ConVerseHISM", "OptimizedImportVerify", "Verifying the imported session..."));
@@ -4048,13 +4358,25 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 		Inventory.ExistingActors, Normalized, Result, FailedLightCount, TotalLightCount);
 	if (!Result.bVerificationSucceeded)
 	{
+		// The full list is kept on the manifest; the summary, which the accept/discard dialog shows,
+		// lists only the first few so a source with hundreds of failed groups still fits on screen.
+		constexpr int32 MaxListedFailedGroups = 20;
 		FString FailedGroupSummary;
+		FString FailedGroupPreview;
+		int32 ListedFailedGroups = 0, UnlistedFailedGroups = 0;
 		for (const FConVerseOptimizedGroupVerification& Verification : Result.GroupVerification)
 		{
 			if (!Verification.bPassed)
 			{
-				FailedGroupSummary += FString::Printf(TEXT("\n  %s: %s"), *Verification.GroupId, *Verification.Details);
+				const FString Line = FString::Printf(TEXT("\n  %s: %s"), *Verification.GroupId, *Verification.Details);
+				FailedGroupSummary += Line;
+				if (ListedFailedGroups++ < MaxListedFailedGroups) FailedGroupPreview += Line;
+				else ++UnlistedFailedGroups;
 			}
+		}
+		if (UnlistedFailedGroups > 0)
+		{
+			FailedGroupPreview += FString::Printf(TEXT("\n  ...and %d more failed groups (see the import report)."), UnlistedFailedGroups);
 		}
 		// Names every failing check category (groups/lights/source accounting), not just the group
 		// fraction: bVerificationSucceeded is the AND of all three, so a summary limited to groups can
@@ -4074,6 +4396,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 			Pending->ImportedScene = ImportedScene;
 			Pending->PreviousManifest = PreviousManifest;
 			Pending->FailureDetails = FailedGroupSummary;
+			Pending->FailurePreview = FailedGroupPreview;
 			Pending->bFailPreviousSessionRemovalForTesting =
 				Normalized.FailureInjection == EConVerseOptimizedImportFailureInjection::CorruptBeforeVerificationAndFailPreviousSessionRemoval;
 			Pending->CategorySummary = CategorySummary;
@@ -4083,7 +4406,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::ImportAndVerify(
 				TEXT("Import completed, but verification failed: %s. %d of %d groups verified. ")
 				TEXT("Nothing has been committed or rolled back yet; accept or discard this result.%s"),
 				*CategorySummary, Result.VerifiedGroupCount, Result.PlannedGroupCount,
-				*FailedGroupSummary);
+				*FailedGroupPreview);
 			Pending->Result = Result;
 			PendingFailedVerifications().Add(Result.SessionId, Pending);
 			FinishResult(&Plan, Result);
@@ -4330,7 +4653,7 @@ FConVerseOptimizedImportResult FConVerseDatasmithImportService::AcceptFailedVeri
 	Result.Summary = FString::Printf(
 		TEXT("Accepted despite failed verification: %s. %d of %d groups verified. ")
 		TEXT("This session is committed but degraded, and optimized reimport is refused against it.%s"),
-		*Pending->CategorySummary, Result.VerifiedGroupCount, Result.PlannedGroupCount, *Pending->FailureDetails);
+		*Pending->CategorySummary, Result.VerifiedGroupCount, Result.PlannedGroupCount, *Pending->FailurePreview);
 	FinishResult(&Pending->Plan, Result);
 	return Result;
 }

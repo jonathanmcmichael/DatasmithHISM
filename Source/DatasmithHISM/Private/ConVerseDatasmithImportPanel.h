@@ -36,7 +36,13 @@ private:
 	friend class FConVerseFocusClearsPriorSelectionTest;
 	friend class FConVersePanelTraceOptionTest;
 	friend class FConVersePanelApplyNaniteTest;
+	friend class FConVerseGroupingBreakdownTest;
 	void ApplyInputOptions(const FConVerseOptimizedImportOptions& Options);
+	/** Advanced import tab: conversion bar, unique-mesh count and the further grouping steps that apply. */
+	TSharedRef<SWidget> BuildAdvancedTab();
+	FText GetConversionHeadlineText() const;
+	FText GetConversionLegendText(int32 Part) const;
+	FText GetNextStepsText() const;
 	/** Asks whether to proceed without the result's missing textures; on Yes, records them as accepted. */
 	bool ConfirmMissingTextures(const FConVerseOptimizedImportResult& Result);
 	void SetTextureSearchFolders(const TArray<FString>& Folders);
@@ -174,4 +180,9 @@ private:
 	 * a fresh operation result or invalidated, so it cannot outlive the report it was about.
 	 */
 	FText SaveOutcomeText;
+	/** 0 = Import, 1 = Advanced import. */
+	int32 ActiveTab = 0;
+	/** From the most recent Analyze or Import result; invalid until one succeeds. */
+	FConVerseConversionSummary ConversionSummary;
+	FConVerseGroupingBreakdown ConversionBreakdown;
 };
